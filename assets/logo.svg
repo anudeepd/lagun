@@ -1,0 +1,22 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rounded square background -->
+  <rect x="6" y="6" width="188" height="188" rx="36" fill="#f0f9ff"/>
+
+  <!-- Water waves -->
+  <g fill="none" stroke="#3b82f6" stroke-width="4.5" stroke-linecap="round">
+    <path d="M 44 52 Q 62 40 80 52 T 116 52 T 152 52 T 162 52"/>
+    <path d="M 44 76 Q 62 64 80 76 T 116 76 T 152 76 T 162 76"/>
+    <path d="M 44 100 Q 62 88 80 100 T 116 100 T 152 100 T 162 100"/>
+  </g>
+
+  <!-- Database grid -->
+  <g fill="none" stroke="#06b6d4" stroke-width="4" stroke-linecap="round">
+    <line x1="44" y1="126" x2="156" y2="126"/>
+    <line x1="44" y1="148" x2="156" y2="148"/>
+    <line x1="82" y1="126" x2="82" y2="148"/>
+    <line x1="120" y1="126" x2="120" y2="148"/>
+  </g>
+
+  <!-- Accent node -->
+  <circle cx="100" cy="114" r="5" fill="#0ea5e9"/>
+</svg>
