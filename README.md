@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="assets/logo-full.svg" alt="Lagun" width="280"/>
+  <img src="assets/logo.svg" alt="Lagun" width="120"/>
 </p>
 
-A minimal, web-based MySQL/MariaDB GUI editor. Install it, run it, use it.
+<h1 align="center">Lagun</h1>
+
+<p align="center">A minimal, web-based MySQL/MariaDB GUI editor. Install it, run it, use it.</p>
 
 ## Install
 

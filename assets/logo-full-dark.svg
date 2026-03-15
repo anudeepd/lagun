@@ -1,0 +1,25 @@
+<svg viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Icon background -->
+  <rect x="4" y="4" width="112" height="112" rx="22" fill="#f0f9ff"/>
+
+  <!-- Water waves -->
+  <g fill="none" stroke="#3b82f6" stroke-width="3.5" stroke-linecap="round">
+    <path d="M 22 32 Q 34 24 46 32 T 70 32 T 94 32 T 102 32"/>
+    <path d="M 22 48 Q 34 40 46 48 T 70 48 T 94 48 T 102 48"/>
+    <path d="M 22 64 Q 34 56 46 64 T 70 64 T 94 64 T 102 64"/>
+  </g>
+
+  <!-- Database grid -->
+  <g fill="none" stroke="#06b6d4" stroke-width="3" stroke-linecap="round">
+    <line x1="22" y1="80" x2="98" y2="80"/>
+    <line x1="22" y1="96" x2="98" y2="96"/>
+    <line x1="46" y1="80" x2="46" y2="96"/>
+    <line x1="70" y1="80" x2="70" y2="96"/>
+  </g>
+
+  <!-- Accent node -->
+  <circle cx="60" cy="72" r="4" fill="#0ea5e9"/>
+
+  <!-- Wordmark -->
+  <text x="136" y="74" font-family="'Inter', 'Helvetica Neue', sans-serif" font-size="52" font-weight="600" letter-spacing="-1" fill="#0c4a6e">Lagun</text>
+</svg>
