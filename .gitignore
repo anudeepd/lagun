@@ -37,5 +37,5 @@ lagun.log
 # Local only
 think
 BRANDING.md
-favicon.svg
+/favicon.svg
 .claude/
