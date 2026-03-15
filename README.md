@@ -15,7 +15,7 @@ pip install git+https://github.com/anudeepd/lagun
 ## Usage
 
 ```bash
-lagun
+lagun serve
 ```
 
 Opens the GUI in your browser. Connect to any MySQL or MariaDB database from there.
@@ -28,7 +28,7 @@ Requires [uv](https://github.com/astral-sh/uv).
 git clone https://github.com/anudeepd/lagun
 cd lagun
 uv sync
-uv run lagun
+uv run lagun serve
 ```
 
 ## License
