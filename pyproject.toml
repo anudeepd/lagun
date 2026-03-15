@@ -9,7 +9,7 @@ description = "A web-based MySQL/MariaDB GUI editor"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Lagun Contributors" }]
+authors = [{ name = "Anudeep Dhavaleswarapu", email = "anudeepd2@gmail.com" }]
 keywords = ["mysql", "mariadb", "gui", "web", "database"]
 classifiers = [
     "Development Status :: 3 - Alpha",
