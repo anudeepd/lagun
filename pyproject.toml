@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lagun"
+version = "0.1.0"
+description = "A web-based MySQL/MariaDB GUI editor"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Lagun Contributors" }]
+keywords = ["mysql", "mariadb", "gui", "web", "database"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database :: Front-Ends",
+]
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "aiomysql>=0.2.0",
+    "aiosqlite>=0.20.0",
+    "cryptography>=42.0.0",
+    "keyring>=25.0.0",
+    "click>=8.1.0",
+    "pydantic>=2.7.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.scripts]
+lagun = "lagun.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lagun*"]
+
+[tool.setuptools.package-data]
+lagun = ["static/**/*", "static/*"]
