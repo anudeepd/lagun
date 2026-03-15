@@ -57,6 +57,7 @@ async def export_data(session_id: str, req: ExportRequest):
     async def _generate_insert():
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
                 cols_sql = ", ".join(quote_ident(c) for c in cols)
@@ -85,6 +86,7 @@ async def export_data(session_id: str, req: ExportRequest):
         # Need PK columns from information_schema
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(
                     """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
                        WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
@@ -119,6 +121,7 @@ async def export_data(session_id: str, req: ExportRequest):
         # Need PK columns from information_schema
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(
                     """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
                        WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
@@ -186,6 +189,7 @@ async def export_data(session_id: str, req: ExportRequest):
 
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
 
