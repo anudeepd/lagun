@@ -14,6 +14,8 @@
 - **In-line data editing** — edit cells, insert rows, delete rows directly in the grid
 - **Import & export** — CSV and SQL formats with streaming for large datasets
 - **Query history** — track past queries with execution time and row counts
+- **Bookmarks** — save and organize frequently used tables
+- **Connection management** — import and export connection configs
 - **Secure connections** — SSL/TLS, credentials stored in OS keyring, encrypted session backup
 
 ## Install
