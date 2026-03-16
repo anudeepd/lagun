@@ -4,18 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lagun"
-version = "0.1.0"
+version = "0.1.2"
 description = "A web-based MySQL/MariaDB GUI editor"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "Anudeep Dhavaleswarapu", email = "anudeepd2@gmail.com" }]
 keywords = ["mysql", "mariadb", "gui", "web", "database"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Web Environment",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -33,6 +32,11 @@ dependencies = [
     "pydantic>=2.7.0",
     "python-multipart>=0.0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/anudeepd/lagun"
+Repository = "https://github.com/anudeepd/lagun"
+Issues = "https://github.com/anudeepd/lagun/issues"
 
 [project.scripts]
 lagun = "lagun.cli:main"

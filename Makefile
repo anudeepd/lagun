@@ -1,4 +1,4 @@
-.PHONY: dev build dist install clean lint test test-frontend test-e2e test-all
+.PHONY: dev build dist install clean lint test test-frontend test-e2e test-all publish
 
 dev:
 	python dev.py
@@ -7,7 +7,7 @@ build-frontend:
 	cd frontend && npm install && npm run build
 
 build: build-frontend
-	python -m build
+	uv build
 
 dist: build
 
@@ -16,6 +16,9 @@ install-dev:
 
 install:
 	pip install -e .
+
+publish: build
+	uv publish
 
 clean:
 	rm -rf dist/ build/ *.egg-info lagun/static/* frontend/dist/

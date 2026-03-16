@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="Lagun" width="120"/>
+  <img src="https://raw.githubusercontent.com/anudeepd/lagun/main/assets/logo.svg" alt="Lagun" width="120"/>
 </p>
 
 <h1 align="center">Lagun</h1>
@@ -19,7 +19,7 @@
 ## Install
 
 ```bash
-pip install git+https://github.com/anudeepd/lagun
+pip install lagun
 ```
 
 ## Usage
@@ -29,6 +29,14 @@ lagun serve
 ```
 
 Opens the GUI in your browser. Connect to any MySQL or MariaDB database from there.
+
+Options:
+
+```
+--host TEXT     Bind host. [default: 127.0.0.1]
+--port INTEGER  Bind port. [default: 8080]
+--no-open       Don't open the browser automatically.
+```
 
 ## Development
 
