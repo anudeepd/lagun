@@ -1,4 +1,4 @@
-.PHONY: dev build dist install clean lint test
+.PHONY: dev build dist install clean lint test test-frontend test-e2e test-all
 
 dev:
 	python dev.py
@@ -27,4 +27,15 @@ lint:
 	ruff format --check lagun/
 
 test:
-	pytest tests/ -v
+	uv run pytest tests/ -v
+
+test-frontend:
+	cd frontend && npm run test
+
+test-e2e:
+	cd e2e && npx playwright test
+
+test-all:
+	$(MAKE) test
+	$(MAKE) test-frontend
+	$(MAKE) test-e2e
