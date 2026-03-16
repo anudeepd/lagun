@@ -40,6 +40,15 @@ Options:
 --no-open       Don't open the browser automatically.
 ```
 
+## Screenshots
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/anudeepd/lagun/main/assets/img_1.png" alt="SQL Editor" width="100%"/>
+  <img src="https://raw.githubusercontent.com/anudeepd/lagun/main/assets/img_2.png" alt="Schema View" width="100%"/>
+  <img src="https://raw.githubusercontent.com/anudeepd/lagun/main/assets/img_3.png" alt="Data View with Search" width="100%"/>
+  <img src="https://raw.githubusercontent.com/anudeepd/lagun/main/assets/img_4.png" alt="Data View with Filter" width="100%"/>
+</p>
+
 ## Development
 
 Requires [uv](https://github.com/astral-sh/uv).
