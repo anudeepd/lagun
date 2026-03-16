@@ -6,6 +6,16 @@
 
 <p align="center">A minimal, web-based MySQL/MariaDB GUI editor. Install it, run it, use it.</p>
 
+## Features
+
+- **Web-based SQL editor** with syntax highlighting, autocompletion, and multi-tab support
+- **Schema browser** — explore databases, tables, columns, and indexes
+- **Schema management** — create, modify, and drop tables, columns, and indexes
+- **In-line data editing** — edit cells, insert rows, delete rows directly in the grid
+- **Import & export** — CSV and SQL formats with streaming for large datasets
+- **Query history** — track past queries with execution time and row counts
+- **Secure connections** — SSL/TLS, credentials stored in OS keyring, encrypted session backup
+
 ## Install
 
 ```bash
