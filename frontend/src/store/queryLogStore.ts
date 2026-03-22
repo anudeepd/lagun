@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+function uuid() {
+  return crypto.randomUUID?.() ??
+    '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+      (+c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16))
+}
+
 export interface QueryLogEntry {
   id: string
   timestamp: string
@@ -26,7 +32,7 @@ export const useQueryLogStore = create<QueryLogState>()(
 
       addEntry: (entry) => set(s => ({
         entries: [
-          { ...entry, id: crypto.randomUUID(), timestamp: new Date().toISOString() },
+          { ...entry, id: uuid(), timestamp: new Date().toISOString() },
           ...s.entries,
         ].slice(0, 200),
       })),
