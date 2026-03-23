@@ -2,6 +2,11 @@ import { create } from 'zustand'
 import { api } from '../api/client'
 import type { TableInfo, ColumnInfo } from '../types'
 
+// Module-level in-flight promise maps — not in Zustand state (which is only for UI indicators)
+const _inflightDbs: Partial<Record<string, Promise<string[]>>> = {}
+const _inflightTables: Partial<Record<string, Promise<TableInfo[]>>> = {}
+const _inflightColumns: Partial<Record<string, Promise<ColumnInfo[]>>> = {}
+
 interface SchemaState {
   // Map of sessionId → database list
   databases: Record<string, string[]>
@@ -28,55 +33,64 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
   loadingTables: new Set(),
 
   loadDatabases: async (sessionId) => {
-    const { databases, loadingDbs } = get()
+    const { databases } = get()
     if (databases[sessionId]) return databases[sessionId]
-    if (loadingDbs.has(sessionId)) return []
+    if (_inflightDbs[sessionId]) return _inflightDbs[sessionId]
 
     set(s => ({ loadingDbs: new Set([...s.loadingDbs, sessionId]) }))
-    try {
-      const dbs = await api.getDatabases(sessionId)
+    const promise = api.getDatabases(sessionId).then(dbs => {
       set(s => ({
         databases: { ...s.databases, [sessionId]: dbs },
         loadingDbs: new Set([...s.loadingDbs].filter(x => x !== sessionId)),
       }))
       return dbs
-    } catch {
+    }).catch(() => {
       set(s => ({
         loadingDbs: new Set([...s.loadingDbs].filter(x => x !== sessionId)),
       }))
-      return []
-    }
+      return [] as string[]
+    }).finally(() => { delete _inflightDbs[sessionId] })
+    _inflightDbs[sessionId] = promise
+    return promise
   },
 
   loadTables: async (sessionId, db) => {
     const key = `${sessionId}/${db}`
-    const { tables, loadingTables } = get()
+    const { tables } = get()
     if (tables[key]) return tables[key]
-    if (loadingTables.has(key)) return []
+    if (_inflightTables[key]) return _inflightTables[key]
 
     set(s => ({ loadingTables: new Set([...s.loadingTables, key]) }))
-    try {
-      const tbls = await api.getTables(sessionId, db)
+    const promise = api.getTables(sessionId, db).then(tbls => {
       set(s => ({
         tables: { ...s.tables, [key]: tbls },
         loadingTables: new Set([...s.loadingTables].filter(x => x !== key)),
       }))
       return tbls
-    } catch {
+    }).catch(() => {
       set(s => ({
         loadingTables: new Set([...s.loadingTables].filter(x => x !== key)),
       }))
-      return []
-    }
+      return [] as TableInfo[]
+    }).finally(() => { delete _inflightTables[key] })
+    _inflightTables[key] = promise
+    return promise
   },
 
   loadColumns: async (sessionId, db, table) => {
     const key = `${sessionId}/${db}/${table}`
     const { columns } = get()
     if (columns[key]) return columns[key]
-    const cols = await api.getColumns(sessionId, db, table)
-    set(s => ({ columns: { ...s.columns, [key]: cols } }))
-    return cols
+    if (_inflightColumns[key]) return _inflightColumns[key]
+
+    const promise = api.getColumns(sessionId, db, table).then(cols => {
+      set(s => ({ columns: { ...s.columns, [key]: cols } }))
+      return cols
+    }).catch(() => {
+      return [] as ColumnInfo[]
+    }).finally(() => { delete _inflightColumns[key] })
+    _inflightColumns[key] = promise
+    return promise
   },
 
   invalidateSession: (sessionId) => {
