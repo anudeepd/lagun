@@ -3,6 +3,7 @@ import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, X, Code2,
 import SyntaxHighlighter from 'react-syntax-highlighter'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
 import Button from '../ui/Button'
+import { clipboardWrite } from '../../utils/clipboard'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import type { ColumnInfo, IndexInfo } from '../../types'
@@ -56,7 +57,7 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
 
   const handleCopy = async () => {
     if (!schemaSql) return
-    await navigator.clipboard.writeText(schemaSql)
+    await clipboardWrite(schemaSql)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

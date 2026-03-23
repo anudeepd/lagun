@@ -1,6 +1,7 @@
 """Streaming export: INSERT SQL, DELETE SQL, CSV."""
 import csv
 import io
+import logging
 import re
 from typing import Optional
 
@@ -12,6 +13,7 @@ from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, escape_value
 
+log = logging.getLogger(__name__)
 router = APIRouter(tags=["export"])
 
 
@@ -48,9 +50,12 @@ async def export_data(session_id: str, req: ExportRequest):
         if req.pk_values:
             conditions = []
             for pk_dict in req.pk_values:
+                if not pk_dict:
+                    continue
                 parts = [f"{quote_ident(col)} = {escape_value(val)}" for col, val in pk_dict.items()]
                 conditions.append(f"({' AND '.join(parts)})")
-            select_sql += f" WHERE {' OR '.join(conditions)}"
+            if conditions:
+                select_sql += f" WHERE {' OR '.join(conditions)}"
     else:
         raise HTTPException(400, "Provide either 'table' or 'sql'")
 
@@ -83,7 +88,6 @@ async def export_data(session_id: str, req: ExportRequest):
                     batch = []
 
     async def _generate_delete():
-        # Need PK columns from information_schema
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"USE {quote_ident(req.database)}")
@@ -96,11 +100,12 @@ async def export_data(session_id: str, req: ExportRequest):
                 )
                 pk_rows = await cur.fetchall()
                 pk_cols = [r[0] for r in pk_rows]
-                if not pk_cols:
-                    raise HTTPException(400, "Table has no primary key — cannot generate DELETE export")
 
                 tbl_q = f"{quote_ident(req.database)}.{quote_ident(req.table or 'tbl')}"
                 await cur.execute(select_sql)
+                cols = [d[0] for d in cur.description]
+                # Fall back to all columns if no primary key (HeidiSQL approach)
+                where_cols = pk_cols if pk_cols else cols
 
                 yield f"-- Lagun export: {req.database}.{req.table}\n-- Format: DELETE\n\n"
 
@@ -108,17 +113,15 @@ async def export_data(session_id: str, req: ExportRequest):
                     rows = await cur.fetchmany(req.batch_size)
                     if not rows:
                         break
-                    cols = [d[0] for d in cur.description]
                     for row in rows:
                         row_dict = dict(zip(cols, row))
                         where = " AND ".join(
-                            f"{quote_ident(pk)} = {escape_value(row_dict[pk])}"
-                            for pk in pk_cols
+                            f"{quote_ident(c)} = {escape_value(row_dict[c])}"
+                            for c in where_cols
                         )
                         yield f"DELETE FROM {tbl_q} WHERE {where};\n"
 
     async def _generate_delete_insert():
-        # Need PK columns from information_schema
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"USE {quote_ident(req.database)}")
@@ -131,28 +134,25 @@ async def export_data(session_id: str, req: ExportRequest):
                 )
                 pk_rows = await cur.fetchall()
                 pk_cols = [r[0] for r in pk_rows]
-                if not pk_cols:
-                    raise HTTPException(400, "Table has no primary key — cannot generate DELETE+INSERT export")
 
                 tbl_q = f"{quote_ident(req.database)}.{quote_ident(req.table or 'tbl')}"
                 await cur.execute(select_sql)
+                cols = [d[0] for d in cur.description]
+                cols_sql = ", ".join(quote_ident(c) for c in cols)
+                # Fall back to all columns if no primary key (HeidiSQL approach)
+                where_cols = pk_cols if pk_cols else cols
 
-                cols = None
-                cols_sql = None
                 yield f"-- Lagun export: {req.database}.{req.table}\n-- Format: DELETE+INSERT\n\n"
 
                 while True:
                     rows = await cur.fetchmany(req.batch_size)
                     if not rows:
                         break
-                    if cols is None:
-                        cols = [d[0] for d in cur.description]
-                        cols_sql = ", ".join(quote_ident(c) for c in cols)
                     for row in rows:
                         row_dict = dict(zip(cols, row))
                         where = " AND ".join(
-                            f"{quote_ident(pk)} = {escape_value(row_dict[pk])}"
-                            for pk in pk_cols
+                            f"{quote_ident(c)} = {escape_value(row_dict[c])}"
+                            for c in where_cols
                         )
                         vals = ", ".join(escape_value(v) for v in row)
                         yield f"DELETE FROM {tbl_q} WHERE {where};\n"

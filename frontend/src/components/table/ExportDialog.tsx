@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ChevronRight, ChevronDown } from 'lucide-react'
+import { clipboardWrite } from '../../utils/clipboard'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Select from '../ui/Select'
@@ -89,15 +90,28 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const handleCopy = async () => {
     setCopying(true)
     try {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: buildBody(),
-      })
-      if (!res.ok) throw new Error(await res.text())
-      const blob = await res.blob()
-      const text = await blob.text()
-      await navigator.clipboard.writeText(text)
+      let text: string
+      if (window.isSecureContext) {
+        // Secure context: async fetch + navigator.clipboard works fine
+        const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: buildBody(),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const blob = await res.blob()
+        text = await blob.text()
+      } else {
+        // Non-secure: sync XHR keeps the user gesture active so
+        // the execCommand('copy') fallback in clipboardWrite works
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', `/api/v1/sessions/${sessionId}/export`, false)
+        xhr.setRequestHeader('Content-Type', 'application/json')
+        xhr.send(buildBody())
+        if (xhr.status !== 200) throw new Error(xhr.responseText)
+        text = xhr.responseText
+      }
+      await clipboardWrite(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch (e) {

@@ -554,7 +554,11 @@ function TableTab({ tab }: Props) {
             database={tab.database}
             table={tab.table}
             pkValues={selectedRows.length > 0
-              ? selectedRows.map(r => Object.fromEntries(pkColumns.map(pk => [pk, r[pk]])))
+              ? selectedRows.map(r => {
+                  // Fall back to all columns if no primary key (HeidiSQL approach)
+                  const keyCols = pkColumns.length > 0 ? pkColumns : columns.map(c => c.name)
+                  return Object.fromEntries(keyCols.map(col => [col, r[col]]))
+                })
               : undefined}
           />
         </Suspense>

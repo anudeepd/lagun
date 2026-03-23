@@ -5,6 +5,7 @@ import { Copy, Braces, Slash, Clock, Trash2 } from 'lucide-react'
 import type { CellContextMenuEvent, RowClickedEvent } from 'ag-grid-community'
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo } from '../../types'
+import { clipboardWrite } from '../../utils/clipboard'
 
 const darkTheme = themeQuartz.withParams({
   backgroundColor: '#0f172a',
@@ -164,13 +165,13 @@ export default function ResultGrid({ result, onCellEdit, primaryKeyColumns = [],
         type: 'item',
         label: 'Copy cell',
         icon: <Copy size={12} />,
-        onClick: () => { navigator.clipboard.writeText(String(menu.cellValue ?? '')); closeMenu() },
+        onClick: () => { clipboardWrite(String(menu.cellValue ?? '')).catch(() => {}); closeMenu() },
       },
       {
         type: 'item',
         label: 'Copy row as JSON',
         icon: <Braces size={12} />,
-        onClick: () => { navigator.clipboard.writeText(JSON.stringify(displayRow, null, 2)); closeMenu() },
+        onClick: () => { clipboardWrite(JSON.stringify(displayRow, null, 2)).catch(() => {}); closeMenu() },
       },
     ]
 
