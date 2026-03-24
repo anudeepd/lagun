@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import ReactCodeMirror from '@uiw/react-codemirror'
-import { sql, MySQL } from '@codemirror/lang-sql'
+import { sql, MySQL, schemaCompletionSource } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { Play, Loader2 } from 'lucide-react'
 import Button from '../ui/Button'
@@ -26,11 +26,19 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
     }
   }
 
-  const sqlExtension = useMemo(() => sql({
-    dialect: MySQL,
-    schema: schema ?? {},
-    defaultSchema: database,
-  }), [schema, database])
+  // Keep schema in a ref so the extension never needs to be recreated when columns load
+  const schemaRef = useRef(schema ?? {})
+  schemaRef.current = schema ?? {}
+
+  // Stable extension: only recreates when database changes, not on every schema update.
+  // Schema completions read from the ref at completion time so they're always current.
+  const sqlExtension = useMemo(() => [
+    sql({ dialect: MySQL, defaultSchema: database }),
+    MySQL.language.data.of({
+      autocomplete: (ctx: Parameters<ReturnType<typeof schemaCompletionSource>>[0]) =>
+        schemaCompletionSource({ dialect: MySQL, schema: schemaRef.current, defaultSchema: database })(ctx),
+    }),
+  ], [database])
 
   return (
     <div className="flex flex-col h-full">

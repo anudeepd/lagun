@@ -1,8 +1,13 @@
-import { useMemo, useCallback, useState, useRef } from 'react'
+import { useMemo, useCallback, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
 import { Copy, Braces, Slash, Clock, Trash2 } from 'lucide-react'
-import type { CellContextMenuEvent, RowClickedEvent } from 'ag-grid-community'
+import type { CellContextMenuEvent, RowClickedEvent, GridApi } from 'ag-grid-community'
+
+export interface ResultGridHandle {
+  isAnyFilterPresent: () => boolean
+  getFilteredData: () => { columns: string[], rows: unknown[][] }
+}
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo } from '../../types'
 import { clipboardWrite } from '../../utils/clipboard'
@@ -59,9 +64,21 @@ interface Props {
   onDeleteRows?: (rows: Record<string, unknown>[]) => void
 }
 
-export default function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows }: Props) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
+  const agApiRef = useRef<GridApi | null>(null)
+
+  useImperativeHandle(ref, () => ({
+    isAnyFilterPresent: () => agApiRef.current?.isAnyFilterPresent() ?? false,
+    getFilteredData: () => {
+      const rows: unknown[][] = []
+      agApiRef.current?.forEachNodeAfterFilterAndSort(node => {
+        if (node.data) rows.push(result.columns.map(col => node.data[col] ?? null))
+      })
+      return { columns: result.columns, rows }
+    },
+  }))
 
   const columnDefs = useMemo(() =>
     result.columns.map(col => ({
@@ -226,6 +243,7 @@ export default function ResultGrid({ result, onCellEdit, primaryKeyColumns = [],
         columnDefs={columnDefs}
         rowData={rowData}
         getRowId={getRowId}
+        onGridReady={e => { agApiRef.current = e.api }}
         onCellValueChanged={onCellValueChanged}
         onSelectionChanged={handleSelectionChanged}
         onRowClicked={selectable ? handleRowClicked : undefined}
@@ -248,4 +266,6 @@ export default function ResultGrid({ result, onCellEdit, primaryKeyColumns = [],
       )}
     </div>
   )
-}
+})
+
+export default ResultGrid

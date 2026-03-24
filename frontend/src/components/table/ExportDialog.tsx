@@ -16,9 +16,66 @@ interface Props {
   sql?: string
   /** When provided, export only these rows (identified by PK values) */
   pkValues?: Record<string, unknown>[]
+  /** When provided, bypass backend and export these pre-fetched (filtered) rows */
+  rowsOverride?: { columns: string[], rows: unknown[][] }
+  /** PK column names used for DELETE SQL generation when rowsOverride is set */
+  pkColumnsForSql?: string[]
 }
 
-export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues }: Props) {
+function sqlLiteral(v: unknown): string {
+  if (v === null || v === undefined) return 'NULL'
+  if (typeof v === 'number' || typeof v === 'bigint') return String(v)
+  return `'${String(v).split("'").join("''")}'`
+}
+
+function buildFrontendContent(
+  format: 'insert' | 'delete' | 'delete+insert' | 'csv',
+  database: string,
+  table: string,
+  data: { columns: string[], rows: unknown[][] },
+  pkCols: string[],
+  csvOpts: { delimiter: string, quoteChar: string, escapeChar: string, lineTerminator: string, encoding: string },
+): string {
+  if (format === 'csv') {
+    const { delimiter: d, quoteChar: q, escapeChar: e, lineTerminator: nl } = csvOpts
+    const escape = (v: unknown) => {
+      const s = v === null || v === undefined ? '' : String(v)
+      if (!q) return s
+      return (s.includes(d) || s.includes(q) || s.includes('\n'))
+        ? q + s.split(q).join(e + q) + q
+        : s
+    }
+    const header = data.columns.map(c => q ? q + c + q : c).join(d)
+    const body = [header, ...data.rows.map(r => r.map(escape).join(d))].join(nl)
+    return csvOpts.encoding === 'utf-8-sig' ? '\uFEFF' + body : body
+  }
+
+  if (format === 'insert') {
+    const cols = data.columns.map(c => `\`${c}\``).join(', ')
+    const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
+    return `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES\n${values};\n`
+  }
+
+  const effectivePks = pkCols.length > 0 ? pkCols : data.columns
+  const deleteLines = data.rows.map(r => {
+    const where = effectivePks
+      .map(pk => {
+        const idx = data.columns.indexOf(pk)
+        return `\`${pk}\` = ${sqlLiteral(idx >= 0 ? r[idx] : null)}`
+      })
+      .join(' AND ')
+    return `DELETE FROM \`${database}\`.\`${table}\` WHERE ${where};`
+  }).join('\n')
+
+  if (format === 'delete') return deleteLines + '\n'
+
+  // delete+insert
+  const cols = data.columns.map(c => `\`${c}\``).join(', ')
+  const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
+  return deleteLines + '\n\n' + `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES\n${values};\n`
+}
+
+export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, pkColumnsForSql = [] }: Props) {
   const [format, setFormat] = useState<'insert' | 'delete' | 'delete+insert' | 'csv'>(customSql ? 'csv' : 'insert')
   const [batchSize, setBatchSize] = useState('500')
   const [exporting, setExporting] = useState(false)
@@ -59,23 +116,38 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     } : {}),
   })
 
+  const getCsvOpts = () => ({
+    delimiter: effectiveDelimiter,
+    quoteChar: csvQuotechar,
+    escapeChar: csvEscapechar,
+    lineTerminator: effectiveLineterminator,
+    encoding: csvEncoding,
+  })
+
   const handleExport = async () => {
     setExporting(true)
     try {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: buildBody(),
-      })
-      if (!res.ok) throw new Error(await res.text())
-
-      // Stream to download
-      const blob = await res.blob()
+      let blob: Blob
+      let filename: string
+      if (rowsOverride) {
+        const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts())
+        blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+        filename = `${database}_${table}_filtered.${format === 'csv' ? 'csv' : 'sql'}`
+      } else {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: buildBody(),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        blob = await res.blob()
+        const cd = res.headers.get('Content-Disposition') ?? ''
+        const match = cd.match(/filename="([^"]+)"/)
+        filename = match ? match[1] : `${database}_${table}.${format === 'csv' ? 'csv' : 'sql'}`
+      }
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
-      const cd = res.headers.get('Content-Disposition') ?? ''
-      const match = cd.match(/filename="([^"]+)"/)
-      a.download = match ? match[1] : `${database}_${table}.${format === 'csv' ? 'csv' : 'sql'}`
+      a.download = filename
       a.href = url
       a.click()
       URL.revokeObjectURL(url)
@@ -91,7 +163,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     setCopying(true)
     try {
       let text: string
-      if (window.isSecureContext) {
+      if (rowsOverride) {
+        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts())
+      } else if (window.isSecureContext) {
         // Secure context: async fetch + navigator.clipboard works fine
         const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
           method: 'POST',
@@ -233,9 +307,11 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           </div>
         )}
         <p className="text-xs text-slate-500">
-          {pkValues
-            ? <>Exporting <strong className="text-slate-300">{pkValues.length} selected rows</strong> from <code className="text-slate-300">{table}</code>.</>
-            : <>Exports all rows from <code className="text-slate-300">{table}</code>. Large tables are streamed in batches.</>
+          {rowsOverride
+            ? <>Exporting <strong className="text-slate-300">{rowsOverride.rows.length} filtered rows</strong> from <code className="text-slate-300">{table}</code> (grid filter active).</>
+            : pkValues
+              ? <>Exporting <strong className="text-slate-300">{pkValues.length} selected rows</strong> from <code className="text-slate-300">{table}</code>.</>
+              : <>Exports all rows from <code className="text-slate-300">{table}</code>. Large tables are streamed in batches.</>
           }
         </p>
       </div>

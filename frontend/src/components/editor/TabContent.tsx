@@ -5,7 +5,7 @@ import { useSchemaStore } from '../../store/schemaStore'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
 import QueryEditor from './QueryEditor'
-import ResultGrid from './ResultGrid'
+import ResultGrid, { type ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X } from 'lucide-react'
 import Button from '../ui/Button'
@@ -57,6 +57,8 @@ function QueryTab({ tab }: Props) {
   const [running, setRunning] = useState(false)
   const [limit, setLimit] = useState(1000)
   const [showExport, setShowExport] = useState(false)
+  const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
+  const gridRef = useRef<ResultGridHandle>(null)
   const { tables, columns, loadTables, loadColumns } = useSchemaStore()
   const addEntry = useQueryLogStore(s => s.addEntry)
 
@@ -71,14 +73,26 @@ function QueryTab({ tab }: Props) {
     return result
   }, [tab.sessionId, tab.database, tables, columns])
 
+  // Load table names eagerly (single fast request)
   useEffect(() => {
     if (!tab.database) return
-    loadTables(tab.sessionId, tab.database).then(tbls => {
-      for (const tbl of tbls) {
-        loadColumns(tab.sessionId, tab.database!, tbl.name)
-      }
-    })
+    loadTables(tab.sessionId, tab.database)
   }, [tab.sessionId, tab.database])
+
+  // Lazy: load columns only for tables referenced in the current SQL
+  useEffect(() => {
+    if (!tab.database) return
+    const timer = setTimeout(() => {
+      const matches = [...sql.matchAll(/(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+`?(?:\w+`?\.`?)?(\w+)`?/gi)]
+      // Also catch comma-separated tables: FROM t1, t2 or UPDATE t1, t2
+      const commaMatches = [...sql.matchAll(/,\s*`?(?:\w+`?\.`?)?(\w+)`?\s*(?:AS\s+\w+\s*)?(?:,|WHERE\b|SET\b|ON\b|$)/gi)]
+      const names = [...new Set([...matches, ...commaMatches].map(m => m[1]))]
+      for (const name of names) {
+        loadColumns(tab.sessionId, tab.database!, name)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [sql, tab.sessionId, tab.database])
 
   const run = async () => {
     if (!sql.trim()) return
@@ -116,7 +130,7 @@ function QueryTab({ tab }: Props) {
       </div>
       <div className="flex-1 overflow-hidden">
         {result ? (
-          <ResultGrid result={result} />
+          <ResultGrid ref={gridRef} result={result} />
         ) : (
           <div className="flex items-center justify-center h-full text-slate-600 text-sm">
             Press Ctrl+Enter to run a query
@@ -129,7 +143,12 @@ function QueryTab({ tab }: Props) {
         </div>
         {result && !result.error && result.columns.length > 0 && (
           <button
-            onClick={() => setShowExport(true)}
+            onClick={() => {
+              setExportOverride(
+                gridRef.current?.isAnyFilterPresent() ? gridRef.current.getFilteredData() : undefined
+              )
+              setShowExport(true)
+            }}
             className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
             title="Export result"
           >
@@ -147,6 +166,7 @@ function QueryTab({ tab }: Props) {
             database={tab.database}
             table="result"
             sql={sql.trim()}
+            rowsOverride={exportOverride}
           />
         </Suspense>
       )}
@@ -164,6 +184,8 @@ function TableTab({ tab }: Props) {
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
   const [selectedRows, setSelectedRows] = useState<Record<string, unknown>[]>([])
   const [showDataExport, setShowDataExport] = useState(false)
+  const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
+  const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
   const [globalSearch, setGlobalSearch] = useState('')
   const [whereFilter, setWhereFilter] = useState('')
@@ -441,7 +463,14 @@ function TableTab({ tab }: Props) {
         )}
         {view === 'data' && result && !result.error && (
           <button
-            onClick={() => setShowDataExport(true)}
+            onClick={() => {
+              if (selectedRows.length === 0 && gridRef.current?.isAnyFilterPresent()) {
+                setExportOverride(gridRef.current.getFilteredData())
+              } else {
+                setExportOverride(undefined)
+              }
+              setShowDataExport(true)
+            }}
             className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
             title="Export data"
           >
@@ -520,6 +549,7 @@ function TableTab({ tab }: Props) {
             </div>
           ) : result ? (
             <ResultGrid
+              ref={gridRef}
               result={result}
               editable={pkColumns.length > 0}
               primaryKeyColumns={pkColumns}
@@ -560,6 +590,8 @@ function TableTab({ tab }: Props) {
                   return Object.fromEntries(keyCols.map(col => [col, r[col]]))
                 })
               : undefined}
+            rowsOverride={exportOverride}
+            pkColumnsForSql={pkColumns}
           />
         </Suspense>
       )}
