@@ -16,7 +16,7 @@ export default function Sidebar() {
   const [showImport, setShowImport] = useState(false)
 
   return (
-    <aside className="w-64 flex-shrink-0 bg-surface-900 border-r border-surface-800 flex flex-col overflow-hidden">
+    <aside className="w-full bg-surface-900 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-surface-800">
         <Logo size="sm" showText={true} />

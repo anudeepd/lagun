@@ -2,7 +2,7 @@ import { useMemo, useCallback, useState, useRef, forwardRef, useImperativeHandle
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
 import { Copy, Braces, Slash, Clock, Trash2 } from 'lucide-react'
-import type { CellContextMenuEvent, RowClickedEvent, GridApi } from 'ag-grid-community'
+import type { CellContextMenuEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
@@ -68,6 +68,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
+  const autoSizedCols = useRef(new Set<string>())
+  const lastHeaderClick = useRef<{ colId: string; time: number } | null>(null)
 
   useImperativeHandle(ref, () => ({
     isAnyFilterPresent: () => agApiRef.current?.isAnyFilterPresent() ?? false,
@@ -151,6 +153,37 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         node.setSelected(true)
       }
     })
+  }, [])
+
+  const handleCellDoubleClicked = useCallback((params: { column: { getColId: () => string; getActualWidth: () => number }; api: GridApi }) => {
+    const colId = params.column.getColId()
+    if (autoSizedCols.current.has(colId)) {
+      params.api.applyColumnState({ state: [{ colId, flex: 1 }] })
+      autoSizedCols.current.delete(colId)
+    } else {
+      params.api.autoSizeColumn(colId)
+      if (params.column.getActualWidth() > 400) params.api.setColumnWidth(colId, 400)
+      autoSizedCols.current.add(colId)
+    }
+  }, [])
+
+  const handleColumnHeaderClicked = useCallback((e: ColumnHeaderClickedEvent) => {
+    if (!('getActualWidth' in e.column)) return  // skip column groups
+    const col = e.column
+    const colId = col.getColId()
+    const now = Date.now()
+    if (lastHeaderClick.current?.colId === colId && now - lastHeaderClick.current.time < 300) {
+      handleCellDoubleClicked({ column: col, api: e.api })
+      lastHeaderClick.current = null
+    } else {
+      lastHeaderClick.current = { colId, time: now }
+    }
+  }, [handleCellDoubleClicked])
+
+  const handleColumnResized = useCallback((e: { finished: boolean; source: string; column?: { getColId: () => string } | null }) => {
+    if (e.finished && e.source === 'uiColumnDragged' && e.column) {
+      autoSizedCols.current.delete(e.column.getColId())
+    }
   }, [])
 
   const handleCellContextMenu = useCallback((e: CellContextMenuEvent) => {
@@ -247,13 +280,14 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         onCellValueChanged={onCellValueChanged}
         onSelectionChanged={handleSelectionChanged}
         onRowClicked={selectable ? handleRowClicked : undefined}
+        onColumnHeaderClicked={handleColumnHeaderClicked}
+        onColumnResized={handleColumnResized}
         onCellContextMenu={handleCellContextMenu}
         onBodyScroll={closeMenu}
         defaultColDef={defaultColDef}
         rowSelection={rowSelectionConfig}
         suppressContextMenu
         preventDefaultOnContextMenu
-        singleClickEdit
         stopEditingWhenCellsLoseFocus
       />
       {menu && (

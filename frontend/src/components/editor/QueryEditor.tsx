@@ -1,8 +1,11 @@
-import { useMemo, useRef } from 'react'
-import ReactCodeMirror from '@uiw/react-codemirror'
+import { useMemo, useRef, type Ref } from 'react'
+import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { sql, MySQL, schemaCompletionSource } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
+import { EditorView, keymap } from '@codemirror/view'
+import { Prec } from '@codemirror/state'
 import { Play, Loader2 } from 'lucide-react'
+import clsx from 'clsx'
 import Button from '../ui/Button'
 
 const LIMIT_OPTIONS = [100, 500, 1000, 5000, 10000]
@@ -13,22 +16,24 @@ interface Props {
   onRun: () => void
   running: boolean
   database?: string
+  databases?: string[]
+  onDatabaseChange?: (db: string) => void
   schema?: Record<string, string[]>
   limit?: number
   onLimitChange?: (limit: number) => void
+  editorRef?: Ref<ReactCodeMirrorRef>
 }
 
-export default function QueryEditor({ value, onChange, onRun, running, database, schema, limit, onLimitChange }: Props) {
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault()
-      if (!running) onRun()
-    }
-  }
-
+export default function QueryEditor({ value, onChange, onRun, running, database, databases, onDatabaseChange, schema, limit, onLimitChange, editorRef }: Props) {
   // Keep schema in a ref so the extension never needs to be recreated when columns load
   const schemaRef = useRef(schema ?? {})
   schemaRef.current = schema ?? {}
+
+  // Refs so the stable keymap extension always calls the latest values
+  const onRunRef = useRef(onRun)
+  onRunRef.current = onRun
+  const runningRef = useRef(running)
+  runningRef.current = running
 
   // Stable extension: only recreates when database changes, not on every schema update.
   // Schema completions read from the ref at completion time so they're always current.
@@ -40,15 +45,37 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
     }),
   ], [database])
 
+  // Prec.highest ensures this fires before any other CodeMirror keymap handlers,
+  // so the selection is still intact when run() reads it.
+  const runKeymap = useMemo(() => Prec.highest(keymap.of([{
+    key: 'Ctrl-Enter',
+    mac: 'Cmd-Enter',
+    run: () => { if (!runningRef.current) onRunRef.current(); return true },
+  }])), [])
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1.5 bg-surface-900 border-b border-surface-800">
         <div className="flex items-center gap-2">
-          {database && (
+          {databases && databases.length > 0 ? (
+            <select
+              value={database ?? ''}
+              onChange={e => onDatabaseChange?.(e.target.value)}
+              className={clsx(
+                'bg-surface-800 border rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500',
+                database
+                  ? 'border-surface-700 text-slate-300'
+                  : 'border-amber-600 text-amber-400'
+              )}
+            >
+              {!database && <option value="" disabled>Select database…</option>}
+              {databases.map(db => <option key={db} value={db}>{db}</option>)}
+            </select>
+          ) : database ? (
             <span className="text-xs text-slate-500 bg-surface-800 px-2 py-0.5 rounded">
               {database}
             </span>
-          )}
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {onLimitChange && (
@@ -80,11 +107,12 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
           </Button>
         </div>
       </div>
-      <div className="flex-1 overflow-hidden" onKeyDown={handleKeyDown}>
+      <div className="flex-1 overflow-hidden">
         <ReactCodeMirror
+          ref={editorRef}
           value={value}
           onChange={onChange}
-          extensions={[sqlExtension]}
+          extensions={[sqlExtension, EditorView.lineWrapping, runKeymap]}
           theme={oneDark}
           className="h-full text-sm"
           style={{ height: '100%' }}

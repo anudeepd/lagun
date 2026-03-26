@@ -197,6 +197,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                 className="flex items-center gap-1.5 w-full px-2 py-1 hover:bg-surface-800 text-slate-300 group"
                 onClick={() => toggleDb(db)}
                 onContextMenu={e => handleTableContext(e, db)}
+                title={db}
               >
                 {isOpen ? <ChevronDown size={12} className="flex-shrink-0" /> : <ChevronRight size={12} className="flex-shrink-0" />}
                 <Database size={12} className="flex-shrink-0 text-yellow-400" />
@@ -219,6 +220,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                     className="flex items-center gap-1.5 w-full pl-7 pr-2 py-0.5 hover:bg-surface-800 text-slate-400 hover:text-slate-200 group"
                     onClick={() => openTableTab(sessionId, db, tbl.name)}
                     onContextMenu={e => handleTableContext(e, db, tbl.name)}
+                    title={tbl.name}
                   >
                     <Table2 size={11} className="flex-shrink-0 text-slate-500" />
                     <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>

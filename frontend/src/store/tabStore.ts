@@ -13,12 +13,18 @@ function newId() { return `tab-${uuid()}` }
 interface TabState {
   tabs: Tab[]
   activeTabId: string | null
+  pendingSqls: Record<string, { sql: string; database?: string }>
 
   openQueryTab: (sessionId: string, database?: string) => void
+  openQueryTabWithSql: (sessionId: string, sql: string, database?: string) => void
   openTableTab: (sessionId: string, database: string, table: string) => void
   closeTab: (id: string) => void
+  closeAllTabs: () => void
   setActiveTab: (id: string) => void
   setSql: (tabId: string, sql: string) => void
+  setTabDatabase: (tabId: string, database: string) => void
+  injectSqlToTab: (tabId: string, sql: string, database?: string) => void
+  consumePendingSql: (tabId: string) => void
 }
 
 export const useTabStore = create<TabState>()(
@@ -26,6 +32,7 @@ export const useTabStore = create<TabState>()(
     (set, get) => ({
       tabs: [],
       activeTabId: null,
+      pendingSqls: {},
 
       openQueryTab: (sessionId, database) => {
         const id = newId()
@@ -35,6 +42,19 @@ export const useTabStore = create<TabState>()(
           type: 'query',
           sessionId,
           database,
+        }
+        set(s => ({ tabs: [...s.tabs, tab], activeTabId: id }))
+      },
+
+      openQueryTabWithSql: (sessionId, sql, database) => {
+        const id = newId()
+        const tab: Tab = {
+          id,
+          label: database ? `Query — ${database}` : 'Query',
+          type: 'query',
+          sessionId,
+          database,
+          sql,
         }
         set(s => ({ tabs: [...s.tabs, tab], activeTabId: id }))
       },
@@ -75,9 +95,25 @@ export const useTabStore = create<TabState>()(
 
       setActiveTab: (id) => set({ activeTabId: id }),
 
+      closeAllTabs: () => set({ tabs: [], activeTabId: null }),
+
       setSql: (tabId, sql) => set(s => ({
         tabs: s.tabs.map(t => t.id === tabId ? { ...t, sql } : t),
       })),
+
+      setTabDatabase: (tabId, database) => set(s => ({
+        tabs: s.tabs.map(t => t.id === tabId ? { ...t, database, label: `Query — ${database}` } : t),
+      })),
+
+      injectSqlToTab: (tabId, sql, database) => set(s => ({
+        pendingSqls: { ...s.pendingSqls, [tabId]: { sql, database } },
+      })),
+
+      consumePendingSql: (tabId) => set(s => {
+        const next = { ...s.pendingSqls }
+        delete next[tabId]
+        return { pendingSqls: next }
+      }),
     }),
     {
       name: 'lagun-tabs',

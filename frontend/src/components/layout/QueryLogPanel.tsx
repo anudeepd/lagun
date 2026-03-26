@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { Terminal, ChevronUp, ChevronDown } from 'lucide-react'
+import { Terminal, ChevronUp, ChevronDown, Copy, CornerDownLeft } from 'lucide-react'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import type { QueryLogEntry } from '../../store/queryLogStore'
+import { useTabStore } from '../../store/tabStore'
+import { clipboardWrite } from '../../utils/clipboard'
 
 function formatTime(iso: string): string {
   const d = new Date(iso)
@@ -20,6 +22,9 @@ function formatRows(entry: QueryLogEntry): string {
 export default function QueryLogPanel() {
   const [expanded, setExpanded] = useState(false)
   const { entries, clearLog } = useQueryLogStore()
+  const { tabs, activeTabId, injectSqlToTab, openQueryTabWithSql } = useTabStore()
+  const activeTab = tabs.find(t => t.id === activeTabId)
+  const hasQueryTab = activeTab?.type === 'query'
 
   return (
     <div className="flex-shrink-0 border-t border-surface-800 bg-surface-950">
@@ -64,6 +69,7 @@ export default function QueryLogPanel() {
                   <th className="text-left px-2 py-1 font-medium w-24">Rows</th>
                   <th className="text-left px-2 py-1 font-medium w-16">ms</th>
                   <th className="text-left px-2 py-1 font-medium w-12">Status</th>
+                  <th className="w-14" />
                 </tr>
               </thead>
               <tbody>
@@ -72,21 +78,42 @@ export default function QueryLogPanel() {
                     key={entry.id}
                     className={`border-t border-surface-800 ${entry.error ? 'bg-red-950/30' : ''}`}
                   >
-                    <td className="px-2 py-0.5 text-slate-500 tabular-nums">{formatTime(entry.timestamp)}</td>
-                    <td
-                      className="px-2 py-0.5 font-mono text-slate-300 max-w-0 w-full truncate"
-                      title={entry.sql}
-                    >
-                      {entry.sql.length > 80 ? entry.sql.slice(0, 80) + '…' : entry.sql}
+                    <td className="px-2 py-0.5 text-slate-500 tabular-nums whitespace-nowrap">{formatTime(entry.timestamp)}</td>
+                    <td className="px-2 py-0.5 font-mono text-slate-300 w-full break-all">
+                      {entry.sql}
                     </td>
-                    <td className="px-2 py-0.5 text-slate-400 tabular-nums">{formatRows(entry)}</td>
-                    <td className="px-2 py-0.5 text-slate-400 tabular-nums">{entry.execTimeMs}</td>
-                    <td className="px-2 py-0.5">
+                    <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{formatRows(entry)}</td>
+                    <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{entry.execTimeMs}</td>
+                    <td className="px-2 py-0.5 whitespace-nowrap">
                       {entry.error ? (
                         <span className="text-red-400" title={entry.error}>✗</span>
                       ) : (
                         <span className="text-green-400">✓</span>
                       )}
+                    </td>
+                    <td className="px-2 py-0.5 whitespace-nowrap">
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => clipboardWrite(entry.sql).catch(() => {})}
+                          title="Copy SQL"
+                          className="p-0.5 text-slate-600 hover:text-slate-300 transition-colors"
+                        >
+                          <Copy size={10} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (hasQueryTab) {
+                              injectSqlToTab(activeTabId!, entry.sql, entry.database)
+                            } else {
+                              openQueryTabWithSql(entry.sessionId, entry.sql, entry.database)
+                            }
+                          }}
+                          title={hasQueryTab ? 'Load into editor' : 'Open in new query tab'}
+                          className="p-0.5 text-slate-600 hover:text-brand-400 transition-colors"
+                        >
+                          <CornerDownLeft size={10} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

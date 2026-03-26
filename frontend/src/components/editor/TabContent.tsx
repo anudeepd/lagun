@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
+import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import type { Tab, QueryResult, ColumnInfo } from '../../types'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
+import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
 import ResultGrid, { type ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
@@ -32,6 +34,41 @@ export default function TabContent({ tab }: Props) {
   return <TableTab tab={tab} />
 }
 
+function splitStatements(sql: string): string[] {
+  const statements: string[] = []
+  let current = ''
+  let inSingle = false, inDouble = false, inBacktick = false
+  let inLineComment = false, inBlockComment = false
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i], next = sql[i + 1]
+    if (inLineComment) { current += ch; if (ch === '\n') inLineComment = false; continue }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') { current += '*/'; i++; inBlockComment = false }
+      else current += ch
+      continue
+    }
+    if (inSingle) {
+      current += ch
+      if (ch === "'" && next === "'") { current += next; i++ }
+      else if (ch === "'") inSingle = false
+      continue
+    }
+    if (inDouble) { current += ch; if (ch === '"') inDouble = false; continue }
+    if (inBacktick) { current += ch; if (ch === '`') inBacktick = false; continue }
+    if (ch === '-' && next === '-') { inLineComment = true; current += '--'; i++; continue }
+    if (ch === '/' && next === '*') { inBlockComment = true; current += '/*'; i++; continue }
+    if (ch === "'") { inSingle = true; current += ch; continue }
+    if (ch === '"') { inDouble = true; current += ch; continue }
+    if (ch === '`') { inBacktick = true; current += ch; continue }
+    if (ch === ';') { const t = current.trim(); if (t) statements.push(t); current = ''; continue }
+    current += ch
+  }
+  const t = current.trim()
+  if (t) statements.push(t)
+  return statements
+}
+
 function QueryTab({ tab }: Props) {
   const storeSql = useTabStore(s => s.tabs.find(t => t.id === tab.id)?.sql ?? '')
   const setSqlStore = useTabStore(s => s.setSql)
@@ -53,14 +90,43 @@ function QueryTab({ tab }: Props) {
   // Re-initialize local state when switching to a different tab's content
   useEffect(() => { setSql(storeSql) }, [tab.id])
 
-  const [result, setResult] = useState<QueryResult | null>(null)
+  const [results, setResults] = useState<QueryResult[]>([])
+  const [resultIdx, setResultIdx] = useState(0)
   const [running, setRunning] = useState(false)
   const [limit, setLimit] = useState(1000)
   const [showExport, setShowExport] = useState(false)
   const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
   const gridRef = useRef<ResultGridHandle>(null)
-  const { tables, columns, loadTables, loadColumns } = useSchemaStore()
+  const editorRef = useRef<ReactCodeMirrorRef>(null)
+  const { tables, columns, databases, loadDatabases, loadTables, loadColumns } = useSchemaStore()
+  const setTabDatabase = useTabStore(s => s.setTabDatabase)
+  const pendingSql = useTabStore(s => s.pendingSqls[tab.id])
+  const consumePendingSql = useTabStore(s => s.consumePendingSql)
   const addEntry = useQueryLogStore(s => s.addEntry)
+
+  // Load SQL injected from query log
+  useEffect(() => {
+    if (pendingSql !== undefined) {
+      setSql(pendingSql.sql)
+      if (pendingSql.database) setTabDatabase(tab.id, pendingSql.database)
+      consumePendingSql(tab.id)
+    }
+  }, [pendingSql])
+
+  const session = useSessionStore(s => s.sessions.find(x => x.id === tab.sessionId))
+  const allDbs = databases[tab.sessionId] ?? []
+  const filteredDbs = session?.selected_databases?.length
+    ? allDbs.filter(db => session.selected_databases!.includes(db))
+    : allDbs
+  // Always include the currently-active database even if it's outside selected_databases
+  // (e.g. injected from query log)
+  const dbList = tab.database && !filteredDbs.includes(tab.database)
+    ? [...filteredDbs, tab.database]
+    : filteredDbs
+
+  useEffect(() => {
+    loadDatabases(tab.sessionId)
+  }, [tab.sessionId])
 
   const schema = useMemo(() => {
     if (!tab.database) return {}
@@ -96,20 +162,35 @@ function QueryTab({ tab }: Props) {
 
   const run = async () => {
     if (!sql.trim()) return
+
+    const view = editorRef.current?.view
+    const selection = view
+      ? view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to).trim()
+      : ''
+    const toRun = selection || sql.trim()
+    const statements = splitStatements(toRun)
+    if (statements.length === 0) return
+
     setRunning(true)
-    const start = Date.now()
+    const newResults: QueryResult[] = []
     try {
-      const r = await api.executeQuery(tab.sessionId, sql, tab.database, limit)
-      setResult(r)
-      addEntry({
-        sql: sql.trim(),
-        sessionId: tab.sessionId,
-        database: tab.database,
-        rowCount: r.row_count ?? undefined,
-        execTimeMs: r.exec_time_ms ?? (Date.now() - start),
-        error: r.error ?? undefined,
-      })
+      for (const stmt of statements) {
+        const start = Date.now()
+        const r = await api.executeQuery(tab.sessionId, stmt, tab.database, limit)
+        newResults.push(r)
+        addEntry({
+          sql: stmt,
+          sessionId: tab.sessionId,
+          database: tab.database,
+          rowCount: r.row_count ?? undefined,
+          execTimeMs: r.exec_time_ms ?? (Date.now() - start),
+          error: r.error ?? undefined,
+        })
+        if (r.error) break
+      }
     } finally {
+      setResults(newResults)
+      setResultIdx(0)
       setRunning(false)
     }
   }
@@ -123,25 +204,51 @@ function QueryTab({ tab }: Props) {
           onRun={run}
           running={running}
           database={tab.database}
+          databases={dbList}
+          onDatabaseChange={db => setTabDatabase(tab.id, db)}
           schema={schema}
           limit={limit}
           onLimitChange={setLimit}
+          editorRef={editorRef}
         />
       </div>
-      <div className="flex-1 overflow-hidden">
-        {result ? (
-          <ResultGrid ref={gridRef} result={result} />
-        ) : (
-          <div className="flex items-center justify-center h-full text-slate-600 text-sm">
-            Press Ctrl+Enter to run a query
+      <div className="flex-1 overflow-hidden flex flex-col">
+        {results.length > 1 && (
+          <div className="flex flex-shrink-0 bg-surface-900 border-b border-surface-800 overflow-x-auto">
+            {results.map((r, i) => (
+              <button
+                key={i}
+                onClick={() => setResultIdx(i)}
+                className={`px-3 py-1 text-xs whitespace-nowrap border-r border-surface-800 transition-colors ${
+                  resultIdx === i
+                    ? 'bg-surface-950 text-slate-200 border-t-2 border-t-brand-500'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800'
+                }`}
+              >
+                {r.error
+                  ? `✗ Result ${i + 1}`
+                  : r.columns.length > 0
+                    ? `Result ${i + 1} (${r.row_count} rows)`
+                    : `Result ${i + 1} (${r.affected_rows ?? 0} affected)`}
+              </button>
+            ))}
           </div>
         )}
+        <div className="flex-1 overflow-hidden">
+          {results.length > 0 ? (
+            <ResultGrid key={resultIdx} ref={gridRef} result={results[resultIdx]} />
+          ) : (
+            <div className="flex items-center justify-center h-full text-slate-600 text-sm">
+              Press Ctrl+Enter to run a query
+            </div>
+          )}
+        </div>
       </div>
       <div className="flex items-center border-t border-surface-800">
         <div className="flex-1">
-          <ResultToolbar result={result} running={running} />
+          <ResultToolbar result={results[resultIdx] ?? null} running={running} />
         </div>
-        {result && !result.error && result.columns.length > 0 && (
+        {results[resultIdx] && !results[resultIdx].error && results[resultIdx].columns.length > 0 && (
           <button
             onClick={() => {
               setExportOverride(
@@ -194,6 +301,7 @@ function TableTab({ tab }: Props) {
   const addEntry = useQueryLogStore(s => s.addEntry)
 
   const pkColumns = columns.filter(c => c.is_primary_key).map(c => c.name)
+  const rowKeyColumns = pkColumns.length > 0 ? pkColumns : columns.map(c => c.name)
 
   const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string) => {
     if (!tab.database || !tab.table) return
@@ -275,9 +383,9 @@ function TableTab({ tab }: Props) {
   }, [globalSearch])
 
   const handleCellEdit = async (params: { column: string; newValue: unknown; data: Record<string, unknown> }) => {
-    if (!tab.database || !tab.table || pkColumns.length === 0) return
+    if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     const primary_key: Record<string, unknown> = {}
-    pkColumns.forEach(pk => { primary_key[pk] = params.data[pk] })
+    rowKeyColumns.forEach(pk => { primary_key[pk] = params.data[pk] })
 
     const start = Date.now()
     const r = await api.cellUpdate(tab.sessionId, {
@@ -311,8 +419,8 @@ function TableTab({ tab }: Props) {
   }
 
   const handleDeleteRows = async (rows: Record<string, unknown>[]) => {
-    if (!tab.database || !tab.table || pkColumns.length === 0) return
-    const primary_keys = rows.map(row => Object.fromEntries(pkColumns.map(pk => [pk, row[pk]])))
+    if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
+    const primary_keys = rows.map(row => Object.fromEntries(rowKeyColumns.map(pk => [pk, row[pk]])))
     const r = await api.rowDelete(tab.sessionId, {
       database: tab.database,
       table: tab.table,
@@ -551,8 +659,8 @@ function TableTab({ tab }: Props) {
             <ResultGrid
               ref={gridRef}
               result={result}
-              editable={pkColumns.length > 0}
-              primaryKeyColumns={pkColumns}
+              editable={columns.length > 0}
+              primaryKeyColumns={rowKeyColumns}
               onCellEdit={handleCellEdit}
               onDeleteRows={handleDeleteRows}
               selectable={true}
