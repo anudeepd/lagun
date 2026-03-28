@@ -178,4 +178,6 @@ export const api = {
     }
     return res.json()
   },
+
+  getServerConfig: () => request<{ ldap_enabled: boolean }>('/config/server'),
 }

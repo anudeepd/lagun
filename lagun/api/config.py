@@ -20,6 +20,11 @@ from lagun.models.session import SessionCreate
 router = APIRouter(tags=["config"])
 
 _EXPORT_VERSION = 1
+
+
+@router.get("/config/server")
+async def get_server_config():
+    return {"ldap_enabled": bool(os.getenv("LAGUN_LDAP_CONFIG"))}
 _KDF_ITERATIONS = 600_000
 
 

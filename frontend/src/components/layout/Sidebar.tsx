@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Plus, Upload, Download } from 'lucide-react'
+import { Plus, Upload, Download, LogOut } from 'lucide-react'
 import { useSessionStore } from '../../store/sessionStore'
+import { useServerConfigStore } from '../../store/serverConfigStore'
 import SessionList from '../sessions/SessionList'
 import SessionForm from '../sessions/SessionForm'
 import ConfigExportDialog from '../sessions/ConfigExportDialog'
@@ -11,6 +12,7 @@ import Logo from '../ui/Logo'
 
 export default function Sidebar() {
   const { sessions, activeSessionId } = useSessionStore()
+  const ldapEnabled = useServerConfigStore(s => s.ldapEnabled)
   const [showForm, setShowForm] = useState(false)
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -48,6 +50,17 @@ export default function Sidebar() {
           >
             <Plus size={14} />
           </Button>
+          {ldapEnabled && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { window.location.href = '/_auth/logout' }}
+              title="Logout"
+              className="p-1 text-red-400 hover:text-red-300"
+            >
+              <LogOut size={14} />
+            </Button>
+          )}
         </div>
       </div>
 

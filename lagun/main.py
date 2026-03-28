@@ -76,6 +76,20 @@ async def favicon():
     return JSONResponse(status_code=404, content={"detail": "Not found"})
 
 
+_ldap_config_path = os.getenv("LAGUN_LDAP_CONFIG")
+if _ldap_config_path:
+    try:
+        from ldapgate.config import load_config
+        from ldapgate.middleware import add_ldap_auth
+    except ImportError as e:
+        raise RuntimeError(
+            "ldapgate is not installed but LAGUN_LDAP_CONFIG is set. "
+            "Install it with: pip install 'lagun[ldap]' or pip install -e /path/to/ldapgate"
+        ) from e
+    _login_template = Path(__file__).parent / "templates" / "login.html"
+    add_ldap_auth(app, load_config(_ldap_config_path), template_path=str(_login_template))
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 async def spa_fallback(full_path: str):
     if full_path.startswith("api/"):
