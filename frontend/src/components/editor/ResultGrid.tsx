@@ -62,23 +62,29 @@ interface Props {
   onSelectionChange?: (rows: Record<string, unknown>[]) => void
   columns?: ColumnInfo[]
   onDeleteRows?: (rows: Record<string, unknown>[]) => void
+  hiddenColumns?: Set<string>
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows }: Props, ref) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, hiddenColumns }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
   const autoSizedCols = useRef(new Set<string>())
   const lastHeaderClick = useRef<{ colId: string; time: number } | null>(null)
 
+  const visibleColumns = useMemo(() =>
+    hiddenColumns?.size ? result.columns.filter(col => !hiddenColumns.has(col)) : result.columns,
+    [result.columns, hiddenColumns]
+  )
+
   useImperativeHandle(ref, () => ({
     isAnyFilterPresent: () => agApiRef.current?.isAnyFilterPresent() ?? false,
     getFilteredData: () => {
       const rows: unknown[][] = []
       agApiRef.current?.forEachNodeAfterFilterAndSort(node => {
-        if (node.data) rows.push(result.columns.map(col => node.data[col] ?? null))
+        if (node.data) rows.push(visibleColumns.map(col => node.data[col] ?? null))
       })
-      return { columns: result.columns, rows }
+      return { columns: visibleColumns, rows }
     },
   }))
 
@@ -90,10 +96,13 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       resizable: true,
       sortable: true,
       filter: true,
+      hide: hiddenColumns?.has(col) ?? false,
+      // Ensure header name is always fully visible: ~8px per char at 12px monospace + 60px for padding/icons
+      minWidth: Math.max(80, col.length * 8 + 60),
       cellStyle: { fontFamily: 'ui-monospace, monospace', fontSize: '12px' },
       headerClass: 'text-xs font-semibold',
     })),
-    [result.columns, editable]
+    [result.columns, editable, hiddenColumns]
   )
 
   const rowData = useMemo(() =>

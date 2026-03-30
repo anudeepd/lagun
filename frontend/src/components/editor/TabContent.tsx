@@ -9,7 +9,7 @@ import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
 import ResultGrid, { type ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
-import { RefreshCw, Download, Upload, Search, Filter, X } from 'lucide-react'
+import { RefreshCw, Download, Upload, Search, Filter, X, Eye } from 'lucide-react'
 import Button from '../ui/Button'
 import ReactCodeMirror from '@uiw/react-codemirror'
 import { sql, MySQL } from '@codemirror/lang-sql'
@@ -298,6 +298,11 @@ function TableTab({ tab }: Props) {
   const [whereFilter, setWhereFilter] = useState('')
   const [appliedWhere, setAppliedWhere] = useState('')
   const [showFilterBar, setShowFilterBar] = useState(false)
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set())
+  const [showColPicker, setShowColPicker] = useState(false)
+  const [colSearch, setColSearch] = useState('')
+  const [sortColsAlpha, setSortColsAlpha] = useState(false)
+  const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
 
   const pkColumns = columns.filter(c => c.is_primary_key).map(c => c.name)
@@ -370,7 +375,21 @@ function TableTab({ tab }: Props) {
     setWhereFilter('')
     setAppliedWhere('')
     setShowFilterBar(false)
+    setHiddenColumns(new Set())
+    setShowColPicker(false)
+    setColSearch('')
   }, [tab.sessionId, tab.database, tab.table])
+
+  useEffect(() => {
+    if (!showColPicker) return
+    const handler = (e: MouseEvent) => {
+      if (colPickerRef.current && !colPickerRef.current.contains(e.target as Node)) {
+        setShowColPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showColPicker])
 
   // Debounced global search — re-queries server on every keystroke pause
   useEffect(() => {
@@ -526,6 +545,77 @@ function TableTab({ tab }: Props) {
             {appliedWhere ? 'Filtered' : 'Filter'}
           </button>
         )}
+        {/* Column visibility picker */}
+        {view === 'data' && result && result.columns.length > 0 && (
+          <div className="relative" ref={colPickerRef}>
+            <button
+              onClick={() => setShowColPicker(v => !v)}
+              className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
+                hiddenColumns.size > 0
+                  ? 'text-brand-400 bg-brand-950 border border-brand-800'
+                  : 'text-slate-500 hover:text-slate-300'
+              }`}
+              title="Select visible columns"
+            >
+              <Eye size={11} />
+              Columns{hiddenColumns.size > 0 ? ` (${result.columns.length - hiddenColumns.size}/${result.columns.length})` : ''}
+            </button>
+            {showColPicker && (
+              <div className="absolute right-0 top-full mt-1 z-50 bg-surface-900 border border-surface-700 rounded shadow-xl w-52 flex flex-col">
+                <div className="px-2 pt-2 pb-1">
+                  <input
+                    type="text"
+                    value={colSearch}
+                    onChange={e => setColSearch(e.target.value)}
+                    placeholder="Filter columns…"
+                    autoFocus
+                    className="w-full bg-surface-800 border border-surface-700 rounded px-2 py-0.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <label className="flex items-center gap-2 px-3 py-1 hover:bg-surface-800 cursor-pointer border-b border-surface-700">
+                  <input
+                    type="checkbox"
+                    checked={hiddenColumns.size === 0}
+                    onChange={e => setHiddenColumns(e.target.checked ? new Set() : new Set(result.columns))}
+                    className="accent-brand-500"
+                  />
+                  <span className="text-xs text-slate-200 font-semibold">All</span>
+                </label>
+                <div className="max-h-60 overflow-y-auto">
+                  {(sortColsAlpha ? [...result.columns].sort() : result.columns)
+                    .filter(col => !colSearch || col.toLowerCase().includes(colSearch.toLowerCase()))
+                    .map(col => (
+                      <label key={col} className="flex items-center gap-2 px-3 py-1 hover:bg-surface-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!hiddenColumns.has(col)}
+                          onChange={e => {
+                            setHiddenColumns(prev => {
+                              const next = new Set(prev)
+                              if (e.target.checked) next.delete(col)
+                              else next.add(col)
+                              return next
+                            })
+                          }}
+                          className="accent-brand-500"
+                        />
+                        <span className="text-xs text-slate-300 font-mono truncate" title={col}>{col}</span>
+                      </label>
+                    ))}
+                </div>
+                <label className="flex items-center gap-2 px-3 py-1.5 hover:bg-surface-800 cursor-pointer border-t border-surface-700">
+                  <input
+                    type="checkbox"
+                    checked={sortColsAlpha}
+                    onChange={e => setSortColsAlpha(e.target.checked)}
+                    className="accent-brand-500"
+                  />
+                  <span className="text-xs text-slate-400">Sort alphabetically</span>
+                </label>
+              </div>
+            )}
+          </div>
+        )}
         {/* Limit selector — only shown in data view */}
         {view === 'data' && (
           <div className="flex items-center gap-1 text-xs text-slate-500">
@@ -572,8 +662,8 @@ function TableTab({ tab }: Props) {
         {view === 'data' && result && !result.error && (
           <button
             onClick={() => {
-              if (selectedRows.length === 0 && gridRef.current?.isAnyFilterPresent()) {
-                setExportOverride(gridRef.current.getFilteredData())
+              if (selectedRows.length === 0 && (gridRef.current?.isAnyFilterPresent() || hiddenColumns.size > 0)) {
+                setExportOverride(gridRef.current?.getFilteredData())
               } else {
                 setExportOverride(undefined)
               }
@@ -666,6 +756,7 @@ function TableTab({ tab }: Props) {
               selectable={true}
               onSelectionChange={setSelectedRows}
               columns={columns}
+              hiddenColumns={hiddenColumns}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
