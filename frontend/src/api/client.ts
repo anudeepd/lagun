@@ -44,31 +44,46 @@ export const api = {
     request<string[]>(`/sessions/${sessionId}/databases`),
   getTables: (sessionId: string, db: string) =>
     request<import('../types').TableInfo[]>(`/sessions/${sessionId}/databases/${db}/tables`),
-  getColumns: (sessionId: string, db: string, table: string) =>
+  getColumns: (sessionId: string, db: string, table: string, signal?: AbortSignal) =>
     request<import('../types').ColumnInfo[]>(
-      `/sessions/${sessionId}/databases/${db}/tables/${table}/columns`
+      `/sessions/${sessionId}/databases/${db}/tables/${table}/columns`,
+      { signal }
     ),
   getIndexes: (sessionId: string, db: string, table: string) =>
     request<import('../types').IndexInfo[]>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/indexes`
     ),
+  getFunctions: (sessionId: string, db: string) =>
+    request<string[]>(`/sessions/${sessionId}/databases/${db}/functions`),
   getCreateSql: (sessionId: string, db: string, table: string) =>
     request<{ create_sql: string }>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/create_sql`
     ),
 
   // Query
-  executeQuery: (sessionId: string, sql: string, database?: string, limit?: number) =>
+  executeQuery: (sessionId: string, sql: string, database?: string, limit?: number, signal?: AbortSignal) =>
     request<import('../types').QueryResult>(`/sessions/${sessionId}/query`, {
       method: 'POST',
       body: JSON.stringify({ sql, database, limit }),
+      signal,
     }),
+  killQuery: (sessionId: string) =>
+    request<{ ok: boolean; error?: string }>(`/sessions/${sessionId}/query`, { method: 'DELETE' }),
   cellUpdate: (sessionId: string, payload: {
     database: string; table: string; primary_key: Record<string, unknown>;
     column: string; new_value: unknown;
   }) =>
     request<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
       `/sessions/${sessionId}/cell-update`,
+      { method: 'POST', body: JSON.stringify(payload) }
+    ),
+  rowUpdate: (sessionId: string, payload: {
+    database: string; table: string;
+    primary_key: Record<string, unknown>;
+    updates: Record<string, unknown>;
+  }) =>
+    request<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
+      `/sessions/${sessionId}/row-update`,
       { method: 'POST', body: JSON.stringify(payload) }
     ),
   rowInsert: (sessionId: string, payload: {

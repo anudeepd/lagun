@@ -17,6 +17,7 @@ export interface QueryLogEntry {
   affectedRows?: number
   execTimeMs: number
   error?: string
+  cancelled?: boolean
 }
 
 interface QueryLogState {

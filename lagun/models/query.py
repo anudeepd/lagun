@@ -46,6 +46,20 @@ class RowInsertResult(BaseModel):
     error: Optional[str] = None
 
 
+class RowUpdateRequest(BaseModel):
+    database: str
+    table: str
+    primary_key: dict[str, Any]   # old PK values for WHERE
+    updates: dict[str, Any]       # {col: new_value, ...}
+
+
+class RowUpdateResult(BaseModel):
+    ok: bool
+    affected_rows: int
+    sql_executed: str
+    error: Optional[str] = None
+
+
 class RowDeleteRequest(BaseModel):
     database: str
     table: str

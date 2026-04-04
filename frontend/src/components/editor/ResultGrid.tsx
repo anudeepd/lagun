@@ -1,8 +1,8 @@
-import { useMemo, useCallback, useState, useRef, forwardRef, useImperativeHandle } from 'react'
+import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
 import { Copy, Braces, Slash, Clock, Trash2 } from 'lucide-react'
-import type { CellContextMenuEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
+import type { CellClassParams, CellContextMenuEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
@@ -54,6 +54,7 @@ interface Props {
   onCellEdit?: (params: {
     column: string
     newValue: unknown
+    oldValue: unknown
     data: Record<string, unknown>
   }) => void
   primaryKeyColumns?: string[]
@@ -63,9 +64,10 @@ interface Props {
   columns?: ColumnInfo[]
   onDeleteRows?: (rows: Record<string, unknown>[]) => void
   hiddenColumns?: Set<string>
+  pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, hiddenColumns }: Props, ref) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, hiddenColumns, pendingChanges }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
@@ -88,6 +90,14 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     },
   }))
 
+  const pendingChangesRef = useRef(pendingChanges)
+  pendingChangesRef.current = pendingChanges
+
+  // Refresh cell styles whenever pending changes update
+  useEffect(() => {
+    agApiRef.current?.refreshCells({ force: true })
+  }, [pendingChanges])
+
   const columnDefs = useMemo(() =>
     result.columns.map(col => ({
       field: col,
@@ -99,7 +109,14 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       hide: hiddenColumns?.has(col) ?? false,
       // Ensure header name is always fully visible: ~8px per char at 12px monospace + 60px for padding/icons
       minWidth: Math.max(80, col.length * 8 + 60),
-      cellStyle: { fontFamily: 'ui-monospace, monospace', fontSize: '12px' },
+      cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
+        const base = { fontFamily: 'ui-monospace, monospace', fontSize: '12px' }
+        const rowId = params.data?.__ag_rowId as string | undefined
+        if (rowId && pendingChangesRef.current?.get(rowId)?.changes[col] !== undefined) {
+          return { ...base, backgroundColor: '#7c3a00', color: '#fed7aa' }
+        }
+        return base
+      },
       headerClass: 'text-xs font-semibold',
     })),
     [result.columns, editable, hiddenColumns]
@@ -133,12 +150,13 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     flex: 1,
   }), [])
 
-  const onCellValueChanged = useCallback((params: { colDef: { field?: string }; newValue: unknown; data: Record<string, unknown> }) => {
+  const onCellValueChanged = useCallback((params: CellValueChangedEvent) => {
     if (!onCellEdit || !params.colDef.field) return
     onCellEdit({
       column: params.colDef.field,
       newValue: params.newValue,
-      data: params.data,
+      oldValue: params.oldValue,
+      data: params.data as Record<string, unknown>,
     })
   }, [onCellEdit])
 
@@ -241,7 +259,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           type: 'item',
           label: 'Set to NULL',
           icon: <Slash size={12} />,
-          onClick: () => { onCellEdit?.({ column: menu.columnName, newValue: null, data: menu.rowData }); closeMenu() },
+          onClick: () => { onCellEdit?.({ column: menu.columnName, newValue: null, oldValue: menu.rowData[menu.columnName], data: menu.rowData }); closeMenu() },
         })
       }
       if (isDateType) {
@@ -250,7 +268,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           type: 'item',
           label: `Set to NOW()  ${nowStr}`,
           icon: <Clock size={12} />,
-          onClick: () => { onCellEdit?.({ column: menu.columnName, newValue: nowStr, data: menu.rowData }); closeMenu() },
+          onClick: () => { onCellEdit?.({ column: menu.columnName, newValue: nowStr, oldValue: menu.rowData[menu.columnName], data: menu.rowData }); closeMenu() },
         })
       }
     }

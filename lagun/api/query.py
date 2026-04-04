@@ -13,11 +13,15 @@ from lagun.db.utils import quote_ident
 from lagun.models.query import (
     QueryRequest, QueryResult,
     CellUpdateRequest, CellUpdateResult,
+    RowUpdateRequest, RowUpdateResult,
     RowInsertRequest, RowInsertResult,
     RowDeleteRequest, RowDeleteResult,
 )
 
 router = APIRouter(tags=["query"])
+
+# Maps session_id → MySQL thread_id of the currently running query (if any)
+_active_queries: dict[str, int] = {}
 
 
 async def _get_pool_or_404(session_id: str):
@@ -44,35 +48,58 @@ async def execute_query(session_id: str, req: QueryRequest):
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                if req.database:
-                    await cur.execute(f"USE {quote_ident(req.database)}")
-                await cur.execute(sql)
-                if cur.description:
-                    columns = [d[0] for d in cur.description]
-                    rows = [list(r) for r in (await cur.fetchall())]
-                    # Serialize non-JSON-native types
-                    rows = [[_serialize(v) for v in row] for row in rows]
-                    return QueryResult(
-                        columns=columns,
-                        rows=rows,
-                        row_count=len(rows),
-                        exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
-                    )
-                else:
-                    return QueryResult(
-                        columns=[],
-                        rows=[],
-                        row_count=cur.rowcount,
-                        exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
-                        affected_rows=cur.rowcount,
-                        insert_id=cur.lastrowid,
-                    )
+                # Register connection thread_id so it can be killed if needed
+                await cur.execute("SELECT CONNECTION_ID()")
+                row = await cur.fetchone()
+                _active_queries[session_id] = row[0]
+                try:
+                    if req.database:
+                        await cur.execute(f"USE {quote_ident(req.database)}")
+                    await cur.execute(sql)
+                    if cur.description:
+                        columns = [d[0] for d in cur.description]
+                        rows = [list(r) for r in (await cur.fetchall())]
+                        # Serialize non-JSON-native types
+                        rows = [[_serialize(v) for v in row] for row in rows]
+                        return QueryResult(
+                            columns=columns,
+                            rows=rows,
+                            row_count=len(rows),
+                            exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
+                        )
+                    else:
+                        return QueryResult(
+                            columns=[],
+                            rows=[],
+                            row_count=cur.rowcount,
+                            exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
+                            affected_rows=cur.rowcount,
+                            insert_id=cur.lastrowid,
+                        )
+                finally:
+                    _active_queries.pop(session_id, None)
     except Exception as exc:
+        _active_queries.pop(session_id, None)
         return QueryResult(
             columns=[], rows=[], row_count=0,
             exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
             error=str(exc),
         )
+
+
+@router.delete("/sessions/{session_id}/query")
+async def kill_query(session_id: str):
+    thread_id = _active_queries.get(session_id)
+    if not thread_id:
+        return {"ok": False, "error": "No active query"}
+    try:
+        pool, _ = await _get_pool_or_404(session_id)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(f"KILL QUERY {thread_id}")
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 def _serialize(v: Any) -> Any:
@@ -119,6 +146,37 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
         return CellUpdateResult(ok=True, affected_rows=affected, sql_executed=display_sql)
     except Exception as exc:
         return CellUpdateResult(ok=False, affected_rows=0, sql_executed="", error=str(exc))
+
+
+@router.post("/sessions/{session_id}/row-update", response_model=RowUpdateResult)
+async def row_update(session_id: str, req: RowUpdateRequest):
+    pool, _ = await _get_pool_or_404(session_id)
+    try:
+        db_q = quote_ident(req.database)
+        tbl_q = quote_ident(req.table)
+
+        set_clauses = ", ".join(f"{quote_ident(col)} = %s" for col in req.updates)
+        pk_clauses = " AND ".join(f"{quote_ident(k)} = %s" for k in req.primary_key)
+        sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
+        params = list(req.updates.values()) + list(req.primary_key.values())
+
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, params)
+                affected = cur.rowcount
+
+        # Build display SQL safely
+        parts = sql.split("%s")
+        display_parts = []
+        for i, part in enumerate(parts):
+            display_parts.append(part)
+            if i < len(params):
+                p = params[i]
+                display_parts.append("NULL" if p is None else repr(p))
+        display_sql = "".join(display_parts)
+        return RowUpdateResult(ok=True, affected_rows=affected, sql_executed=display_sql)
+    except Exception as exc:
+        return RowUpdateResult(ok=False, affected_rows=0, sql_executed="", error=str(exc))
 
 
 @router.post("/sessions/{session_id}/row-insert", response_model=RowInsertResult)

@@ -69,6 +69,18 @@ function splitStatements(sql: string): string[] {
   return statements
 }
 
+const MIN_EDITOR_HEIGHT = 100
+const MAX_EDITOR_HEIGHT_FRACTION = 0.7
+
+const SQL_KEYWORDS = new Set([
+  'WHERE', 'ON', 'SET', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS',
+  'JOIN', 'HAVING', 'GROUP', 'ORDER', 'LIMIT', 'UNION', 'AND', 'OR',
+  'SELECT', 'AS', 'INTO', 'FROM', 'UPDATE', 'DELETE', 'INSERT',
+  'VALUES', 'USING', 'BY', 'WITH', 'DISTINCT', 'ALL', 'FULL',
+  'NATURAL', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NOT', 'IN',
+  'IS', 'NULL', 'LIKE', 'BETWEEN', 'EXISTS', 'EXCEPT', 'INTERSECT',
+])
+
 function QueryTab({ tab }: Props) {
   const storeSql = useTabStore(s => s.tabs.find(t => t.id === tab.id)?.sql ?? '')
   const setSqlStore = useTabStore(s => s.setSql)
@@ -94,8 +106,16 @@ function QueryTab({ tab }: Props) {
   const [resultIdx, setResultIdx] = useState(0)
   const [running, setRunning] = useState(false)
   const [limit, setLimit] = useState(1000)
+  const [functions, setFunctions] = useState<string[]>([])
   const [showExport, setShowExport] = useState(false)
   const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const [editorHeight, setEditorHeight] = useState(() => {
+    const saved = localStorage.getItem('queryEditorHeight')
+    return saved ? Number(saved) : 192
+  })
+  const editorDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
+  const editorContainerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<ResultGridHandle>(null)
   const editorRef = useRef<ReactCodeMirrorRef>(null)
   const { tables, columns, databases, loadDatabases, loadTables, loadColumns } = useSchemaStore()
@@ -128,6 +148,30 @@ function QueryTab({ tab }: Props) {
     loadDatabases(tab.sessionId)
   }, [tab.sessionId])
 
+  // Synchronously extract alias→table map from the current SQL (no debounce needed — pure string parsing)
+  const aliasMap = useMemo(() => {
+    const map: Record<string, string> = {}
+    // FROM/JOIN table [AS alias] or FROM/JOIN table alias (implicit MySQL syntax)
+    // Captures: m[1]=tableName, m[2]=explicit AS alias, m[3]=implicit alias
+    const fromJoinMatches = [...sql.matchAll(
+      /(?:FROM|JOIN)\s+`?(?:\w+`?\.`?)?(\w+)`?(?:\s+AS\s+(\w+)|\s+(?!ON\b|WHERE\b|SET\b|INNER\b|LEFT\b|RIGHT\b|OUTER\b|CROSS\b|JOIN\b|HAVING\b|GROUP\b|ORDER\b|LIMIT\b|UNION\b|AND\b|OR\b|SELECT\b|INTO\b|USING\b)(\w+))?/gi
+    )]
+    for (const m of fromJoinMatches) {
+      const alias = m[2] || m[3]
+      if (alias && !SQL_KEYWORDS.has(alias.toUpperCase())) map[alias] = m[1]
+    }
+    // Comma-separated tables: , table [AS alias] or , table alias
+    // Captures: m[1]=tableName, m[2]=explicit AS alias, m[3]=implicit alias
+    const commaMatches = [...sql.matchAll(
+      /,\s*`?(?:\w+`?\.`?)?(\w+)`?(?:\s+AS\s+(\w+)|\s+(?!WHERE\b|SET\b|ON\b|LIMIT\b)(\w+))?(?:\s*,|\s+WHERE\b|\s+SET\b|\s+ON\b|\s+LIMIT\b|$)/gi
+    )]
+    for (const m of commaMatches) {
+      const alias = m[2] || m[3]
+      if (alias && !SQL_KEYWORDS.has(alias.toUpperCase())) map[alias] = m[1]
+    }
+    return map
+  }, [sql])
+
   const schema = useMemo(() => {
     if (!tab.database) return {}
     const tbls = tables[`${tab.sessionId}/${tab.database}`] ?? []
@@ -136,8 +180,15 @@ function QueryTab({ tab }: Props) {
       const key = `${tab.sessionId}/${tab.database}/${tbl.name}`
       result[tbl.name] = (columns[key] ?? []).map(c => c.name)
     }
+    // Inject alias entries so `alias.col` completion works via schemaCompletionSource.
+    // Skip if the alias name is already a real table (avoids clobbering real entries).
+    for (const [alias, tableName] of Object.entries(aliasMap)) {
+      if (result[tableName] && !result[alias]) {
+        result[alias] = result[tableName]
+      }
+    }
     return result
-  }, [tab.sessionId, tab.database, tables, columns])
+  }, [tab.sessionId, tab.database, tables, columns, aliasMap])
 
   // Load table names eagerly (single fast request)
   useEffect(() => {
@@ -145,20 +196,50 @@ function QueryTab({ tab }: Props) {
     loadTables(tab.sessionId, tab.database)
   }, [tab.sessionId, tab.database])
 
+  // Load user-defined functions for autocomplete
+  useEffect(() => {
+    if (!tab.database) return
+    api.getFunctions(tab.sessionId, tab.database)
+      .then(setFunctions)
+      .catch(() => setFunctions([]))
+  }, [tab.sessionId, tab.database])
+
   // Lazy: load columns only for tables referenced in the current SQL
   useEffect(() => {
     if (!tab.database) return
     const timer = setTimeout(() => {
-      const matches = [...sql.matchAll(/(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+`?(?:\w+`?\.`?)?(\w+)`?/gi)]
-      // Also catch comma-separated tables: FROM t1, t2 or UPDATE t1, t2
-      const commaMatches = [...sql.matchAll(/,\s*`?(?:\w+`?\.`?)?(\w+)`?\s*(?:AS\s+\w+\s*)?(?:,|WHERE\b|SET\b|ON\b|$)/gi)]
-      const names = [...new Set([...matches, ...commaMatches].map(m => m[1]))]
+      const fromJoinMatches = [...sql.matchAll(/(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+`?(?:\w+`?\.`?)?(\w+)`?/gi)]
+      const commaMatches = [...sql.matchAll(/,\s*`?(?:\w+`?\.`?)?(\w+)`?\s*(?:AS\s+\w+\s*)?(?:,|WHERE\b|SET\b|ON\b|LIMIT\b|$)/gi)]
+      const names = [...new Set([...fromJoinMatches, ...commaMatches].map(m => m[1]))]
       for (const name of names) {
         loadColumns(tab.sessionId, tab.database!, name)
       }
     }, 300)
     return () => clearTimeout(timer)
   }, [sql, tab.sessionId, tab.database])
+
+  const handleEditorDividerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    editorDragRef.current = { startY: e.clientY, startHeight: editorHeight }
+    const onMove = (ev: MouseEvent) => {
+      if (!editorDragRef.current) return
+      const containerHeight = editorContainerRef.current?.clientHeight ?? 600
+      const maxH = Math.floor(containerHeight * MAX_EDITOR_HEIGHT_FRACTION)
+      const next = Math.max(
+        MIN_EDITOR_HEIGHT,
+        Math.min(maxH, editorDragRef.current.startHeight + ev.clientY - editorDragRef.current.startY)
+      )
+      setEditorHeight(next)
+      localStorage.setItem('queryEditorHeight', String(next))
+    }
+    const onUp = () => {
+      editorDragRef.current = null
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }
 
   const run = async () => {
     if (!sql.trim()) return
@@ -175,8 +256,25 @@ function QueryTab({ tab }: Props) {
     const newResults: QueryResult[] = []
     try {
       for (const stmt of statements) {
+        const controller = new AbortController()
+        abortControllerRef.current = controller
         const start = Date.now()
-        const r = await api.executeQuery(tab.sessionId, stmt, tab.database, limit)
+        let r: QueryResult
+        try {
+          r = await api.executeQuery(tab.sessionId, stmt, tab.database, limit, controller.signal)
+        } catch (e) {
+          if ((e as Error).name === 'AbortError') {
+            addEntry({
+              sql: stmt,
+              sessionId: tab.sessionId,
+              database: tab.database,
+              execTimeMs: Date.now() - start,
+              cancelled: true,
+            })
+            break
+          }
+          throw e
+        }
         newResults.push(r)
         addEntry({
           sql: stmt,
@@ -189,29 +287,42 @@ function QueryTab({ tab }: Props) {
         if (r.error) break
       }
     } finally {
+      abortControllerRef.current = null
       setResults(newResults)
       setResultIdx(0)
       setRunning(false)
     }
   }
 
+  const handleCancel = async () => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    try { await api.killQuery(tab.sessionId) } catch { /* ignore */ }
+  }
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="h-48 flex-shrink-0 border-b border-surface-800">
+    <div className="flex flex-col h-full" ref={editorContainerRef}>
+      <div style={{ height: editorHeight }} className="flex-shrink-0">
         <QueryEditor
           value={sql}
           onChange={setSql}
           onRun={run}
+          onCancel={handleCancel}
           running={running}
           database={tab.database}
           databases={dbList}
           onDatabaseChange={db => setTabDatabase(tab.id, db)}
           schema={schema}
+          functions={functions}
           limit={limit}
           onLimitChange={setLimit}
           editorRef={editorRef}
         />
       </div>
+      <div
+        onMouseDown={handleEditorDividerMouseDown}
+        className="h-1.5 flex-shrink-0 bg-surface-800 hover:bg-brand-500 cursor-row-resize transition-colors"
+      />
       <div className="flex-1 overflow-hidden flex flex-col">
         {results.length > 1 && (
           <div className="flex flex-shrink-0 bg-surface-900 border-b border-surface-800 overflow-x-auto">
@@ -302,6 +413,10 @@ function TableTab({ tab }: Props) {
   const [showColPicker, setShowColPicker] = useState(false)
   const [colSearch, setColSearch] = useState('')
   const [sortColsAlpha, setSortColsAlpha] = useState(false)
+  const [pendingChanges, setPendingChanges] = useState<
+    Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
+  >(new Map())
+  const loadAbortRef = useRef<AbortController | null>(null)
   const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
 
@@ -314,6 +429,11 @@ function TableTab({ tab }: Props) {
     const effectiveSearch = searchOverride !== undefined ? searchOverride : globalSearch
     const effectiveWhere = whereOverride !== undefined ? whereOverride : appliedWhere
 
+    // Cancel any in-flight load and start a fresh one
+    loadAbortRef.current?.abort()
+    const controller = new AbortController()
+    loadAbortRef.current = controller
+
     setSelectedRows([])
 
     if (result === null) {
@@ -325,7 +445,7 @@ function TableTab({ tab }: Props) {
     const start = Date.now()
     try {
       // Fetch columns first so we can build LIKE conditions across all columns
-      const cols = await api.getColumns(tab.sessionId, tab.database, tab.table)
+      const cols = await api.getColumns(tab.sessionId, tab.database, tab.table, controller.signal)
       setColumns(cols)
 
       let selectSql = `SELECT * FROM \`${tab.database}\`.\`${tab.table}\``
@@ -345,7 +465,7 @@ function TableTab({ tab }: Props) {
         selectSql += ` WHERE ${conditions.join(' AND ')}`
       }
 
-      const res = await api.executeQuery(tab.sessionId, selectSql, undefined, effectiveLimit)
+      const res = await api.executeQuery(tab.sessionId, selectSql, undefined, effectiveLimit, controller.signal)
       setResult(res)
       addEntry({
         sql: selectSql,
@@ -355,9 +475,18 @@ function TableTab({ tab }: Props) {
         execTimeMs: res.exec_time_ms ?? (Date.now() - start),
         error: res.error ?? undefined,
       })
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') {
+        setInitialLoading(false)
+        setRefreshing(false)
+        return
+      }
+      throw e
     } finally {
-      setInitialLoading(false)
-      setRefreshing(false)
+      if (loadAbortRef.current === controller) {
+        setInitialLoading(false)
+        setRefreshing(false)
+      }
     }
   }
 
@@ -378,6 +507,7 @@ function TableTab({ tab }: Props) {
     setHiddenColumns(new Set())
     setShowColPicker(false)
     setColSearch('')
+    setPendingChanges(new Map())
   }, [tab.sessionId, tab.database, tab.table])
 
   useEffect(() => {
@@ -401,40 +531,66 @@ function TableTab({ tab }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSearch])
 
-  const handleCellEdit = async (params: { column: string; newValue: unknown; data: Record<string, unknown> }) => {
+  const handleCellEdit = useCallback((params: { column: string; newValue: unknown; oldValue: unknown; data: Record<string, unknown> }) => {
     if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
-    const primary_key: Record<string, unknown> = {}
-    rowKeyColumns.forEach(pk => { primary_key[pk] = params.data[pk] })
+    const rowId = params.data.__ag_rowId as string
 
-    const start = Date.now()
-    const r = await api.cellUpdate(tab.sessionId, {
-      database: tab.database,
-      table: tab.table,
-      primary_key,
-      column: params.column,
-      new_value: params.newValue,
+    setPendingChanges(prev => {
+      const next = new Map(prev)
+      const existing = next.get(rowId)
+      if (!existing) {
+        // First edit on this row: reconstruct original by substituting oldValue for the edited cell
+        const original: Record<string, unknown> = { ...params.data, [params.column]: params.oldValue }
+        next.set(rowId, { original, changes: { [params.column]: params.newValue } })
+      } else {
+        const newChanges = { ...existing.changes, [params.column]: params.newValue }
+        // If value reverted to original, drop that key
+        if (params.newValue === existing.original[params.column]) {
+          delete newChanges[params.column]
+        }
+        if (Object.keys(newChanges).length === 0) {
+          next.delete(rowId)
+        } else {
+          next.set(rowId, { ...existing, changes: newChanges })
+        }
+      }
+      return next
     })
-    if (r.ok) {
-      setStatusMsg(`✓ ${r.sql_executed}`)
-      addEntry({
-        sql: r.sql_executed,
-        sessionId: tab.sessionId,
+  }, [tab.database, tab.table, rowKeyColumns])
+
+  const handleApplyChanges = async () => {
+    if (!tab.database || !tab.table || pendingChanges.size === 0) return
+    for (const [, { original, changes }] of pendingChanges) {
+      const primary_key: Record<string, unknown> = {}
+      rowKeyColumns.forEach(pk => { primary_key[pk] = original[pk] })
+      const start = Date.now()
+      const r = await api.rowUpdate(tab.sessionId, {
         database: tab.database,
-        affectedRows: r.affected_rows ?? undefined,
-        execTimeMs: Date.now() - start,
+        table: tab.table,
+        primary_key,
+        updates: changes,
       })
-      loadData()
-    } else {
-      setStatusMsg(`✗ ${r.error}`)
       addEntry({
         sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`,
         sessionId: tab.sessionId,
         database: tab.database,
+        affectedRows: r.affected_rows ?? undefined,
         execTimeMs: Date.now() - start,
         error: r.error ?? undefined,
       })
+      if (!r.ok) {
+        setStatusMsg(`✗ ${r.error}`)
+        setTimeout(() => setStatusMsg(null), 4000)
+        return
+      }
     }
-    setTimeout(() => setStatusMsg(null), 4000)
+    setPendingChanges(new Map())
+    loadData()
+  }
+
+  const handleDiscardChanges = () => {
+    setPendingChanges(new Map())
+    loadData()
   }
 
   const handleDeleteRows = async (rows: Record<string, unknown>[]) => {
@@ -631,9 +787,35 @@ function TableTab({ tab }: Props) {
             </select>
           </div>
         )}
-        {/* Refreshing badge */}
-        {view === 'data' && refreshing && (
-          <RefreshCw size={12} className="animate-spin text-slate-400" />
+        {/* Pending changes: Apply / Discard */}
+        {view === 'data' && pendingChanges.size > 0 && (
+          <>
+            <button
+              onClick={handleApplyChanges}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-700 hover:bg-amber-600 text-white rounded transition-colors"
+            >
+              Apply ({pendingChanges.size})
+            </button>
+            <button
+              onClick={handleDiscardChanges}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              Discard
+            </button>
+          </>
+        )}
+        {/* Refreshing / loading badge + cancel */}
+        {view === 'data' && (initialLoading || refreshing) && (
+          <>
+            <RefreshCw size={12} className="animate-spin text-slate-400" />
+            <button
+              onClick={() => loadAbortRef.current?.abort()}
+              className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              title="Cancel loading"
+            >
+              <X size={10} /> Cancel
+            </button>
+          </>
         )}
         {/* View toggle */}
         <div className="flex rounded overflow-hidden border border-surface-700">
@@ -676,7 +858,7 @@ function TableTab({ tab }: Props) {
           </button>
         )}
         {view === 'data' && (
-          <Button variant="ghost" size="sm" onClick={() => loadData()} title="Refresh" disabled={initialLoading || refreshing}>
+          <Button variant="ghost" size="sm" onClick={() => { setPendingChanges(new Map()); loadData() }} title="Refresh" disabled={initialLoading || refreshing}>
             <RefreshCw size={12} className={initialLoading || refreshing ? 'animate-spin' : ''} />
           </Button>
         )}
@@ -757,6 +939,7 @@ function TableTab({ tab }: Props) {
               onSelectionChange={setSelectedRows}
               columns={columns}
               hiddenColumns={hiddenColumns}
+              pendingChanges={pendingChanges}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">

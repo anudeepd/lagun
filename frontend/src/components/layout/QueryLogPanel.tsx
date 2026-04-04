@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Terminal, ChevronUp, ChevronDown, Copy, CornerDownLeft } from 'lucide-react'
+import { Terminal, ChevronUp, ChevronDown, Copy, CornerDownLeft, Ban } from 'lucide-react'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import type { QueryLogEntry } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
@@ -14,6 +14,7 @@ function formatTime(iso: string): string {
 }
 
 function formatRows(entry: QueryLogEntry): string {
+  if (entry.cancelled) return '—'
   if (entry.affectedRows != null) return `${entry.affectedRows} affected`
   if (entry.rowCount != null) return `${entry.rowCount} rows`
   return '—'
@@ -76,7 +77,7 @@ export default function QueryLogPanel() {
                 {entries.map(entry => (
                   <tr
                     key={entry.id}
-                    className={`border-t border-surface-800 ${entry.error ? 'bg-red-950/30' : ''}`}
+                    className={`border-t border-surface-800 ${entry.error ? 'bg-red-950/30' : entry.cancelled ? 'bg-amber-950/20' : ''}`}
                   >
                     <td className="px-2 py-0.5 text-slate-500 tabular-nums whitespace-nowrap">{formatTime(entry.timestamp)}</td>
                     <td className="px-2 py-0.5 font-mono text-slate-300 w-full break-all">
@@ -87,6 +88,8 @@ export default function QueryLogPanel() {
                     <td className="px-2 py-0.5 whitespace-nowrap">
                       {entry.error ? (
                         <span className="text-red-400" title={entry.error}>✗</span>
+                      ) : entry.cancelled ? (
+                        <span title="Cancelled"><Ban size={10} className="text-amber-500" /></span>
                       ) : (
                         <span className="text-green-400">✓</span>
                       )}

@@ -112,6 +112,22 @@ async def list_indexes(session_id: str, db: str, table: str) -> list[IndexInfo]:
     return [IndexInfo(**v) for v in index_map.values()]
 
 
+@router.get("/sessions/{session_id}/databases/{db}/functions")
+async def list_functions(session_id: str, db: str) -> list[str]:
+    pool = await _get_pool_or_404(session_id)
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT ROUTINE_NAME
+                   FROM information_schema.ROUTINES
+                   WHERE ROUTINE_SCHEMA = %s AND ROUTINE_TYPE = 'FUNCTION'
+                   ORDER BY ROUTINE_NAME""",
+                (db,),
+            )
+            rows = await cur.fetchall()
+    return [r[0] for r in rows]
+
+
 @router.get("/sessions/{session_id}/databases/{db}/tables/{table}/create_sql")
 async def get_create_sql(session_id: str, db: str, table: str) -> dict:
     pool = await _get_pool_or_404(session_id)
