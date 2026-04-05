@@ -5,7 +5,7 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import { EditorView, keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
 import type { CompletionContext, CompletionResult, Completion } from '@codemirror/autocomplete'
-import { Play, Loader2, X } from 'lucide-react'
+import { Play, Loader2, X, WrapText } from 'lucide-react'
 import clsx from 'clsx'
 import Button from '../ui/Button'
 
@@ -137,9 +137,11 @@ interface Props {
   onLimitChange?: (limit: number) => void
   onCancel?: () => void
   editorRef?: Ref<ReactCodeMirrorRef>
+  wordWrap?: boolean
+  onWordWrapChange?: (wrap: boolean) => void
 }
 
-export default function QueryEditor({ value, onChange, onRun, running, database, databases, onDatabaseChange, schema, functions, limit, onLimitChange, onCancel, editorRef }: Props) {
+export default function QueryEditor({ value, onChange, onRun, running, database, databases, onDatabaseChange, schema, functions, limit, onLimitChange, onCancel, editorRef, wordWrap = true, onWordWrapChange }: Props) {
   // Keep schema in a ref so the extension never needs to be recreated when columns load
   const schemaRef = useRef(schema ?? {})
   schemaRef.current = schema ?? {}
@@ -240,6 +242,13 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
     run: () => { if (!runningRef.current) onRunRef.current(); return true },
   }])), [])
 
+  const extensions = useMemo(
+    () => wordWrap
+      ? [sqlExtension, EditorView.lineWrapping, runKeymap]
+      : [sqlExtension, runKeymap],
+    [sqlExtension, runKeymap, wordWrap]
+  )
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-1.5 bg-surface-900 border-b border-surface-800">
@@ -279,6 +288,20 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               </select>
             </div>
           )}
+          {onWordWrapChange && (
+            <button
+              onClick={() => onWordWrapChange(!wordWrap)}
+              title={wordWrap ? 'Disable word wrap' : 'Enable word wrap'}
+              className={clsx(
+                'flex items-center p-1 rounded transition-colors',
+                wordWrap
+                  ? 'text-brand-400 bg-surface-700'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-surface-700'
+              )}
+            >
+              <WrapText size={13} />
+            </button>
+          )}
           <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-surface-800 border border-surface-700 rounded">
             Ctrl+↵
           </kbd>
@@ -305,10 +328,10 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
           ref={editorRef}
           value={value}
           onChange={onChange}
-          extensions={[sqlExtension, EditorView.lineWrapping, runKeymap]}
+          extensions={extensions}
           theme={oneDark}
+          height="100%"
           className="h-full text-sm"
-          style={{ height: '100%' }}
           basicSetup={{
             lineNumbers: true,
             highlightActiveLine: true,

@@ -114,6 +114,10 @@ function QueryTab({ tab }: Props) {
     const saved = localStorage.getItem('queryEditorHeight')
     return saved ? Number(saved) : 192
   })
+  const [wordWrap, setWordWrap] = useState(() => {
+    const saved = localStorage.getItem('queryWordWrap')
+    return saved !== null ? saved === 'true' : true
+  })
   const editorDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<ResultGridHandle>(null)
@@ -218,6 +222,11 @@ function QueryTab({ tab }: Props) {
     return () => clearTimeout(timer)
   }, [sql, tab.sessionId, tab.database])
 
+  const handleWordWrapChange = useCallback((wrap: boolean) => {
+    setWordWrap(wrap)
+    localStorage.setItem('queryWordWrap', String(wrap))
+  }, [])
+
   const handleEditorDividerMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     editorDragRef.current = { startY: e.clientY, startHeight: editorHeight }
@@ -236,6 +245,7 @@ function QueryTab({ tab }: Props) {
       editorDragRef.current = null
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
+      editorRef.current?.view?.requestMeasure()
     }
     document.addEventListener('mousemove', onMove)
     document.addEventListener('mouseup', onUp)
@@ -317,6 +327,8 @@ function QueryTab({ tab }: Props) {
           limit={limit}
           onLimitChange={setLimit}
           editorRef={editorRef}
+          wordWrap={wordWrap}
+          onWordWrapChange={handleWordWrapChange}
         />
       </div>
       <div
