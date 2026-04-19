@@ -1,4 +1,4 @@
-import { useMemo, useRef, type Ref } from 'react'
+import { useMemo, useRef, useCallback, type Ref } from 'react'
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { sql, MySQL, schemaCompletionSource } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -8,74 +8,7 @@ import type { CompletionContext, CompletionResult, Completion } from '@codemirro
 import { Play, Loader2, X, WrapText } from 'lucide-react'
 import clsx from 'clsx'
 import Button from '../ui/Button'
-
-// Common MySQL/MariaDB built-in functions
-const MYSQL_BUILTINS = [
-  'ABS', 'ACOS', 'ADDDATE', 'ADDTIME', 'AES_DECRYPT', 'AES_ENCRYPT',
-  'ASCII', 'ASIN', 'ATAN', 'ATAN2', 'AVG',
-  'BENCHMARK', 'BIN', 'BIT_AND', 'BIT_COUNT', 'BIT_LENGTH', 'BIT_OR', 'BIT_XOR',
-  'CAST', 'CEIL', 'CEILING', 'CHAR', 'CHARACTER_LENGTH', 'CHARSET', 'COALESCE',
-  'COERCIBILITY', 'COLLATION', 'COMPRESS', 'CONCAT', 'CONCAT_WS', 'CONNECTION_ID',
-  'CONV', 'CONVERT', 'CONVERT_TZ', 'COS', 'COT', 'COUNT', 'CRC32', 'CURDATE',
-  'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'CURRENT_USER', 'CURTIME',
-  'DATABASE', 'DATE', 'DATE_ADD', 'DATE_FORMAT', 'DATE_SUB', 'DATEDIFF', 'DAY',
-  'DAYNAME', 'DAYOFMONTH', 'DAYOFWEEK', 'DAYOFYEAR', 'DEGREES',
-  'ELT', 'EXP', 'EXPORT_SET', 'EXTRACT',
-  'FIELD', 'FIND_IN_SET', 'FLOOR', 'FORMAT', 'FOUND_ROWS', 'FROM_BASE64',
-  'FROM_DAYS', 'FROM_UNIXTIME',
-  'GET_FORMAT', 'GET_LOCK', 'GREATEST', 'GROUP_CONCAT',
-  'HEX', 'HOUR',
-  'IF', 'IFNULL', 'INET_ATON', 'INET_NTOA', 'INET6_ATON', 'INET6_NTOA',
-  'INSERT', 'INSTR', 'IS_FREE_LOCK', 'IS_IPV4', 'IS_IPV4_COMPAT', 'IS_IPV4_MAPPED',
-  'IS_IPV6', 'IS_USED_LOCK', 'ISNULL',
-  'JSON_ARRAY', 'JSON_ARRAYAGG', 'JSON_CONTAINS', 'JSON_CONTAINS_PATH',
-  'JSON_DEPTH', 'JSON_EXTRACT', 'JSON_INSERT', 'JSON_KEYS', 'JSON_LENGTH',
-  'JSON_MERGE_PATCH', 'JSON_MERGE_PRESERVE', 'JSON_OBJECT', 'JSON_OBJECTAGG',
-  'JSON_OVERLAPS', 'JSON_PRETTY', 'JSON_QUOTE', 'JSON_REMOVE', 'JSON_REPLACE',
-  'JSON_SEARCH', 'JSON_SET', 'JSON_TYPE', 'JSON_UNQUOTE', 'JSON_VALID', 'JSON_VALUE',
-  'LAST_DAY', 'LAST_INSERT_ID', 'LCASE', 'LEAST', 'LEFT', 'LENGTH', 'LN',
-  'LOAD_FILE', 'LOCATE', 'LOG', 'LOG10', 'LOG2', 'LOWER', 'LPAD', 'LTRIM',
-  'MAKE_SET', 'MAKEDATE', 'MAKETIME', 'MAX', 'MD5',
-  'MICROSECOND', 'MID', 'MIN', 'MINUTE', 'MOD', 'MONTH', 'MONTHNAME',
-  'NOW', 'NULLIF',
-  'OCT', 'OCTET_LENGTH', 'ORD',
-  'PERIOD_ADD', 'PERIOD_DIFF', 'PI', 'POW', 'POWER',
-  'QUARTER', 'QUOTE',
-  'RADIANS', 'RAND', 'REGEXP_INSTR', 'REGEXP_LIKE', 'REGEXP_REPLACE',
-  'REGEXP_SUBSTR', 'RELEASE_LOCK', 'REPEAT', 'REPLACE',
-  'REVERSE', 'RIGHT', 'ROUND', 'ROW_COUNT', 'RPAD', 'RTRIM',
-  'SCHEMA', 'SEC_TO_TIME', 'SECOND', 'SESSION_USER', 'SHA', 'SHA1', 'SHA2',
-  'SIGN', 'SIN', 'SLEEP', 'SOUNDEX', 'SPACE', 'SQRT', 'STD', 'STDDEV',
-  'STDDEV_POP', 'STDDEV_SAMP', 'STR_TO_DATE', 'STRCMP', 'SUBDATE', 'SUBSTR',
-  'SUBSTRING', 'SUBSTRING_INDEX', 'SUBTIME', 'SUM', 'SYSDATE', 'SYSTEM_USER',
-  'TAN', 'TIME', 'TIME_FORMAT', 'TIME_TO_SEC', 'TIMEDIFF', 'TIMESTAMP',
-  'TIMESTAMPADD', 'TIMESTAMPDIFF', 'TO_BASE64', 'TO_DAYS', 'TO_SECONDS', 'TRIM',
-  'TRUNCATE',
-  'UCASE', 'UNCOMPRESS', 'UNCOMPRESSED_LENGTH', 'UNHEX', 'UNIX_TIMESTAMP',
-  'UPPER', 'USER', 'UTC_DATE', 'UTC_TIME', 'UTC_TIMESTAMP', 'UUID', 'UUID_SHORT',
-  'VALUES', 'VAR_POP', 'VAR_SAMP', 'VARIANCE', 'VERSION',
-  'WEEK', 'WEEKDAY', 'WEEKOFYEAR', 'WEIGHT_STRING',
-  'YEAR', 'YEARWEEK',
-]
-
-const MYSQL_BUILTIN_OPTIONS = MYSQL_BUILTINS.map(name => ({
-  label: name,
-  type: 'function' as const,
-  apply: `${name}(`,
-  boost: 50,
-}))
-
-const LIMIT_OPTIONS = [100, 500, 1000, 5000, 10000]
-
-// SQL keywords to exclude from implicit alias detection and subquery column parsing
-const SQL_KEYWORDS = new Set([
-  'WHERE', 'ON', 'SET', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS',
-  'JOIN', 'HAVING', 'GROUP', 'ORDER', 'LIMIT', 'UNION', 'AND', 'OR',
-  'SELECT', 'AS', 'INTO', 'FROM', 'UPDATE', 'DELETE', 'INSERT',
-  'VALUES', 'USING', 'BY', 'WITH', 'DISTINCT', 'ALL', 'FULL',
-  'NATURAL', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NOT', 'IN',
-  'IS', 'NULL', 'LIKE', 'BETWEEN', 'EXISTS', 'EXCEPT', 'INTERSECT',
-])
+import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
 
 // Extract the current SQL statement from the document at the given position
 function extractStatementAt(doc: string, pos: number): string {
@@ -107,7 +40,7 @@ function extractScopeInfo(sql: string): { realTables: string[], subqueryAliases:
       if (asMatch) return asMatch[1]
       const lastIdent = item.match(/(\w+)\s*$/)
       return lastIdent ? lastIdent[1] : null
-    }).filter((c): c is string => c !== null && !SQL_KEYWORDS.has(c.toUpperCase()))
+    }).filter((c): c is string => c !== null && !SQL_KW.has(c.toUpperCase()))
     if (cols.length) subqueryAliases.set(alias, cols)
   }
 
@@ -142,6 +75,7 @@ interface Props {
 }
 
 export default function QueryEditor({ value, onChange, onRun, running, database, databases, onDatabaseChange, schema, functions, limit, onLimitChange, onCancel, editorRef, wordWrap = true, onWordWrapChange }: Props) {
+  const handleWordWrapChange = useCallback(() => onWordWrapChange?.(!wordWrap), [onWordWrapChange, wordWrap])
   // Keep schema in a ref so the extension never needs to be recreated when columns load
   const schemaRef = useRef(schema ?? {})
   schemaRef.current = schema ?? {}
@@ -287,20 +221,18 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
                 ))}
               </select>
             </div>
-          )}
-          {onWordWrapChange && (
-            <button
-              onClick={() => onWordWrapChange(!wordWrap)}
+)}
+          {onWordWrapChange && ( // Only shown when parent provides the callback (TabContent always does)
+            <Button
+              variant="icon" 
+              size="sm"
+              onClick={handleWordWrapChange}
+              aria-pressed={wordWrap}
+              aria-label="Toggle word wrap"
               title={wordWrap ? 'Disable word wrap' : 'Enable word wrap'}
-              className={clsx(
-                'flex items-center p-1 rounded transition-colors',
-                wordWrap
-                  ? 'text-brand-400 bg-surface-700'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-surface-700'
-              )}
             >
-              <WrapText size={13} />
-            </button>
+              <WrapText size={12} />
+            </Button>
           )}
           <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-surface-800 border border-surface-700 rounded">
             Ctrl+↵

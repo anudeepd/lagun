@@ -149,6 +149,17 @@
 
     button[type="submit"].loading .spinner { display: block; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .powered-by {
+      margin-top: 1.5rem;
+      text-align: center;
+      font-size: 0.72rem;
+      color: #475569;
+    }
+    .powered-by a {
+      color: #64748b;
+      text-decoration: none;
+    }
+    .powered-by a:hover { color: #94a3b8; }
   </style>
 </head>
 <body>
@@ -201,6 +212,8 @@
         </button>
       </div>
     </form>
+
+    <div class="powered-by">Powered by <a href="https://github.com/anudeepd/ldapgate" tabindex="-1">LDAPGate</a></div>
   </div>
 
   <script>

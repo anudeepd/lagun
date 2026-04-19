@@ -47,7 +47,7 @@ export default function AppLayout() {
       </div>
 
       {/* Main area */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="flex flex-col flex-1 min-w-0">
         <TabBar />
         <div className="flex-1 overflow-hidden">
           {tabs.length === 0 ? (

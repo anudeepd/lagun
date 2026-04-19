@@ -35,15 +35,26 @@ export const useQueryLogStore = create<QueryLogState>()(
         entries: [
           { ...entry, id: uuid(), timestamp: new Date().toISOString() },
           ...s.entries,
-        ].slice(0, 200),
+        ].slice(0, 100),
       })),
 
       clearLog: () => set({ entries: [] }),
     }),
     {
       name: 'lagun-query-log',
-      version: 1,
-      partialize: (s) => ({ entries: s.entries }),
+      version: 3,
+      migrate: (persistedState: unknown, version: number) => {
+        if (version < 3) {
+          const s = persistedState as { entries?: { sql: string }[] }
+          if (s.entries) {
+            s.entries = s.entries.slice(0, 50)
+          }
+        }
+        return persistedState as Partial<QueryLogState>
+      },
+      partialize: (s) => ({ 
+        entries: s.entries.slice(0, 50),
+      }),
     }
   )
 )

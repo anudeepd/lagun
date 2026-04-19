@@ -25,6 +25,8 @@ interface TabState {
   setTabDatabase: (tabId: string, database: string) => void
   injectSqlToTab: (tabId: string, sql: string, database?: string) => void
   consumePendingSql: (tabId: string) => void
+  moveTab: (fromId: string, toId: string) => void
+  renameTab: (id: string, newLabel: string) => void
 }
 
 export const useTabStore = create<TabState>()(
@@ -114,10 +116,28 @@ export const useTabStore = create<TabState>()(
         delete next[tabId]
         return { pendingSqls: next }
       }),
+
+      moveTab: (fromId, toId) => set(s => {
+        const fromIdx = s.tabs.findIndex(t => t.id === fromId)
+        const toIdx = s.tabs.findIndex(t => t.id === toId)
+        if (fromIdx < 0 || toIdx < 0) return {}
+        const tabs = [...s.tabs]
+        const [moving] = tabs.splice(fromIdx, 1)
+        tabs.splice(toIdx, 0, moving)
+        return { tabs }
+      }),
+
+      renameTab: (id, newLabel) => set(s => ({
+        tabs: s.tabs.map(t =>
+          t.id === id && t.type === 'query'
+            ? { ...t, label: newLabel }
+            : t
+        ),
+      })),
     }),
     {
       name: 'lagun-tabs',
-      version: 2,
+      version: 4,
       partialize: (s) => ({ tabs: s.tabs, activeTabId: s.activeTabId }),
     }
   )

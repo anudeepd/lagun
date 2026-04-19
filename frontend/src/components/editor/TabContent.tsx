@@ -17,11 +17,27 @@ import { oneDark } from '@codemirror/theme-one-dark'
 import { keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
+import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const ExportDialog = lazy(() => import('../table/ExportDialog'))
 const ImportDialog = lazy(() => import('../table/ImportDialog'))
-const LIMIT_OPTIONS = [100, 500, 1000, 5000, 10000]
+
+const KEY_WORD_WRAP = 'lagun-query-word-wrap'
+const KEY_EDITOR_HEIGHT = 'lagun-query-editor-height'
+
+try {
+  const oldWrap = localStorage.getItem('queryWordWrap')
+  if (oldWrap !== null && localStorage.getItem(KEY_WORD_WRAP) === null) {
+    localStorage.setItem(KEY_WORD_WRAP, oldWrap)
+    localStorage.removeItem('queryWordWrap')
+  }
+  const oldHeight = localStorage.getItem('queryEditorHeight')
+  if (oldHeight !== null && localStorage.getItem(KEY_EDITOR_HEIGHT) === null) {
+    localStorage.setItem(KEY_EDITOR_HEIGHT, oldHeight)
+    localStorage.removeItem('queryEditorHeight')
+  }
+} catch { /* localStorage unavailable (private browsing, etc.) */ }
 
 interface Props {
   tab: Tab
@@ -72,15 +88,6 @@ function splitStatements(sql: string): string[] {
 const MIN_EDITOR_HEIGHT = 100
 const MAX_EDITOR_HEIGHT_FRACTION = 0.7
 
-const SQL_KEYWORDS = new Set([
-  'WHERE', 'ON', 'SET', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS',
-  'JOIN', 'HAVING', 'GROUP', 'ORDER', 'LIMIT', 'UNION', 'AND', 'OR',
-  'SELECT', 'AS', 'INTO', 'FROM', 'UPDATE', 'DELETE', 'INSERT',
-  'VALUES', 'USING', 'BY', 'WITH', 'DISTINCT', 'ALL', 'FULL',
-  'NATURAL', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'NOT', 'IN',
-  'IS', 'NULL', 'LIKE', 'BETWEEN', 'EXISTS', 'EXCEPT', 'INTERSECT',
-])
-
 function QueryTab({ tab }: Props) {
   const storeSql = useTabStore(s => s.tabs.find(t => t.id === tab.id)?.sql ?? '')
   const setSqlStore = useTabStore(s => s.setSql)
@@ -111,11 +118,11 @@ function QueryTab({ tab }: Props) {
   const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
   const abortControllerRef = useRef<AbortController | null>(null)
   const [editorHeight, setEditorHeight] = useState(() => {
-    const saved = localStorage.getItem('queryEditorHeight')
+    const saved = localStorage.getItem(KEY_EDITOR_HEIGHT)
     return saved ? Number(saved) : 192
   })
   const [wordWrap, setWordWrap] = useState(() => {
-    const saved = localStorage.getItem('queryWordWrap')
+    const saved = localStorage.getItem(KEY_WORD_WRAP)
     return saved !== null ? saved === 'true' : true
   })
   const editorDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
@@ -162,7 +169,7 @@ function QueryTab({ tab }: Props) {
     )]
     for (const m of fromJoinMatches) {
       const alias = m[2] || m[3]
-      if (alias && !SQL_KEYWORDS.has(alias.toUpperCase())) map[alias] = m[1]
+      if (alias && !SQL_KW.has(alias.toUpperCase())) map[alias] = m[1]
     }
     // Comma-separated tables: , table [AS alias] or , table alias
     // Captures: m[1]=tableName, m[2]=explicit AS alias, m[3]=implicit alias
@@ -171,7 +178,7 @@ function QueryTab({ tab }: Props) {
     )]
     for (const m of commaMatches) {
       const alias = m[2] || m[3]
-      if (alias && !SQL_KEYWORDS.has(alias.toUpperCase())) map[alias] = m[1]
+      if (alias && !SQL_KW.has(alias.toUpperCase())) map[alias] = m[1]
     }
     return map
   }, [sql])
@@ -224,7 +231,7 @@ function QueryTab({ tab }: Props) {
 
   const handleWordWrapChange = useCallback((wrap: boolean) => {
     setWordWrap(wrap)
-    localStorage.setItem('queryWordWrap', String(wrap))
+    localStorage.setItem(KEY_WORD_WRAP, String(wrap))
   }, [])
 
   const handleEditorDividerMouseDown = (e: React.MouseEvent) => {
@@ -239,12 +246,13 @@ function QueryTab({ tab }: Props) {
         Math.min(maxH, editorDragRef.current.startHeight + ev.clientY - editorDragRef.current.startY)
       )
       setEditorHeight(next)
-      localStorage.setItem('queryEditorHeight', String(next))
+      localStorage.setItem(KEY_EDITOR_HEIGHT, String(next))
     }
     const onUp = () => {
       editorDragRef.current = null
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
+      // Ask CodeMirror to remeasure layout after drag resize
       editorRef.current?.view?.requestMeasure()
     }
     document.addEventListener('mousemove', onMove)
@@ -274,26 +282,22 @@ function QueryTab({ tab }: Props) {
           r = await api.executeQuery(tab.sessionId, stmt, tab.database, limit, controller.signal)
         } catch (e) {
           if ((e as Error).name === 'AbortError') {
-            addEntry({
-              sql: stmt,
-              sessionId: tab.sessionId,
-              database: tab.database,
-              execTimeMs: Date.now() - start,
-              cancelled: true,
-            })
+            try { addEntry({ sql: stmt, sessionId: tab.sessionId, database: tab.database, execTimeMs: Date.now() - start, cancelled: true }) } catch { /* ignore localStorage errors */ }
             break
           }
           throw e
         }
         newResults.push(r)
-        addEntry({
-          sql: stmt,
-          sessionId: tab.sessionId,
-          database: tab.database,
-          rowCount: r.row_count ?? undefined,
-          execTimeMs: r.exec_time_ms ?? (Date.now() - start),
-          error: r.error ?? undefined,
-        })
+        try {
+          addEntry({
+            sql: stmt,
+            sessionId: tab.sessionId,
+            database: tab.database,
+            rowCount: r.row_count ?? undefined,
+            execTimeMs: r.exec_time_ms ?? (Date.now() - start),
+            error: r.error ?? undefined,
+          })
+        } catch { /* ignore localStorage errors */ }
         if (r.error) break
       }
     } finally {
@@ -414,6 +418,7 @@ function TableTab({ tab }: Props) {
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
   const [selectedRows, setSelectedRows] = useState<Record<string, unknown>[]>([])
   const [showDataExport, setShowDataExport] = useState(false)
+  const [functions, setFunctions] = useState<string[]>([])
   const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
   const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
@@ -479,14 +484,7 @@ function TableTab({ tab }: Props) {
 
       const res = await api.executeQuery(tab.sessionId, selectSql, undefined, effectiveLimit, controller.signal)
       setResult(res)
-      addEntry({
-        sql: selectSql,
-        sessionId: tab.sessionId,
-        database: tab.database,
-        rowCount: res.row_count ?? undefined,
-        execTimeMs: res.exec_time_ms ?? (Date.now() - start),
-        error: res.error ?? undefined,
-      })
+      try { addEntry({ sql: selectSql, sessionId: tab.sessionId, database: tab.database, rowCount: res.row_count ?? undefined, execTimeMs: res.exec_time_ms ?? (Date.now() - start), error: res.error ?? undefined }) } catch { /* ignore */ }
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
         setInitialLoading(false)
@@ -543,6 +541,14 @@ function TableTab({ tab }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [globalSearch])
 
+  // Load user-defined functions for autocomplete in the filter bar
+  useEffect(() => {
+    if (!tab.database) return
+    api.getFunctions(tab.sessionId, tab.database)
+      .then(setFunctions)
+      .catch(() => setFunctions([]))
+  }, [tab.sessionId, tab.database])
+
   const handleCellEdit = useCallback((params: { column: string; newValue: unknown; oldValue: unknown; data: Record<string, unknown> }) => {
     if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     const rowId = params.data.__ag_rowId as string
@@ -582,14 +588,7 @@ function TableTab({ tab }: Props) {
         primary_key,
         updates: changes,
       })
-      addEntry({
-        sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`,
-        sessionId: tab.sessionId,
-        database: tab.database,
-        affectedRows: r.affected_rows ?? undefined,
-        execTimeMs: Date.now() - start,
-        error: r.error ?? undefined,
-      })
+try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, sessionId: tab.sessionId, database: tab.database, affectedRows: r.affected_rows ?? undefined, execTimeMs: Date.now() - start, error: r.error ?? undefined }) } catch { /* ignore */ }
       if (!r.ok) {
         setStatusMsg(`✗ ${r.error}`)
         setTimeout(() => setStatusMsg(null), 4000)
@@ -615,13 +614,7 @@ function TableTab({ tab }: Props) {
     })
     if (r.ok) {
       setStatusMsg(`✓ Deleted ${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''}`)
-      addEntry({
-        sql: `DELETE FROM \`${tab.database}\`.\`${tab.table}\` (${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''})`,
-        sessionId: tab.sessionId,
-        database: tab.database,
-        affectedRows: r.affected_rows,
-        execTimeMs: 0,
-      })
+      try { addEntry({ sql: `DELETE FROM \`${tab.database}\`.\`${tab.table}\` (${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''})`, sessionId: tab.sessionId, database: tab.database, affectedRows: r.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
       loadData()
     } else {
       setStatusMsg(`✗ ${r.error}`)
@@ -670,6 +663,27 @@ function TableTab({ tab }: Props) {
       },
     })
   }, [columns])
+
+  // Function completions for the filter bar (both built-in and user-defined)
+  const filterFunctionCompletionExtension = useMemo(() => {
+    const udfOptions = functions.map(name => ({
+      label: name,
+      type: 'function' as const,
+      apply: `${name}(`,
+      boost: 80,
+    }))
+    return MySQL.language.data.of({
+      autocomplete: (context: CompletionContext): CompletionResult | null => {
+        const word = context.matchBefore(/\w+/)
+        if (!word && !context.explicit) return null
+        return {
+          from: word ? word.from : context.pos,
+          options: [...udfOptions, ...MYSQL_BUILTIN_OPTIONS],
+          validFor: /^\w*$/,
+        }
+      },
+    })
+  }, [functions])
 
   const filterKeymapExtension = useMemo(() =>
     Prec.highest(keymap.of([
@@ -890,7 +904,7 @@ function TableTab({ tab }: Props) {
                   loadData(undefined, globalSearch, '')
                 }
               }}
-              extensions={[filterSqlExtension, filterColumnCompletionExtension, filterKeymapExtension]}
+              extensions={[filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterKeymapExtension]}
               theme={oneDark}
               height="28px"
               placeholder="e.g. id = 5 AND name LIKE 'John%'"
