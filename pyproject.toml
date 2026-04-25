@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lagun"
-version = "0.1.12"
+version = "0.1.13"
 description = "A web-based MySQL/MariaDB GUI editor"
 readme = "README.md"
 requires-python = ">=3.10"

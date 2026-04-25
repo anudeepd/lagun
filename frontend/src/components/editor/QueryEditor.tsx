@@ -9,6 +9,7 @@ import { Play, Loader2, X, WrapText } from 'lucide-react'
 import clsx from 'clsx'
 import Button from '../ui/Button'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
+import { isMac, modKey } from '../../utils/platform'
 
 // Extract the current SQL statement from the document at the given position
 function extractStatementAt(doc: string, pos: number): string {
@@ -235,7 +236,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
             </Button>
           )}
           <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-surface-800 border border-surface-700 rounded">
-            Ctrl+↵
+            {isMac ? '⌘↵' : 'Ctrl+↵'}
           </kbd>
           {running && onCancel && (
             <Button variant="ghost" size="sm" onClick={onCancel} title="Cancel query">
@@ -248,7 +249,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
             size="sm"
             onClick={onRun}
             disabled={running || !value.trim()}
-            title="Run (Ctrl+Enter)"
+            title={`Run (${modKey}Enter)`}
           >
             {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
             Run

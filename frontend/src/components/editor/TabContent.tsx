@@ -18,6 +18,7 @@ import { keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
+import { isMac, modKey } from '../../utils/platform'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const ExportDialog = lazy(() => import('../table/ExportDialog'))
@@ -366,7 +367,7 @@ function QueryTab({ tab }: Props) {
             <ResultGrid key={resultIdx} ref={gridRef} result={results[resultIdx]} />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
-              Press Ctrl+Enter to run a query
+              Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
             </div>
           )}
         </div>
@@ -918,7 +919,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-surface-800 border border-surface-700 rounded">
-              Ctrl+↵
+              {isMac ? '⌘↵' : 'Ctrl+↵'}
             </kbd>
             <button
               onClick={handleApplyFilter}

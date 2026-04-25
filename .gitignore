@@ -44,3 +44,15 @@ think
 BRANDING.md
 /favicon.svg
 .claude/
+.ocr/
+.codex/
+.opencode/
+.agents/
+skills-lock.json
+CLAUDE.md
+AGENTS.md
+PLAN-*.md
+TESTING.md
+TODO.md
+ldapgate.yaml
+/package-lock.json
