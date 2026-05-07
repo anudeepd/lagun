@@ -28,7 +28,7 @@ function sqlLiteral(v: unknown): string {
   return `'${String(v).split("'").join("''")}'`
 }
 
-function buildFrontendContent(
+export function buildFrontendContent(
   format: 'insert' | 'delete' | 'delete+insert' | 'csv',
   database: string,
   table: string,
@@ -38,14 +38,32 @@ function buildFrontendContent(
 ): string {
   if (format === 'csv') {
     const { delimiter: d, quoteChar: q, escapeChar: e, lineTerminator: nl } = csvOpts
-    const escape = (v: unknown) => {
+    // CSV formula injection (=, +, -, @ prefix) is intentionally not sanitized —
+    // this is a DB admin tool and users are exporting their own data.
+    const escape = (v: unknown, forceQuote = false) => {
       const s = v === null || v === undefined ? '' : String(v)
-      if (!q) return s
-      return (s.includes(d) || s.includes(q) || s.includes('\n'))
-        ? q + s.split(q).join(e + q) + q
-        : s
+      if (!q) {
+        // QUOTE_NONE: mirrors Python csv.QUOTE_NONE — no quoting, but escape
+        // the delimiter and newlines with escapechar so fields aren't split.
+        if (!e) return s
+        const selfEscaped = s.split(e).join(e + e)
+        return selfEscaped
+          .split(d).join(e + d)
+          .replace(/\r\n/g, e + '\r\n')
+          .replace(/\r(?!\n)/g, e + '\r')
+          .replace(/(?<!\r)\n/g, e + '\n')
+      }
+      // When using a separate escapechar (e.g. backslash), values containing it
+      // must be quoted and the escapechar self-escaped, or a parser misreads the
+      // following character as an escape sequence (e.g. C:\path → \p interpreted).
+      const hasEscapechar = !!(e && e !== q && s.includes(e))
+      if (!forceQuote && !hasEscapechar && !(s.includes(d) || s.includes(q) || s.includes('\n') || s.includes('\r'))) return s
+      // Pre-escape the escapechar first, then escape the quotechar. Order matters:
+      // doing it in reverse would double-escape the backslashes we just inserted.
+      const inner = hasEscapechar ? s.split(e).join(e + e) : s
+      return q + inner.split(q).join(e + q) + q
     }
-    const header = data.columns.map(c => q ? q + c + q : c).join(d)
+    const header = data.columns.map(c => escape(c, true)).join(d)
     const body = [header, ...data.rows.map(r => r.map(escape).join(d))].join(nl)
     return csvOpts.encoding === 'utf-8-sig' ? '\uFEFF' + body : body
   }
