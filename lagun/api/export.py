@@ -33,6 +33,7 @@ class ExportRequest(BaseModel):
     sql: Optional[str] = None        # custom SELECT; overrides table
     format: str = "insert"           # "insert" | "delete" | "delete+insert" | "csv"
     batch_size: int = 500
+    insert_mode: str = "single"    # "batch" | "single"
     pk_values: Optional[list] = None  # list of dicts: [{pk_col: val, ...}, ...]
     # CSV-specific options (ignored for other formats)
     csv_delimiter: str = ","
@@ -89,22 +90,31 @@ async def export_data(session_id: str, req: ExportRequest):
                 tbl_q = quote_ident(tbl)
 
                 yield f"-- Lagun export: {req.database}.{tbl}\n"
-                yield f"-- Format: INSERT\n\n"
+                yield f"-- Format: INSERT ({req.insert_mode})\n\n"
 
-                batch = []
-                while True:
-                    rows = await cur.fetchmany(req.batch_size)
-                    if not rows:
-                        break
-                    for row in rows:
-                        vals = ", ".join(escape_value(v) for v in row)
-                        batch.append(f"({vals})")
-                    yield (
-                        f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n"
-                        + ",\n".join(batch)
-                        + ";\n"
-                    )
+                if req.insert_mode == "single":
+                    while True:
+                        rows = await cur.fetchmany(req.batch_size)
+                        if not rows:
+                            break
+                        for row in rows:
+                            vals = ", ".join(escape_value(v) for v in row)
+                            yield f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                else:
                     batch = []
+                    while True:
+                        rows = await cur.fetchmany(req.batch_size)
+                        if not rows:
+                            break
+                        for row in rows:
+                            vals = ", ".join(escape_value(v) for v in row)
+                            batch.append(f"({vals})")
+                        yield (
+                            f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n"
+                            + ",\n".join(batch)
+                            + ";\n"
+                        )
+                        batch = []
 
     async def _generate_delete():
         async with pool.acquire() as conn:
@@ -161,21 +171,43 @@ async def export_data(session_id: str, req: ExportRequest):
                 # Fall back to all columns if no primary key (HeidiSQL approach)
                 where_cols = pk_cols if pk_cols else cols
 
-                yield f"-- Lagun export: {req.database}.{req.table}\n-- Format: DELETE+INSERT\n\n"
+                yield f"-- Lagun export: {req.database}.{req.table}\n-- Format: DELETE+INSERT ({req.insert_mode})\n\n"
 
-                while True:
-                    rows = await cur.fetchmany(req.batch_size)
-                    if not rows:
-                        break
-                    for row in rows:
-                        row_dict = dict(zip(cols, row))
-                        where = " AND ".join(
-                            f"{quote_ident(c)} = {escape_value(row_dict[c])}"
-                            for c in where_cols
+                if req.insert_mode == "single":
+                    while True:
+                        rows = await cur.fetchmany(req.batch_size)
+                        if not rows:
+                            break
+                        for row in rows:
+                            row_dict = dict(zip(cols, row))
+                            where = " AND ".join(
+                                f"{quote_ident(c)} = {escape_value(row_dict[c])}"
+                                for c in where_cols
+                            )
+                            vals = ", ".join(escape_value(v) for v in row)
+                            yield f"DELETE FROM {tbl_q} WHERE {where};\n"
+                            yield f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                else:
+                    batch = []
+                    while True:
+                        rows = await cur.fetchmany(req.batch_size)
+                        if not rows:
+                            break
+                        for row in rows:
+                            row_dict = dict(zip(cols, row))
+                            where = " AND ".join(
+                                f"{quote_ident(c)} = {escape_value(row_dict[c])}"
+                                for c in where_cols
+                            )
+                            vals = ", ".join(escape_value(v) for v in row)
+                            yield f"DELETE FROM {tbl_q} WHERE {where};\n"
+                            batch.append(f"({vals})")
+                        yield (
+                            f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n"
+                            + ",\n".join(batch)
+                            + ";\n"
                         )
-                        vals = ", ".join(escape_value(v) for v in row)
-                        yield f"DELETE FROM {tbl_q} WHERE {where};\n"
-                        yield f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                        batch = []
 
     async def _generate_csv():
         writer_kwargs: dict = dict(

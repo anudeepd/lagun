@@ -191,3 +191,97 @@ describe('encoding', () => {
     expect(out.charCodeAt(0)).not.toBe(0xFEFF)
   })
 })
+
+function insert(
+  columns: string[],
+  rows: unknown[][],
+  insertMode: 'batch' | 'single' = 'single',
+): string {
+  return buildFrontendContent('insert', DB, TBL, { columns, rows }, PK, {
+    delimiter: ',',
+    quoteChar: '"',
+    escapeChar: '"',
+    lineTerminator: '\r\n',
+    encoding: 'utf-8',
+  }, insertMode)
+}
+
+function deleteInsert(
+  columns: string[],
+  rows: unknown[][],
+  pkCols: string[],
+  insertMode: 'batch' | 'single' = 'single',
+): string {
+  return buildFrontendContent('delete+insert', DB, TBL, { columns, rows }, pkCols, {
+    delimiter: ',',
+    quoteChar: '"',
+    escapeChar: '"',
+    lineTerminator: '\r\n',
+    encoding: 'utf-8',
+  }, insertMode)
+}
+
+describe('insert format', () => {
+  it('batch mode — all rows in one INSERT', () => {
+    const out = insert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], 'batch')
+    expect(out).toBe('INSERT INTO `db`.`tbl` (`id`, `name`) VALUES\n(1, \'Alice\'),\n(2, \'Bob\');\n')
+  })
+
+  it('single mode — one INSERT per row', () => {
+    const out = insert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], 'single')
+    expect(out).toBe(
+      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (1, 'Alice');\n" +
+      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (2, 'Bob');\n"
+    )
+  })
+
+  it('escapes single quotes in values', () => {
+    const out = insert(['name'], [["it's"]], 'batch')
+    expect(out).toContain("'it''s'")
+  })
+
+  it('handles null values', () => {
+    const out = insert(['id', 'name'], [[1, null]], 'batch')
+    expect(out).toContain('NULL')
+  })
+})
+
+describe('delete format', () => {
+  it('produces one DELETE per row using PK', () => {
+    const out = buildFrontendContent('delete', DB, TBL, { columns: ['id', 'name'], rows: [[1, 'Alice'], [2, 'Bob']] }, ['id'], {
+      delimiter: ',',
+      quoteChar: '"',
+      escapeChar: '"',
+      lineTerminator: '\r\n',
+      encoding: 'utf-8',
+    })
+    expect(out).toBe(
+      'DELETE FROM `db`.`tbl` WHERE `id` = 1;\n' +
+      'DELETE FROM `db`.`tbl` WHERE `id` = 2;\n'
+    )
+  })
+})
+
+describe('delete+insert format', () => {
+  it('batch mode — one DELETE per row + one INSERT for the batch', () => {
+    const out = deleteInsert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], ['id'], 'batch')
+    expect(out).toBe(
+      'DELETE FROM `db`.`tbl` WHERE `id` = 1;\n' +
+      'DELETE FROM `db`.`tbl` WHERE `id` = 2;\n' +
+      '\n' +
+      'INSERT INTO `db`.`tbl` (`id`, `name`) VALUES\n' +
+      "(1, 'Alice'),\n" +
+      "(2, 'Bob');\n"
+    )
+  })
+
+  it('single mode — one DELETE + one INSERT per row', () => {
+    const out = deleteInsert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], ['id'], 'single')
+    expect(out).toBe(
+      'DELETE FROM `db`.`tbl` WHERE `id` = 1;\n' +
+      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (1, 'Alice');\n" +
+      'DELETE FROM `db`.`tbl` WHERE `id` = 2;\n' +
+      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (2, 'Bob');\n"
+    )
+  })
+})

@@ -27,13 +27,13 @@ test('edit a cell and verify the change persists', async ({ page, sessionId }) =
   // Wait for rows to load
   await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
 
-  // Single-click the price cell in the first row (grid uses singleClickEdit)
+  // Double-click the price cell to enter edit mode
   const priceCell = page.locator('.ag-row').first().locator('[col-id="price"]')
-  await priceCell.click()
+  await priceCell.dblclick()
 
   // Type the new value into the cell editor
-  const cellEditor = page.locator('.ag-cell-editor input, .ag-cell-edit-input')
-  await cellEditor.press('Control+a')
+  const cellEditor = page.locator('.ag-text-field-input')
+  await cellEditor.waitFor({ state: 'visible', timeout: 5000 })
   await cellEditor.fill('99.99')
   await cellEditor.press('Enter')
 

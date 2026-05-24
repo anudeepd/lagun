@@ -75,7 +75,7 @@ export async function openSessionQueryTab(page: Page, sessionName: string) {
   const sessionRow = sessionSpan.locator('xpath=..')
   await sessionRow.hover()  // reveal the context menu button
   await sessionRow.locator('div.relative button').click()
-  await page.getByRole('button', { name: 'New Query', exact: true }).click()
+  await sessionRow.getByRole('button', { name: 'New Query', exact: true }).click()
 }
 
 /** Extended test with a fully set-up session + seeded DB. */

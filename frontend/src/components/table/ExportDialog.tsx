@@ -35,6 +35,7 @@ export function buildFrontendContent(
   data: { columns: string[], rows: unknown[][] },
   pkCols: string[],
   csvOpts: { delimiter: string, quoteChar: string, escapeChar: string, lineTerminator: string, encoding: string },
+  insertMode: 'batch' | 'single' = 'batch',
 ): string {
   if (format === 'csv') {
     const { delimiter: d, quoteChar: q, escapeChar: e, lineTerminator: nl } = csvOpts
@@ -64,12 +65,18 @@ export function buildFrontendContent(
       return q + inner.split(q).join(e + q) + q
     }
     const header = data.columns.map(c => escape(c, true)).join(d)
-    const body = [header, ...data.rows.map(r => r.map(escape).join(d))].join(nl)
+    const body = [header, ...data.rows.map(r => r.map(v => escape(v)).join(d))].join(nl)
     return csvOpts.encoding === 'utf-8-sig' ? '\uFEFF' + body : body
   }
 
   if (format === 'insert') {
     const cols = data.columns.map(c => `\`${c}\``).join(', ')
+    if (insertMode === 'single') {
+      return data.rows.map(r => {
+        const vals = `(${r.map(sqlLiteral).join(', ')})`
+        return `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES ${vals};\n`
+      }).join('')
+    }
     const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
     return `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES\n${values};\n`
   }
@@ -89,12 +96,24 @@ export function buildFrontendContent(
 
   // delete+insert
   const cols = data.columns.map(c => `\`${c}\``).join(', ')
+  if (insertMode === 'single') {
+    return data.rows.map(r => {
+      const idx = effectivePks.map(pk => data.columns.indexOf(pk))
+      const where = effectivePks
+        .map((pk, i) => `\`${pk}\` = ${sqlLiteral(idx[i] >= 0 ? r[idx[i]] : null)}`)
+        .join(' AND ')
+      const vals = `(${r.map(sqlLiteral).join(', ')})`
+      return `DELETE FROM \`${database}\`.\`${table}\` WHERE ${where};\n` +
+             `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES ${vals};\n`
+    }).join('')
+  }
   const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
   return deleteLines + '\n\n' + `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES\n${values};\n`
 }
 
 export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, pkColumnsForSql = [] }: Props) {
   const [format, setFormat] = useState<'insert' | 'delete' | 'delete+insert' | 'csv'>(customSql ? 'csv' : 'insert')
+  const [insertMode, setInsertMode] = useState<'batch' | 'single'>('single')
   const [batchSize, setBatchSize] = useState('500')
   const [exporting, setExporting] = useState(false)
   const [copying, setCopying] = useState(false)
@@ -124,6 +143,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     ...(customSql ? { sql: customSql } : { table }),
     format,
     batch_size: parseInt(batchSize),
+    ...(format === 'insert' || format === 'delete+insert' ? { insert_mode: insertMode } : {}),
     ...(pkValues ? { pk_values: pkValues } : {}),
     ...(format === 'csv' ? {
       csv_delimiter: effectiveDelimiter,
@@ -148,7 +168,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       let blob: Blob
       let filename: string
       if (rowsOverride) {
-        const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts())
+        const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode)
         blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
         filename = `${database}_${table}_filtered.${format === 'csv' ? 'csv' : 'sql'}`
       } else {
@@ -168,7 +188,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       a.download = filename
       a.href = url
       a.click()
-      URL.revokeObjectURL(url)
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
       onClose()
     } catch (e) {
       alert(`Export failed: ${e}`)
@@ -182,9 +202,8 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     try {
       let text: string
       if (rowsOverride) {
-        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts())
-      } else if (window.isSecureContext) {
-        // Secure context: async fetch + navigator.clipboard works fine
+        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode)
+      } else {
         const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -193,15 +212,6 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
         if (!res.ok) throw new Error(await res.text())
         const blob = await res.blob()
         text = await blob.text()
-      } else {
-        // Non-secure: sync XHR keeps the user gesture active so
-        // the execCommand('copy') fallback in clipboardWrite works
-        const xhr = new XMLHttpRequest()
-        xhr.open('POST', `/api/v1/sessions/${sessionId}/export`, false)
-        xhr.setRequestHeader('Content-Type', 'application/json')
-        xhr.send(buildBody())
-        if (xhr.status !== 200) throw new Error(xhr.responseText)
-        text = xhr.responseText
       }
       await clipboardWrite(text)
       setCopied(true)
@@ -241,6 +251,16 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           {!customSql && <option value="delete+insert">DELETE + INSERT SQL</option>}
           <option value="csv">CSV</option>
         </Select>
+        {(format === 'insert' || format === 'delete+insert') && (
+          <Select
+            label="INSERT Mode"
+            value={insertMode}
+            onChange={e => setInsertMode(e.target.value as typeof insertMode)}
+          >
+            <option value="batch">Batch (all rows in one INSERT)</option>
+            <option value="single">Single (one INSERT per row)</option>
+          </Select>
+        )}
         <Input
           label="Batch Size"
           type="number"

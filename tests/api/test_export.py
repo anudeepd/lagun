@@ -54,6 +54,76 @@ async def test_export_delete_format(client, session_id, test_db):
     assert "DELETE FROM" in body
 
 
+async def test_export_insert_single_mode(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
+        "database": test_db,
+        "table": "users",
+        "format": "insert",
+        "insert_mode": "single",
+    })
+    assert r.status_code == 200
+    body = r.text
+    assert "INSERT INTO" in body
+    assert "Alice" in body
+    assert "Bob" in body
+    # Single mode: each row should have its own INSERT statement
+    lines = [l for l in body.split('\n') if 'INSERT INTO' in l]
+    assert len(lines) == 2, f"Expected 2 single-row INSERTs, got {len(lines)}: {lines}"
+
+
+async def test_export_insert_batch_mode(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
+        "database": test_db,
+        "table": "users",
+        "format": "insert",
+        "insert_mode": "batch",
+    })
+    assert r.status_code == 200
+    body = r.text
+    assert "INSERT INTO" in body
+    assert "Alice" in body
+    assert "Bob" in body
+    # Batch mode: one INSERT line containing both rows
+    insert_lines = [l for l in body.split('\n') if 'INSERT INTO' in l]
+    assert len(insert_lines) == 1, f"Expected 1 batch INSERT, got {len(insert_lines)}: {insert_lines}"
+
+
+async def test_export_delete_insert_single_mode(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
+        "database": test_db,
+        "table": "users",
+        "format": "delete+insert",
+        "insert_mode": "single",
+    })
+    assert r.status_code == 200
+    body = r.text
+    assert "DELETE FROM" in body
+    assert "INSERT INTO" in body
+    # Single mode: each row has DELETE followed by INSERT
+    delete_lines = [l for l in body.split('\n') if 'DELETE FROM' in l]
+    insert_lines = [l for l in body.split('\n') if 'INSERT INTO' in l]
+    assert len(delete_lines) == 2, f"Expected 2 DELETEs, got {len(delete_lines)}"
+    assert len(insert_lines) == 2, f"Expected 2 INSERTs, got {len(insert_lines)}"
+
+
+async def test_export_delete_insert_batch_mode(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
+        "database": test_db,
+        "table": "users",
+        "format": "delete+insert",
+        "insert_mode": "batch",
+    })
+    assert r.status_code == 200
+    body = r.text
+    assert "DELETE FROM" in body
+    assert "INSERT INTO" in body
+    # Batch mode: one DELETE per row, then one batch INSERT
+    delete_lines = [l for l in body.split('\n') if 'DELETE FROM' in l]
+    insert_lines = [l for l in body.split('\n') if 'INSERT INTO' in l]
+    assert len(delete_lines) == 2, f"Expected 2 DELETEs, got {len(delete_lines)}"
+    assert len(insert_lines) == 1, f"Expected 1 batch INSERT, got {len(insert_lines)}"
+
+
 async def test_export_delete_insert_format(client, session_id, test_db):
     r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
         "database": test_db,

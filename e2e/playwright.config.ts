@@ -22,5 +22,6 @@ export default defineConfig({
     port: 8080,
     reuseExistingServer: true,
     cwd: '..',
+    env: { NODE_OPTIONS: '--no-warnings' },
   },
 })

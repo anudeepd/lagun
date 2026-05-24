@@ -316,6 +316,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         suppressContextMenu
         preventDefaultOnContextMenu
         stopEditingWhenCellsLoseFocus
+        singleClickEdit
       />
       {menu && (
         <GridContextMenu
