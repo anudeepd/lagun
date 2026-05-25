@@ -112,6 +112,77 @@ async def test_row_insert(client, session_id, test_db):
     assert r2.json()["rows"][0][0] == 3
 
 
+async def test_row_update(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "SELECT id FROM users WHERE name = 'Alice'",
+        "database": test_db,
+    })
+    alice_id = r.json()["rows"][0][0]
+
+    r2 = await client.post(f"/api/v1/sessions/{session_id}/row-update", json={
+        "database": test_db,
+        "table": "users",
+        "primary_key": {"id": alice_id},
+        "updates": {"age": 31},
+    })
+    assert r2.status_code == 200
+    data = r2.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+
+    r3 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": f"SELECT age FROM users WHERE id = {alice_id}",
+        "database": test_db,
+    })
+    assert r3.json()["rows"][0][0] == 31
+
+
+async def test_row_update_zero_affected(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/row-update", json={
+        "database": test_db,
+        "table": "users",
+        "primary_key": {"id": 99999},
+        "updates": {"age": 31},
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 0
+    assert data["error"] is None
+
+
+async def test_row_update_pk_column(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "SELECT id FROM users WHERE name = 'Alice'",
+        "database": test_db,
+    })
+    old_id = r.json()["rows"][0][0]
+    new_id = old_id + 1000
+
+    r2 = await client.post(f"/api/v1/sessions/{session_id}/row-update", json={
+        "database": test_db,
+        "table": "users",
+        "primary_key": {"id": old_id},
+        "updates": {"id": new_id, "age": 31},
+    })
+    assert r2.status_code == 200
+    data = r2.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+
+    r3 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": f"SELECT age FROM users WHERE id = {new_id}",
+        "database": test_db,
+    })
+    assert r3.json()["rows"][0][0] == 31
+
+    r4 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": f"SELECT COUNT(*) FROM users WHERE id = {old_id}",
+        "database": test_db,
+    })
+    assert r4.json()["rows"][0][0] == 0
+
+
 async def test_row_delete(client, session_id, test_db):
     # Get ids of both rows
     r = await client.post(f"/api/v1/sessions/{session_id}/query", json={
@@ -136,3 +207,69 @@ async def test_row_delete(client, session_id, test_db):
         "database": test_db,
     })
     assert r3.json()["rows"][0][0] == 1
+
+
+async def test_row_update_many_in_sequence(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "SELECT id FROM users WHERE name = 'Alice'",
+        "database": test_db,
+    })
+    alice_id = r.json()["rows"][0][0]
+
+    for i in range(10):
+        r = await client.post(f"/api/v1/sessions/{session_id}/row-update", json={
+            "database": test_db,
+            "table": "users",
+            "primary_key": {"id": alice_id},
+            "updates": {"age": 100 + i},
+        })
+        assert r.status_code == 200
+        assert r.json()["affected_rows"] == 1
+
+    r = await client.post(f"/api/v1/sessions/{session_id}/row-update", json={
+        "database": test_db,
+        "table": "users",
+        "primary_key": {"id": alice_id},
+        "updates": {"age": 200},
+    })
+    assert r.status_code == 200
+    assert r.json()["affected_rows"] == 1
+
+    r2 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": f"SELECT age FROM users WHERE id = {alice_id}",
+        "database": test_db,
+    })
+    assert r2.json()["rows"][0][0] == 200
+
+
+async def test_row_update_no_pk_with_null(client, session_id, test_db):
+    await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": (
+            "CREATE TABLE IF NOT EXISTS no_pk_users ("
+            "  name VARCHAR(100),"
+            "  email VARCHAR(100),"
+            "  age INT"
+            ")"
+        ),
+        "database": test_db,
+    })
+
+    await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "INSERT INTO no_pk_users (name, email, age) VALUES ('Alice', NULL, 30)",
+        "database": test_db,
+    })
+
+    r = await client.post(f"/api/v1/sessions/{session_id}/row-update", json={
+        "database": test_db,
+        "table": "no_pk_users",
+        "primary_key": {"name": "Alice", "email": None, "age": 30},
+        "updates": {"age": 31},
+    })
+    assert r.status_code == 200
+    assert r.json()["affected_rows"] == 1
+
+    r2 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "SELECT age FROM no_pk_users WHERE name = 'Alice'",
+        "database": test_db,
+    })
+    assert r2.json()["rows"][0][0] == 31

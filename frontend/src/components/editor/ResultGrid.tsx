@@ -7,6 +7,7 @@ import type { CellClassParams, CellContextMenuEvent, CellValueChangedEvent, RowC
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
   getFilteredData: () => { columns: string[], rows: unknown[][] }
+  stopEditing: () => void
 }
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo } from '../../types'
@@ -88,6 +89,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       })
       return { columns: visibleColumns, rows }
     },
+    stopEditing: () => { agApiRef.current?.stopEditing() },
   }))
 
   const pendingChangesRef = useRef(pendingChanges)

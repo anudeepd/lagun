@@ -434,6 +434,10 @@ function TableTab({ tab }: Props) {
   const [pendingChanges, setPendingChanges] = useState<
     Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   >(new Map())
+  const pendingChangesRef = useRef(pendingChanges)
+  useEffect(() => {
+    pendingChangesRef.current = pendingChanges
+  })
   const loadAbortRef = useRef<AbortController | null>(null)
   const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
@@ -552,6 +556,7 @@ function TableTab({ tab }: Props) {
 
   const handleCellEdit = useCallback((params: { column: string; newValue: unknown; oldValue: unknown; data: Record<string, unknown> }) => {
     if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
+    if (initialLoading || refreshing) return
     const rowId = params.data.__ag_rowId as string
 
     setPendingChanges(prev => {
@@ -573,13 +578,21 @@ function TableTab({ tab }: Props) {
           next.set(rowId, { ...existing, changes: newChanges })
         }
       }
+      pendingChangesRef.current = next
       return next
     })
-  }, [tab.database, tab.table, rowKeyColumns])
+  }, [tab.database, tab.table, rowKeyColumns, initialLoading, refreshing])
 
   const handleApplyChanges = async () => {
-    if (!tab.database || !tab.table || pendingChanges.size === 0) return
-    for (const [, { original, changes }] of pendingChanges) {
+    // Force-commit any in-progress cell edit before reading pending changes.
+    // Without this, a just-edited cell whose blur hasn't fired yet would be
+    // missing from pendingChanges — the WHERE clause would work correctly
+    // (using old values) but the edit wouldn't be sent at all.
+    gridRef.current?.stopEditing()
+
+    const currentPending = pendingChangesRef.current
+    if (!tab.database || !tab.table || currentPending.size === 0) return
+    for (const [, { original, changes }] of currentPending) {
       const primary_key: Record<string, unknown> = {}
       rowKeyColumns.forEach(pk => { primary_key[pk] = original[pk] })
       const start = Date.now()
@@ -593,6 +606,11 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       if (!r.ok) {
         setStatusMsg(`✗ ${r.error}`)
         setTimeout(() => setStatusMsg(null), 4000)
+        return
+      }
+      if (r.affected_rows === 0) {
+        setStatusMsg(`✗ Update matched 0 rows — the row may have been modified or deleted since it was loaded.`)
+        setTimeout(() => setStatusMsg(null), 6000)
         return
       }
     }
@@ -958,7 +976,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
             <ResultGrid
               ref={gridRef}
               result={result}
-              editable={columns.length > 0}
+              editable={columns.length > 0 && !initialLoading && !refreshing}
               primaryKeyColumns={rowKeyColumns}
               onCellEdit={handleCellEdit}
               onDeleteRows={handleDeleteRows}

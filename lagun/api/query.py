@@ -112,6 +112,18 @@ def _serialize(v: Any) -> Any:
     return v
 
 
+def _build_pk_where(pk: dict[str, Any]) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    values: list[Any] = []
+    for k, v in pk.items():
+        if v is None:
+            clauses.append(f"{quote_ident(k)} IS NULL")
+        else:
+            clauses.append(f"{quote_ident(k)} = %s")
+            values.append(v)
+    return " AND ".join(clauses), values
+
+
 @router.post("/sessions/{session_id}/cell-update", response_model=CellUpdateResult)
 async def cell_update(session_id: str, req: CellUpdateRequest):
     pool, _ = await _get_pool_or_404(session_id)
@@ -121,10 +133,7 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
         tbl_q = quote_ident(req.table)
         col_q = quote_ident(req.column)
 
-        pk_clauses = " AND ".join(
-            f"{quote_ident(k)} = %s" for k in req.primary_key
-        )
-        pk_values = list(req.primary_key.values())
+        pk_clauses, pk_values = _build_pk_where(req.primary_key)
 
         sql = f"UPDATE {db_q}.{tbl_q} SET {col_q} = %s WHERE {pk_clauses}"
         params = [req.new_value] + pk_values
@@ -156,9 +165,9 @@ async def row_update(session_id: str, req: RowUpdateRequest):
         tbl_q = quote_ident(req.table)
 
         set_clauses = ", ".join(f"{quote_ident(col)} = %s" for col in req.updates)
-        pk_clauses = " AND ".join(f"{quote_ident(k)} = %s" for k in req.primary_key)
+        pk_clauses, pk_values = _build_pk_where(req.primary_key)
         sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
-        params = list(req.updates.values()) + list(req.primary_key.values())
+        params = list(req.updates.values()) + pk_values
 
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
@@ -208,9 +217,9 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                 await cur.execute("SET autocommit=0")
                 try:
                     for pk in req.primary_keys:
-                        pk_clauses = " AND ".join(f"{quote_ident(k)} = %s" for k in pk)
+                        pk_clauses, pk_values = _build_pk_where(pk)
                         sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
-                        await cur.execute(sql, list(pk.values()))
+                        await cur.execute(sql, pk_values)
                         total_affected += cur.rowcount
                     await cur.execute("COMMIT")
                 except Exception:
