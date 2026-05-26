@@ -8,6 +8,7 @@ export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
   getFilteredData: () => { columns: string[], rows: unknown[][] }
   stopEditing: () => void
+  deselectAll: () => void
 }
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo } from '../../types'
@@ -90,6 +91,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       return { columns: visibleColumns, rows }
     },
     stopEditing: () => { agApiRef.current?.stopEditing() },
+    deselectAll: () => { agApiRef.current?.deselectAll() },
   }))
 
   const pendingChangesRef = useRef(pendingChanges)
@@ -236,7 +238,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     if (!menu) return []
     const colInfo = columns?.find(c => c.name === menu.columnName)
     const isDateType = colInfo && DATE_TYPES.has(colInfo.data_type.toLowerCase())
-    const targetRows = menu.selectedRows.length > 0 ? menu.selectedRows : [menu.rowData]
+    const validRowIds = new Set(rowData.map(r => r.__ag_rowId as string))
+    const selected = menu.selectedRows.filter(r => validRowIds.has(r.__ag_rowId as string))
+    const targetRows = selected.length > 0 ? selected : [menu.rowData]
     const { __ag_rowId, ...displayRow } = menu.rowData
 
     const items: ContextMenuItem[] = [

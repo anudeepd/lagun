@@ -441,6 +441,7 @@ function TableTab({ tab }: Props) {
   const loadAbortRef = useRef<AbortController | null>(null)
   const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
+  const { invalidateTablesForDb, loadTables } = useSchemaStore()
 
   const pkColumns = columns.filter(c => c.is_primary_key).map(c => c.name)
   const rowKeyColumns = pkColumns.length > 0 ? pkColumns : columns.map(c => c.name)
@@ -615,6 +616,28 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       }
     }
     setPendingChanges(new Map())
+
+    // Optimistically apply changes to local result state
+    if (currentPending.size > 0) {
+      setResult(prev => {
+        if (!prev) return prev
+        const newRows = prev.rows.map((row, idx) => {
+          const rowId = String(idx)
+          const edit = currentPending.get(rowId)
+          if (!edit) return row
+          const updatedRow = [...row]
+          for (const [col, newValue] of Object.entries(edit.changes)) {
+            const colIndex = prev.columns.indexOf(col)
+            if (colIndex >= 0) updatedRow[colIndex] = newValue
+          }
+          return updatedRow
+        })
+        return { ...prev, rows: newRows }
+      })
+    }
+
+    invalidateTablesForDb(tab.sessionId!, tab.database!)
+    loadTables(tab.sessionId!, tab.database!)
     loadData()
   }
 
@@ -632,8 +655,40 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       primary_keys,
     })
     if (r.ok) {
+      // Optimistically remove deleted rows from the local result state
+      setResult(prev => {
+        if (!prev) return prev
+        // Build a set of deleted row keys for O(1) lookup
+        const deletedKeys = new Set(
+          rows.map(row => rowKeyColumns.map(pk => String(row[pk])).join('\x00'))
+        )
+        // Filter out deleted rows using column index lookup
+        const newRows = prev.rows.filter(row => {
+          const key = rowKeyColumns.map(pk => {
+            const colIndex = prev.columns.indexOf(pk)
+            return String(row[colIndex])
+          }).join('\x00')
+          return !deletedKeys.has(key)
+        })
+        return { ...prev, rows: newRows, row_count: newRows.length }
+      })
+
+      // Clear selected rows for deleted items (both React state and AG Grid internal selection)
+      setSelectedRows(prev => {
+        const deletedKeys = new Set(
+          rows.map(row => rowKeyColumns.map(pk => String(row[pk])).join('\x00'))
+        )
+        return prev.filter(row => {
+          const key = rowKeyColumns.map(pk => String(row[pk])).join('\x00')
+          return !deletedKeys.has(key)
+        })
+      })
+      gridRef.current?.deselectAll()
+
       setStatusMsg(`✓ Deleted ${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''}`)
       try { addEntry({ sql: `DELETE FROM \`${tab.database}\`.\`${tab.table}\` (${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''})`, sessionId: tab.sessionId, database: tab.database, affectedRows: r.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
+      invalidateTablesForDb(tab.sessionId!, tab.database!)
+      loadTables(tab.sessionId!, tab.database!)
       loadData()
     } else {
       setStatusMsg(`✗ ${r.error}`)

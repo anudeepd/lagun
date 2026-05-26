@@ -23,6 +23,7 @@ interface SchemaState {
   loadColumns: (sessionId: string, db: string, table: string) => Promise<ColumnInfo[]>
   invalidateSession: (sessionId: string) => void
   invalidateTable: (sessionId: string, db: string, table: string) => void
+  invalidateTablesForDb: (sessionId: string, db: string) => void
 }
 
 export const useSchemaStore = create<SchemaState>((set, get) => ({
@@ -113,6 +114,16 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
       const columns = { ...s.columns }
       delete columns[key]
       return { columns }
+    })
+  },
+
+  invalidateTablesForDb: (sessionId, db) => {
+    const key = `${sessionId}/${db}`
+    delete _inflightTables[key]
+    set(s => {
+      const tables = { ...s.tables }
+      delete tables[key]
+      return { tables }
     })
   },
 }))
