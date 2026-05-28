@@ -18,7 +18,7 @@ install:
 	pip install -e .
 
 publish: build
-	uv publish
+	UV_PUBLISH_TOKEN=$$(python3 -c "import configparser; c = configparser.ConfigParser(); c.read('$${HOME}/.pypirc'); print(c['pypi']['password'])") uv publish
 
 clean:
 	rm -rf dist/ build/ *.egg-info lagun/static/* frontend/dist/
