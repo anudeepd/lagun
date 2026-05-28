@@ -42,16 +42,17 @@ export const api = {
   // Schema
   getDatabases: (sessionId: string) =>
     request<string[]>(`/sessions/${sessionId}/databases`),
-  getTables: (sessionId: string, db: string) =>
-    request<import('../types').TableInfo[]>(`/sessions/${sessionId}/databases/${db}/tables`),
+  getTables: (sessionId: string, db: string, signal?: AbortSignal) =>
+    request<import('../types').TableInfo[]>(`/sessions/${sessionId}/databases/${db}/tables`, { signal }),
   getColumns: (sessionId: string, db: string, table: string, signal?: AbortSignal) =>
     request<import('../types').ColumnInfo[]>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/columns`,
       { signal }
     ),
-  getIndexes: (sessionId: string, db: string, table: string) =>
+  getIndexes: (sessionId: string, db: string, table: string, signal?: AbortSignal) =>
     request<import('../types').IndexInfo[]>(
-      `/sessions/${sessionId}/databases/${db}/tables/${table}/indexes`
+      `/sessions/${sessionId}/databases/${db}/tables/${table}/indexes`,
+      { signal }
     ),
   getFunctions: (sessionId: string, db: string) =>
     request<string[]>(`/sessions/${sessionId}/databases/${db}/functions`),
@@ -102,7 +103,7 @@ export const api = {
     ),
 
   // Table ops
-  createTable: (sessionId: string, db: string, data: import('../types').TableInfo) =>
+  createTable: (sessionId: string, db: string, data: import('../types').CreateTableRequest) =>
     request<{ ok: boolean; sql: string }>(
       `/sessions/${sessionId}/databases/${db}/tables`,
       { method: 'POST', body: JSON.stringify(data) }
@@ -117,7 +118,7 @@ export const api = {
       `/sessions/${sessionId}/databases/${db}/tables/${table}/truncate`,
       { method: 'POST' }
     ),
-  createIndex: (sessionId: string, db: string, table: string, data: import('../types').IndexInfo) =>
+  createIndex: (sessionId: string, db: string, table: string, data: import('../types').CreateIndexRequest) =>
     request<{ ok: boolean; sql: string }>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/indexes`,
       { method: 'POST', body: JSON.stringify(data) }

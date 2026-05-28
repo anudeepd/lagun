@@ -1,5 +1,6 @@
 """aiosqlite CRUD for saved sessions."""
 import json
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,7 +44,7 @@ async def init_db():
         try:
             await db.execute("ALTER TABLE sessions ADD COLUMN selected_databases TEXT NOT NULL DEFAULT '[]'")
             await db.commit()
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # Column already exists
 
 

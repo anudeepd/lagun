@@ -1,12 +1,12 @@
 """Pydantic models for query execution."""
 from typing import Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class QueryRequest(BaseModel):
     sql: str
     database: Optional[str] = None
-    limit: Optional[int] = None  # overrides session default
+    limit: Optional[int] = Field(None, ge=1, le=100000)  # overrides session default
 
 
 class QueryResult(BaseModel):

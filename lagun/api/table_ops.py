@@ -124,9 +124,8 @@ async def set_primary_key(session_id: str, db: str, table: str, req: SetPrimaryK
                 await cur.execute(sql_combined)
                 sql = sql_combined
             except Exception as exc:
-                # MySQL error 1091: "Can't DROP 'PRIMARY'; check that column/key exists"
                 err_msg = str(exc)
-                if "1091" in err_msg or "DROP" in err_msg.upper():
+                if "1091" in err_msg or "can't drop 'primary'" in err_msg.lower():
                     await cur.execute(sql_add_only)
                     sql = sql_add_only
                 else:
@@ -169,7 +168,12 @@ async def modify_column(session_id: str, db: str, table: str, column: str, req: 
     pool = await _pool(session_id)
     new_name = req.name or column
     col_type = validate_col_type(req.type)
-    nullable = "" if req.nullable is False else " NULL"
+    if req.nullable is True:
+        nullable = " NULL"
+    elif req.nullable is False:
+        nullable = " NOT NULL"
+    else:
+        nullable = ""
     default = f" DEFAULT '{escape_string_literal(req.default)}'" if req.default is not None else ""
     comment = f" COMMENT '{escape_string_literal(req.comment)}'" if req.comment else ""
 

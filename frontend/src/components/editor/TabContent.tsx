@@ -399,7 +399,7 @@ function QueryTab({ tab }: Props) {
             onClose={() => setShowExport(false)}
             sessionId={tab.sessionId}
             database={tab.database}
-            table="result"
+            table="query_result"
             sql={sql.trim()}
             rowsOverride={exportOverride}
           />
@@ -506,6 +506,9 @@ function TableTab({ tab }: Props) {
     }
   }
 
+  const loadDataRef = useRef(loadData)
+  loadDataRef.current = loadData
+
   useEffect(() => {
     if (view === 'data' && !result) {
       loadData()
@@ -537,15 +540,17 @@ function TableTab({ tab }: Props) {
     return () => document.removeEventListener('mousedown', handler)
   }, [showColPicker])
 
+  const appliedWhereRef = useRef(appliedWhere)
+  appliedWhereRef.current = appliedWhere
+
   // Debounced global search — re-queries server on every keystroke pause
   useEffect(() => {
     if (view !== 'data') return
     const timer = setTimeout(() => {
-      loadData(undefined, globalSearch, appliedWhere)
+      loadDataRef.current(undefined, globalSearch, appliedWhereRef.current)
     }, 400)
     return () => clearTimeout(timer)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [globalSearch])
+  }, [globalSearch, view])
 
   // Load user-defined functions for autocomplete in the filter bar
   useEffect(() => {
@@ -621,8 +626,12 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
     if (currentPending.size > 0) {
       setResult(prev => {
         if (!prev) return prev
-        const newRows = prev.rows.map((row, idx) => {
-          const rowId = String(idx)
+        const keyCols = rowKeyColumns.length > 0 ? rowKeyColumns : prev.columns
+        const newRows = prev.rows.map((row) => {
+          const rowId = keyCols.map(pk => {
+            const colIndex = prev.columns.indexOf(pk)
+            return String(row[colIndex] ?? '')
+          }).join('\x00')
           const edit = currentPending.get(rowId)
           if (!edit) return row
           const updatedRow = [...row]
@@ -703,8 +712,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
 
   const handleApplyFilter = useCallback(() => {
     setAppliedWhere(whereFilter)
-    loadData(undefined, globalSearch, whereFilter)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadDataRef.current(undefined, globalSearch, whereFilter)
   }, [whereFilter, globalSearch])
 
   const handleClearFilter = () => {

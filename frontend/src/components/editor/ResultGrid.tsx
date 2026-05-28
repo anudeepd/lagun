@@ -128,13 +128,16 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   const rowData = useMemo(() =>
     result.rows.map((row, rowIdx) => {
-      const obj: Record<string, unknown> = { __ag_rowId: String(rowIdx) }
+      const obj: Record<string, unknown> = {}
       result.columns.forEach((col, i) => {
         obj[col] = row[i]
       })
+      const keyCols = primaryKeyColumns.length > 0 ? primaryKeyColumns : result.columns
+      const keyValues = keyCols.map(col => String(obj[col] ?? '')).join('\x00')
+      obj.__ag_rowId = keyValues || String(rowIdx)
       return obj
     }),
-    [result.rows, result.columns]
+    [result.rows, result.columns, primaryKeyColumns]
   )
 
   const getRowId = useCallback((params: { data: Record<string, unknown> }) =>

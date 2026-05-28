@@ -81,12 +81,19 @@ async def export_config(req: ExportRequest):
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"lagun_sessions_{ts}.json"
+
+    def _cleanup_tmp(path: str) -> None:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+
     return FileResponse(
         tmp.name,
         media_type="application/json",
         filename=filename,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        background=BackgroundTask(lambda: os.unlink(tmp.name) if os.path.exists(tmp.name) else None),
+        background=BackgroundTask(_cleanup_tmp, tmp.name),
     )
 
 

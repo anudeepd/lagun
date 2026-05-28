@@ -27,7 +27,7 @@ export default function App() {
         }
       }
     })
-  }, [loadSessions])
+  }, [loadSessions, loadServerConfig])
 
   return <AppLayout />
 }

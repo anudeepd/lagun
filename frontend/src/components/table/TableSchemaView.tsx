@@ -78,13 +78,13 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
     setTimeout(() => setStatusMsg(null), 3000)
   }
 
-  const reload = async () => {
+  const reload = async (signal?: AbortSignal) => {
     setLoading(true)
     try {
       const [cols, idxs, tables] = await Promise.all([
-        api.getColumns(sessionId, database, table),
-        api.getIndexes(sessionId, database, table),
-        api.getTables(sessionId, database),
+        api.getColumns(sessionId, database, table, signal),
+        api.getIndexes(sessionId, database, table, signal),
+        api.getTables(sessionId, database, signal),
       ])
       setColumns(cols)
       setIndexes(idxs)
@@ -97,7 +97,11 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
     }
   }
 
-  useEffect(() => { reload() }, [sessionId, database, table])
+  useEffect(() => {
+    const controller = new AbortController()
+    reload(controller.signal)
+    return () => controller.abort()
+  }, [sessionId, database, table])
 
   const handleTruncate = async () => {
     try {

@@ -85,14 +85,12 @@ async def _probe_connection(host: str, port: int, user: str, password: str) -> T
 @router.post("/sessions/probe", response_model=TestResult)
 async def probe_connection(data: ProbeRequest):
     """Test a connection without saving it and return available databases."""
-    now = time.monotonic()
-    # Prune old timestamps and check rate limit
-    _probe_timestamps[:] = [t for t in _probe_timestamps if now - t < _PROBE_WINDOW]
-    if len(_probe_timestamps) >= _PROBE_RATE_LIMIT:
-        raise HTTPException(429, "Too many probe requests. Please wait before trying again.")
-    _probe_timestamps.append(now)
-
     async with _probe_semaphore:
+        now = time.monotonic()
+        _probe_timestamps[:] = [t for t in _probe_timestamps if now - t < _PROBE_WINDOW]
+        if len(_probe_timestamps) >= _PROBE_RATE_LIMIT:
+            raise HTTPException(429, "Too many probe requests. Please wait before trying again.")
+        _probe_timestamps.append(now)
         return await _probe_connection(data.host, data.port, data.username, data.password)
 
 

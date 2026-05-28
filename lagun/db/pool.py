@@ -31,7 +31,9 @@ async def get_pool(session_id: str) -> aiomysql.Pool:
             if session.ssl_enabled:
                 ssl_ctx = ssl_mod.create_default_context()
             # Explicitly clear MULTI_STATEMENTS to prevent multi-query injection
-            safe_flags = CLIENT.MULTI_RESULTS & ~CLIENT.MULTI_STATEMENTS
+            safe_flags = CLIENT.MULTI_RESULTS
+            if safe_flags & CLIENT.MULTI_STATEMENTS:
+                safe_flags ^= CLIENT.MULTI_STATEMENTS
             pool = await aiomysql.create_pool(
                 host=session.host,
                 port=session.port,

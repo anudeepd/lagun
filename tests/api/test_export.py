@@ -163,7 +163,7 @@ async def test_export_unknown_format_rejected(client, session_id, test_db):
         "table": "users",
         "format": "xml",
     })
-    assert r.status_code == 400
+    assert r.status_code == 422
 
 
 async def test_export_neither_table_nor_sql_rejected(client, session_id, test_db):

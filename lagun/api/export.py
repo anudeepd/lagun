@@ -3,7 +3,7 @@ import csv
 import io
 import logging
 import re
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["export"])
 
 _BLOCKED_SQL = re.compile(
-    r'\b(INTO\s+OUTFILE|INTO\s+DUMPFILE|LOAD_FILE\s*\(|SLEEP\s*\()\b',
+    r'\b(INTO\s+OUTFILE|INTO\s+DUMPFILE|LOAD_FILE\s*\(|SLEEP\s*\(|BENCHMARK\s*\()\b',
     re.IGNORECASE,
 )
 _SAFE_FILENAME = re.compile(r'[^\w.\-]')
@@ -31,9 +31,9 @@ class ExportRequest(BaseModel):
     database: str
     table: Optional[str] = None
     sql: Optional[str] = None        # custom SELECT; overrides table
-    format: str = "insert"           # "insert" | "delete" | "delete+insert" | "csv"
+    format: Literal["insert", "delete", "delete+insert", "csv"] = "insert"
     batch_size: int = 500
-    insert_mode: str = "single"    # "batch" | "single"
+    insert_mode: Literal["batch", "single"] = "single"
     pk_values: Optional[list] = None  # list of dicts: [{pk_col: val, ...}, ...]
     # CSV-specific options (ignored for other formats)
     csv_delimiter: str = ","

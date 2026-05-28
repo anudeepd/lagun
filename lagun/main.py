@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     await close_all_pools()
 
 
-app = FastAPI(title="Lagun API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.19", lifespan=lifespan)
 
 # CORS for development (Vite dev server)
 if os.getenv("LAGUN_DEV"):

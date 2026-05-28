@@ -41,7 +41,7 @@ export default function IndexDialog({ open, onClose, sessionId, database, table,
         columns: selectedCols,
         is_unique: unique,
         index_type: indexType,
-      } as any)
+      })
       onClose()
     } catch (e) {
       setError(String(e))

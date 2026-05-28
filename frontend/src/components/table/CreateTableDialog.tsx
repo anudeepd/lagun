@@ -66,7 +66,7 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
         engine,
         charset: 'utf8mb4',
         collation: 'utf8mb4_unicode_ci',
-      } as any)
+      })
       onCreated()
       onClose()
     } catch (e) {

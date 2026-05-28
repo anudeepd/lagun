@@ -1,7 +1,7 @@
 """CSV/delimited data import via batch INSERT."""
 import csv
 import io
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, Form
 from pydantic import BaseModel
@@ -24,8 +24,9 @@ class ImportConfig(BaseModel):
     lineterminator: str = "\r\n"
     encoding: str = "utf-8"
     first_row_header: bool = True
-    strategy: str = "insert"  # "insert" | "insert_ignore" | "replace"
+    strategy: Literal["insert", "insert_ignore", "replace"] = "insert"
     batch_size: int = 500
+    preserve_empty_strings: bool = False
 
 
 class ImportResult(BaseModel):
@@ -182,6 +183,8 @@ async def _batch_insert(pool, cfg: ImportConfig, raw: bytes) -> ImportResult:
 
     def _coerce_row(row: list[str]) -> list:
         """Convert empty strings to None so NULLs are inserted properly."""
+        if cfg.preserve_empty_strings:
+            return row
         return [None if v == "" else v for v in row]
 
     async with pool.acquire() as conn:

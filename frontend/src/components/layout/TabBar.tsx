@@ -29,7 +29,7 @@ export default function TabBar() {
     const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setContextMenu(null) }
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
-  }, [])
+  }, [setContextMenu])
 
   const handleContextMenu = (e: React.MouseEvent, tabId: string) => {
     e.preventDefault()

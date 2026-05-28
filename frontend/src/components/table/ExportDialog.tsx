@@ -138,21 +138,24 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
 
   const effectiveDelimiter = csvDelimiter === 'custom' ? csvDelimiterCustom : csvDelimiter
 
-  const buildBody = () => JSON.stringify({
-    database,
-    ...(customSql ? { sql: customSql } : { table }),
-    format,
-    batch_size: parseInt(batchSize),
-    ...(format === 'insert' || format === 'delete+insert' ? { insert_mode: insertMode } : {}),
-    ...(pkValues ? { pk_values: pkValues } : {}),
-    ...(format === 'csv' ? {
-      csv_delimiter: effectiveDelimiter,
-      csv_quotechar: csvQuotechar,
-      csv_escapechar: csvEscapechar,
-      csv_lineterminator: effectiveLineterminator,
-      csv_encoding: csvEncoding,
-    } : {}),
-  })
+  const buildBody = () => {
+    const parsedBatchSize = parseInt(batchSize, 10)
+    return JSON.stringify({
+      database,
+      ...(customSql ? { sql: customSql } : { table }),
+      format,
+      batch_size: Number.isNaN(parsedBatchSize) || parsedBatchSize < 1 ? 500 : parsedBatchSize,
+      ...(format === 'insert' || format === 'delete+insert' ? { insert_mode: insertMode } : {}),
+      ...(pkValues ? { pk_values: pkValues } : {}),
+      ...(format === 'csv' ? {
+        csv_delimiter: effectiveDelimiter,
+        csv_quotechar: csvQuotechar,
+        csv_escapechar: csvEscapechar,
+        csv_lineterminator: effectiveLineterminator,
+        csv_encoding: csvEncoding,
+      } : {}),
+    })
+  }
 
   const getCsvOpts = () => ({
     delimiter: effectiveDelimiter,

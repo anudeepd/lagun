@@ -20,8 +20,8 @@ from lagun.models.query import (
 
 router = APIRouter(tags=["query"])
 
-# Maps session_id → MySQL thread_id of the currently running query (if any)
-_active_queries: dict[str, int] = {}
+# Maps session_id → set of MySQL thread_ids of currently running queries
+_active_queries: dict[str, set[int]] = {}
 
 
 async def _get_pool_or_404(session_id: str):
@@ -40,18 +40,22 @@ async def execute_query(session_id: str, req: QueryRequest):
 
     # Auto-append LIMIT for plain SELECT without existing LIMIT
     is_select = re.match(r'^\s*SELECT\b', sql, re.IGNORECASE)
-    has_limit = re.search(r'\bLIMIT\b', sql, re.IGNORECASE)
+    has_limit = re.search(r'\bLIMIT\b', _strip_quotes(sql), re.IGNORECASE)
     if is_select and not has_limit:
         sql = f"{sql} LIMIT {limit}"
 
     t0 = time.monotonic()
+    thread_id = None
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 # Register connection thread_id so it can be killed if needed
                 await cur.execute("SELECT CONNECTION_ID()")
                 row = await cur.fetchone()
-                _active_queries[session_id] = row[0]
+                thread_id = row[0]
+                if session_id not in _active_queries:
+                    _active_queries[session_id] = set()
+                _active_queries[session_id].add(thread_id)
                 try:
                     if req.database:
                         await cur.execute(f"USE {quote_ident(req.database)}")
@@ -77,9 +81,16 @@ async def execute_query(session_id: str, req: QueryRequest):
                             insert_id=cur.lastrowid,
                         )
                 finally:
-                    _active_queries.pop(session_id, None)
+                    _active_queries[session_id].discard(thread_id)
+                    if not _active_queries[session_id]:
+                        del _active_queries[session_id]
     except Exception as exc:
-        _active_queries.pop(session_id, None)
+        if thread_id is not None:
+            queries = _active_queries.get(session_id)
+            if queries:
+                queries.discard(thread_id)
+                if not queries:
+                    del _active_queries[session_id]
         return QueryResult(
             columns=[], rows=[], row_count=0,
             exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
@@ -89,21 +100,54 @@ async def execute_query(session_id: str, req: QueryRequest):
 
 @router.delete("/sessions/{session_id}/query")
 async def kill_query(session_id: str):
-    thread_id = _active_queries.get(session_id)
-    if not thread_id:
+    thread_ids = _active_queries.get(session_id)
+    if not thread_ids:
         return {"ok": False, "error": "No active query"}
     try:
         pool, _ = await _get_pool_or_404(session_id)
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(f"KILL QUERY {thread_id}")
+                for thread_id in list(thread_ids):
+                    await cur.execute(f"KILL QUERY {thread_id}")
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
 
+def _strip_quotes(sql: str) -> str:
+    """Remove quoted strings and backtick identifiers so keywords inside them are ignored."""
+    result: list[str] = []
+    i = 0
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "'":
+            i += 1
+            while i < len(sql):
+                if sql[i] == "'" and i + 1 < len(sql) and sql[i + 1] == "'":
+                    i += 2
+                elif sql[i] == "'":
+                    i += 1
+                    break
+                else:
+                    i += 1
+        elif ch == '"':
+            i += 1
+            while i < len(sql) and sql[i] != '"':
+                i += 1
+            i += 1
+        elif ch == '`':
+            i += 1
+            while i < len(sql) and sql[i] != '`':
+                i += 1
+            i += 1
+        else:
+            result.append(ch)
+            i += 1
+    return ''.join(result)
+
+
 def _serialize(v: Any) -> Any:
-    if isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
+    if isinstance(v, (datetime.datetime, datetime.date, datetime.time, datetime.timedelta)):
         return str(v)
     if isinstance(v, decimal.Decimal):
         return str(v)
@@ -215,6 +259,10 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("SET autocommit=0")
+                await cur.execute("SELECT @@autocommit")
+                autocommit_row = await cur.fetchone()
+                if autocommit_row and autocommit_row[0]:
+                    raise RuntimeError("Failed to disable autocommit for transactional delete")
                 try:
                     for pk in req.primary_keys:
                         pk_clauses, pk_values = _build_pk_where(pk)

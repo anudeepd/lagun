@@ -80,6 +80,30 @@ export interface TableInfo {
   comment: string
 }
 
+export interface ColumnDef {
+  name: string
+  type: string
+  nullable: boolean
+  primary_key: boolean
+  auto_increment: boolean
+  default?: string
+}
+
+export interface CreateTableRequest {
+  name: string
+  columns: ColumnDef[]
+  engine: string
+  charset: string
+  collation: string
+}
+
+export interface CreateIndexRequest {
+  name: string
+  columns: string[]
+  is_unique: boolean
+  index_type: string
+}
+
 export type TabType = 'query' | 'table'
 
 export interface Tab {

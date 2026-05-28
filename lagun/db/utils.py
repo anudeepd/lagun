@@ -94,6 +94,6 @@ def escape_string_literal(val: str) -> str:
     SQL-standard quote-doubling.  Rejects values containing dangerous
     metacharacters that should never appear in DDL string contexts.
     """
-    if any(c in val for c in (";",)) or "--" in val:
+    if any(c in val for c in (";",)) or "--" in val or "/*" in val:
         raise ValueError(f"Value contains disallowed characters: {val!r}")
     return val.replace("'", "''")
