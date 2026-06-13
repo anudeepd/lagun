@@ -87,7 +87,11 @@ if _ldap_config_path:
             "Install it with: pip install 'lagun[ldap]' or pip install -e /path/to/ldapgate"
         ) from e
     _login_template = Path(__file__).parent / "templates" / "login.html"
-    add_ldap_auth(app, load_config(_ldap_config_path), template_path=str(_login_template))
+    _ldap_config = load_config(_ldap_config_path)
+    # Lagun's frontend bundle is the application itself, not public login-page
+    # chrome, so keep all app/static routes behind LDAP auth.
+    _ldap_config.proxy.static_paths = []
+    add_ldap_auth(app, _ldap_config, template_path=str(_login_template))
 
 
 @app.get("/{full_path:path}", include_in_schema=False)

@@ -17,6 +17,14 @@ export default function Sidebar() {
   const [showExport, setShowExport] = useState(false)
   const [showImport, setShowImport] = useState(false)
 
+  const submitLogout = () => {
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = '/_auth/logout'
+    document.body.appendChild(form)
+    form.submit()
+  }
+
   return (
     <aside className="w-full bg-surface-900 flex flex-col overflow-hidden">
       {/* Header */}
@@ -54,7 +62,7 @@ export default function Sidebar() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => { window.location.href = '/_auth/logout' }}
+              onClick={submitLogout}
               title="Logout"
               className="p-1 text-red-400 hover:text-red-300"
             >

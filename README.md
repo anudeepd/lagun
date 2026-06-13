@@ -52,6 +52,10 @@ pip install 'lagun[ldap]'
 lagun serve --ldap-config /path/to/ldapgate.yaml
 ```
 
+For direct local HTTP usage, set `proxy.secure_cookies: false` in the ldapgate
+config. Keep `secure_cookies: true` in production and run Lagun behind HTTPS
+with `trusted_proxies` configured so LDAPGate can honor `X-Forwarded-Proto`.
+
 When LDAP is enabled, a logout button appears in the top-right corner of the tab bar.
 
 See the [ldapgate README](https://github.com/anudeepd/ldapgate) for config file documentation.
