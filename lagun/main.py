@@ -27,11 +27,11 @@ APP_CSP = (
     "script-src 'self'; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; "
-    "font-src 'self'"
+    "font-src 'self' data:"
 )
 
 
-app = FastAPI(title="Lagun API", version="0.1.22", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.25", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -99,6 +99,8 @@ def _ensure_ldapgate_static_paths(config) -> None:
     proxy_config = getattr(config, "proxy", None)
     if proxy_config is None:
         return
+    if getattr(proxy_config, "session_cookie_name", "ldapgate_session") == "ldapgate_session":
+        proxy_config.session_cookie_name = "lagun_session"
     static_paths = list(getattr(proxy_config, "static_paths", []) or [])
     for path in ("/favicon.svg", "/favicon.ico"):
         if path not in static_paths:

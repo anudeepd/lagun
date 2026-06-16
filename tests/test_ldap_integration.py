@@ -6,6 +6,7 @@ from lagun.main import APP_CSP, _ensure_ldapgate_static_paths
 
 def test_app_csp_allows_self_fonts():
     assert "font-src 'self'" in APP_CSP
+    assert "font-src 'self' data:" in APP_CSP
 
 
 def test_ensure_ldapgate_static_paths_preserves_existing_paths():
@@ -14,6 +15,7 @@ def test_ensure_ldapgate_static_paths_preserves_existing_paths():
 
     _ensure_ldapgate_static_paths(config)
 
+    assert proxy.session_cookie_name == "lagun_session"
     assert proxy.static_paths == ["/custom", "/favicon.svg", "/favicon.ico"]
 
 

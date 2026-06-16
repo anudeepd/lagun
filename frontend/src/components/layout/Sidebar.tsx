@@ -64,7 +64,7 @@ export default function Sidebar() {
               size="sm"
               onClick={submitLogout}
               title="Logout"
-              className="p-1 text-red-400 hover:text-red-300"
+              className="p-1 bg-red-900/30 text-red-300 hover:bg-red-900/50 hover:text-red-200 border border-red-800/60"
             >
               <LogOut size={14} />
             </Button>
