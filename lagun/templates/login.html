@@ -52,6 +52,7 @@
       color: #f1f5f9;
       letter-spacing: -0.025em;
     }
+    .brand-logo { flex-shrink: 0; }
 
     /* ── Error ── */
     .error {
@@ -165,7 +166,7 @@
 <body>
   <div class="card">
     <div class="logo-wrap">
-      <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" width="36" height="36" style="flex-shrink:0">
+      <svg class="brand-logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
         <rect x="4" y="4" width="120" height="120" rx="24" fill="#f0f9ff"/>
         <g fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round">
           <path d="M 28 34 Q 38 26 48 34 T 68 34 T 88 34 T 100 34"/>
@@ -194,6 +195,7 @@
 
     <form method="POST" action="{{ login_path }}" id="login-form">
       {% if redirect %}<input type="hidden" name="redirect" value="{{ redirect }}">{% endif %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
       <div class="field">
         <label for="username">Username</label>
