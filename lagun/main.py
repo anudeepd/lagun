@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from importlib.resources import files
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -21,7 +21,25 @@ async def lifespan(app: FastAPI):
     await close_all_pools()
 
 
-app = FastAPI(title="Lagun API", version="0.1.19", lifespan=lifespan)
+APP_CSP = (
+    "default-src 'self'; "
+    "connect-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self'"
+)
+
+
+app = FastAPI(title="Lagun API", version="0.1.22", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def add_app_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/_auth/"):
+        response.headers.setdefault("Content-Security-Policy", APP_CSP)
+    return response
 
 # CORS for development (Vite dev server)
 if os.getenv("LAGUN_DEV"):
@@ -76,6 +94,18 @@ async def favicon():
     return JSONResponse(status_code=404, content={"detail": "Not found"})
 
 
+def _ensure_ldapgate_static_paths(config) -> None:
+    """Allow only login-page public assets without exposing the SPA bundle."""
+    proxy_config = getattr(config, "proxy", None)
+    if proxy_config is None:
+        return
+    static_paths = list(getattr(proxy_config, "static_paths", []) or [])
+    for path in ("/favicon.svg", "/favicon.ico"):
+        if path not in static_paths:
+            static_paths.append(path)
+    proxy_config.static_paths = static_paths
+
+
 _ldap_config_path = os.getenv("LAGUN_LDAP_CONFIG")
 if _ldap_config_path:
     try:
@@ -88,9 +118,7 @@ if _ldap_config_path:
         ) from e
     _login_template = Path(__file__).parent / "templates" / "login.html"
     _ldap_config = load_config(_ldap_config_path)
-    # Lagun's frontend bundle is the application itself, not public login-page
-    # chrome, so keep all app/static routes behind LDAP auth.
-    _ldap_config.proxy.static_paths = []
+    _ensure_ldapgate_static_paths(_ldap_config)
     add_ldap_auth(app, _ldap_config, template_path=str(_login_template))
 
 

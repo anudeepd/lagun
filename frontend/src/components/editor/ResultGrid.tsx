@@ -1,7 +1,7 @@
 import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
-import { Copy, Braces, Slash, Clock, Trash2 } from 'lucide-react'
+import { Copy, Braces, Slash, Clock, Trash2, CopyPlus } from 'lucide-react'
 import type { CellClassParams, CellContextMenuEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 
 export interface ResultGridHandle {
@@ -65,11 +65,13 @@ interface Props {
   onSelectionChange?: (rows: Record<string, unknown>[]) => void
   columns?: ColumnInfo[]
   onDeleteRows?: (rows: Record<string, unknown>[]) => void
+  onDuplicateRow?: (row: Record<string, unknown>) => void
   hiddenColumns?: Set<string>
   pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
+  insertDrafts?: Map<string, Record<string, unknown>>
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, hiddenColumns, pendingChanges }: Props, ref) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
@@ -100,7 +102,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   // Refresh cell styles whenever pending changes update
   useEffect(() => {
     agApiRef.current?.refreshCells({ force: true })
-  }, [pendingChanges])
+  }, [pendingChanges, insertDrafts])
 
   const columnDefs = useMemo(() =>
     result.columns.map(col => ({
@@ -116,6 +118,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
         const base = { fontFamily: 'ui-monospace, monospace', fontSize: '12px' }
         const rowId = params.data?.__ag_rowId as string | undefined
+        if (params.data?.__lagun_insertDraft) {
+          return { ...base, backgroundColor: '#064e3b', color: '#bbf7d0' }
+        }
         if (rowId && pendingChangesRef.current?.get(rowId)?.changes[col] !== undefined) {
           return { ...base, backgroundColor: '#7c3a00', color: '#fed7aa' }
         }
@@ -126,8 +131,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     [result.columns, editable, hiddenColumns]
   )
 
-  const rowData = useMemo(() =>
-    result.rows.map((row, rowIdx) => {
+  const rowData = useMemo(() => {
+    const rows = result.rows.map((row, rowIdx) => {
       const obj: Record<string, unknown> = {}
       result.columns.forEach((col, i) => {
         obj[col] = row[i]
@@ -135,10 +140,23 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       const keyCols = primaryKeyColumns.length > 0 ? primaryKeyColumns : result.columns
       const keyValues = keyCols.map(col => String(obj[col] ?? '')).join('\x00')
       obj.__ag_rowId = keyValues || String(rowIdx)
+      const pending = pendingChanges?.get(obj.__ag_rowId as string)
+      if (pending) Object.assign(obj, pending.changes)
       return obj
-    }),
-    [result.rows, result.columns, primaryKeyColumns]
-  )
+    })
+    if (insertDrafts?.size) {
+      for (const [rowId, values] of insertDrafts) {
+        const obj: Record<string, unknown> = {}
+        result.columns.forEach(col => {
+          obj[col] = values[col] ?? null
+        })
+        obj.__ag_rowId = rowId
+        obj.__lagun_insertDraft = true
+        rows.push(obj)
+      }
+    }
+    return rows
+  }, [result.rows, result.columns, primaryKeyColumns, pendingChanges, insertDrafts])
 
   const getRowId = useCallback((params: { data: Record<string, unknown> }) =>
     params.data.__ag_rowId as string,
@@ -242,9 +260,11 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     const colInfo = columns?.find(c => c.name === menu.columnName)
     const isDateType = colInfo && DATE_TYPES.has(colInfo.data_type.toLowerCase())
     const validRowIds = new Set(rowData.map(r => r.__ag_rowId as string))
-    const selected = menu.selectedRows.filter(r => validRowIds.has(r.__ag_rowId as string))
+    const selected = menu.selectedRows.filter(r =>
+      validRowIds.has(r.__ag_rowId as string) && !r.__lagun_insertDraft
+    )
     const targetRows = selected.length > 0 ? selected : [menu.rowData]
-    const { __ag_rowId, ...displayRow } = menu.rowData
+    const { __ag_rowId, __lagun_insertDraft, ...displayRow } = menu.rowData
 
     const items: ContextMenuItem[] = [
       {
@@ -282,7 +302,17 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       }
     }
 
-    if (onDeleteRows && primaryKeyColumns.length > 0) {
+    if (editable && onDuplicateRow && !menu.rowData.__lagun_insertDraft) {
+      items.push({ type: 'separator' })
+      items.push({
+        type: 'item',
+        label: 'Duplicate row',
+        icon: <CopyPlus size={12} />,
+        onClick: () => { onDuplicateRow(menu.rowData); closeMenu() },
+      })
+    }
+
+    if (onDeleteRows && primaryKeyColumns.length > 0 && !menu.rowData.__lagun_insertDraft) {
       const label = targetRows.length > 1 ? `Delete ${targetRows.length} rows` : 'Delete row'
       items.push({ type: 'separator' })
       items.push({
@@ -295,7 +325,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     }
 
     return items
-  }, [menu, columns, editable, onCellEdit, onDeleteRows, primaryKeyColumns, closeMenu])
+  }, [menu, columns, editable, onCellEdit, onDeleteRows, onDuplicateRow, primaryKeyColumns, closeMenu, rowData])
 
   if (result.error) {
     return (

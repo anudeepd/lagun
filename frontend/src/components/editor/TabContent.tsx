@@ -434,9 +434,12 @@ function TableTab({ tab }: Props) {
   const [pendingChanges, setPendingChanges] = useState<
     Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   >(new Map())
+  const [insertDrafts, setInsertDrafts] = useState<Map<string, Record<string, unknown>>>(new Map())
   const pendingChangesRef = useRef(pendingChanges)
+  const insertDraftsRef = useRef(insertDrafts)
   useEffect(() => {
     pendingChangesRef.current = pendingChanges
+    insertDraftsRef.current = insertDrafts
   })
   const loadAbortRef = useRef<AbortController | null>(null)
   const colPickerRef = useRef<HTMLDivElement>(null)
@@ -527,6 +530,7 @@ function TableTab({ tab }: Props) {
     setShowColPicker(false)
     setColSearch('')
     setPendingChanges(new Map())
+    setInsertDrafts(new Map())
   }, [tab.sessionId, tab.database, tab.table])
 
   useEffect(() => {
@@ -565,6 +569,18 @@ function TableTab({ tab }: Props) {
     if (initialLoading || refreshing) return
     const rowId = params.data.__ag_rowId as string
 
+    if (params.data.__lagun_insertDraft) {
+      setInsertDrafts(prev => {
+        const next = new Map(prev)
+        const draft = { ...(next.get(rowId) ?? {}) }
+        draft[params.column] = params.newValue
+        next.set(rowId, draft)
+        insertDraftsRef.current = next
+        return next
+      })
+      return
+    }
+
     setPendingChanges(prev => {
       const next = new Map(prev)
       const existing = next.get(rowId)
@@ -589,6 +605,22 @@ function TableTab({ tab }: Props) {
     })
   }, [tab.database, tab.table, rowKeyColumns, initialLoading, refreshing])
 
+  const handleDuplicateRow = useCallback((row: Record<string, unknown>) => {
+    const draftId = `__insert__${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const values: Record<string, unknown> = {}
+    columns.forEach(col => {
+      values[col.name] = row[col.name] ?? null
+    })
+    setInsertDrafts(prev => {
+      const next = new Map(prev)
+      next.set(draftId, values)
+      insertDraftsRef.current = next
+      return next
+    })
+    setStatusMsg('Duplicated row as an insert draft. Edit values, then Apply.')
+    setTimeout(() => setStatusMsg(null), 4000)
+  }, [columns])
+
   const handleApplyChanges = async () => {
     // Force-commit any in-progress cell edit before reading pending changes.
     // Without this, a just-edited cell whose blur hasn't fired yet would be
@@ -597,7 +629,8 @@ function TableTab({ tab }: Props) {
     gridRef.current?.stopEditing()
 
     const currentPending = pendingChangesRef.current
-    if (!tab.database || !tab.table || currentPending.size === 0) return
+    const currentDrafts = insertDraftsRef.current
+    if (!tab.database || !tab.table || (currentPending.size === 0 && currentDrafts.size === 0)) return
     for (const [, { original, changes }] of currentPending) {
       const primary_key: Record<string, unknown> = {}
       rowKeyColumns.forEach(pk => { primary_key[pk] = original[pk] })
@@ -620,7 +653,26 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
         return
       }
     }
+    for (const [, values] of currentDrafts) {
+      const start = Date.now()
+      const r = await api.rowInsert(tab.sessionId, {
+        database: tab.database,
+        table: tab.table,
+        values,
+      })
+      try { addEntry({ sql: `INSERT INTO \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.ok ? 1 : 0, execTimeMs: Date.now() - start, error: r.error ?? undefined }) } catch { /* ignore */ }
+      if (!r.ok) {
+        setStatusMsg(`✗ ${r.error}`)
+        setTimeout(() => setStatusMsg(null), 4000)
+        return
+      }
+    }
     setPendingChanges(new Map())
+    setInsertDrafts(new Map())
+    if (currentDrafts.size > 0) {
+      setStatusMsg(`✓ Inserted ${currentDrafts.size} duplicated row${currentDrafts.size !== 1 ? 's' : ''}`)
+      setTimeout(() => setStatusMsg(null), 4000)
+    }
 
     // Optimistically apply changes to local result state
     if (currentPending.size > 0) {
@@ -652,6 +704,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
 
   const handleDiscardChanges = () => {
     setPendingChanges(new Map())
+    setInsertDrafts(new Map())
     loadData()
   }
 
@@ -896,13 +949,13 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
           </div>
         )}
         {/* Pending changes: Apply / Discard */}
-        {view === 'data' && pendingChanges.size > 0 && (
+        {view === 'data' && (pendingChanges.size > 0 || insertDrafts.size > 0) && (
           <>
             <button
               onClick={handleApplyChanges}
               className="flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-700 hover:bg-amber-600 text-white rounded transition-colors"
             >
-              Apply ({pendingChanges.size})
+              Apply ({pendingChanges.size + insertDrafts.size})
             </button>
             <button
               onClick={handleDiscardChanges}
@@ -966,7 +1019,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
           </button>
         )}
         {view === 'data' && (
-          <Button variant="ghost" size="sm" onClick={() => { setPendingChanges(new Map()); loadData() }} title="Refresh" disabled={initialLoading || refreshing}>
+          <Button variant="ghost" size="sm" onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); loadData() }} title="Refresh" disabled={initialLoading || refreshing}>
             <RefreshCw size={12} className={initialLoading || refreshing ? 'animate-spin' : ''} />
           </Button>
         )}
@@ -1043,11 +1096,13 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
               primaryKeyColumns={rowKeyColumns}
               onCellEdit={handleCellEdit}
               onDeleteRows={handleDeleteRows}
+              onDuplicateRow={handleDuplicateRow}
               selectable={true}
               onSelectionChange={setSelectedRows}
               columns={columns}
               hiddenColumns={hiddenColumns}
               pendingChanges={pendingChanges}
+              insertDrafts={insertDrafts}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">

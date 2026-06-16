@@ -12,7 +12,7 @@ import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sq
 import { isMac, modKey } from '../../utils/platform'
 
 // Extract the current SQL statement from the document at the given position
-function extractStatementAt(doc: string, pos: number): string {
+export function extractStatementAt(doc: string, pos: number): string {
   let start = 0
   for (let i = pos - 1; i >= 0; i--) {
     if (doc[i] === ';') { start = i + 1; break }
@@ -21,11 +21,14 @@ function extractStatementAt(doc: string, pos: number): string {
 }
 
 // Parse a statement for in-scope tables (FROM/JOIN) and subquery aliases
-function extractScopeInfo(sql: string): { realTables: string[], subqueryAliases: Map<string, string[]> } {
+export function extractScopeInfo(sql: string): { realTables: string[], subqueryAliases: Map<string, string[]> } {
   const realTables: string[] = []
 
   // FROM/JOIN real tables
   for (const m of sql.matchAll(/(?:FROM|JOIN)\s+`?(?:\w+`?\.`?)?(\w+)`?/gi)) {
+    realTables.push(m[1])
+  }
+  for (const m of sql.matchAll(/\bUPDATE\s+`?(?:\w+`?\.`?)?(\w+)`?/gi)) {
     realTables.push(m[1])
   }
 
@@ -49,7 +52,7 @@ function extractScopeInfo(sql: string): { realTables: string[], subqueryAliases:
 }
 
 // Check if the cursor is in a context that expects column names (not table names)
-function isInColumnContext(textBefore: string): boolean {
+export function isInColumnContext(textBefore: string): boolean {
   // Skip if cursor is after a dot — schemaCompletionSource handles that
   if (/\.\w*$/.test(textBefore)) return false
   // Skip if immediately after a table-name context keyword
