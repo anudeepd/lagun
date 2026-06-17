@@ -10,6 +10,10 @@ export interface ResultGridHandle {
   stopEditing: () => void
   deselectAll: () => void
 }
+
+export interface InsertDraftAnchor {
+  afterRowId: string
+}
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo } from '../../types'
 import { clipboardWrite } from '../../utils/clipboard'
@@ -69,9 +73,78 @@ interface Props {
   hiddenColumns?: Set<string>
   pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   insertDrafts?: Map<string, Record<string, unknown>>
+  insertDraftAnchors?: Map<string, InsertDraftAnchor>
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts }: Props, ref) {
+export function buildResultGridRowData({
+  result,
+  primaryKeyColumns = [],
+  pendingChanges,
+  insertDrafts,
+  insertDraftAnchors,
+}: {
+  result: QueryResult
+  primaryKeyColumns?: string[]
+  pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
+  insertDrafts?: Map<string, Record<string, unknown>>
+  insertDraftAnchors?: Map<string, InsertDraftAnchor>
+}): Record<string, unknown>[] {
+  const rows = result.rows.map((row, rowIdx) => {
+    const obj: Record<string, unknown> = {}
+    result.columns.forEach((col, i) => {
+      obj[col] = row[i]
+    })
+    const keyCols = primaryKeyColumns.length > 0 ? primaryKeyColumns : result.columns
+    const keyValues = keyCols.map(col => String(obj[col] ?? '')).join('\x00')
+    obj.__ag_rowId = keyValues || String(rowIdx)
+    const pending = pendingChanges?.get(obj.__ag_rowId as string)
+    if (pending) Object.assign(obj, pending.changes)
+    return obj
+  })
+
+  if (!insertDrafts?.size) return rows
+
+  const draftsByAnchor = new Map<string, Record<string, unknown>[]>()
+  const unanchoredDrafts: Record<string, unknown>[] = []
+  for (const [rowId, values] of insertDrafts) {
+    const obj: Record<string, unknown> = {}
+    result.columns.forEach(col => {
+      obj[col] = values[col] ?? null
+    })
+    obj.__ag_rowId = rowId
+    obj.__lagun_insertDraft = true
+    const anchor = insertDraftAnchors?.get(rowId)?.afterRowId
+    if (anchor) {
+      const drafts = draftsByAnchor.get(anchor) ?? []
+      drafts.push(obj)
+      draftsByAnchor.set(anchor, drafts)
+    } else {
+      unanchoredDrafts.push(obj)
+    }
+  }
+
+  const orderedRows: Record<string, unknown>[] = []
+  const insertedDraftIds = new Set<string>()
+  for (const row of rows) {
+    orderedRows.push(row)
+    const drafts = draftsByAnchor.get(row.__ag_rowId as string)
+    if (!drafts) continue
+    orderedRows.push(...drafts)
+    drafts.forEach(draft => insertedDraftIds.add(draft.__ag_rowId as string))
+  }
+
+  for (const drafts of draftsByAnchor.values()) {
+    for (const draft of drafts) {
+      if (!insertedDraftIds.has(draft.__ag_rowId as string)) {
+        unanchoredDrafts.push(draft)
+      }
+    }
+  }
+
+  return [...orderedRows, ...unanchoredDrafts]
+}
+
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
@@ -131,32 +204,13 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     [result.columns, editable, hiddenColumns]
   )
 
-  const rowData = useMemo(() => {
-    const rows = result.rows.map((row, rowIdx) => {
-      const obj: Record<string, unknown> = {}
-      result.columns.forEach((col, i) => {
-        obj[col] = row[i]
-      })
-      const keyCols = primaryKeyColumns.length > 0 ? primaryKeyColumns : result.columns
-      const keyValues = keyCols.map(col => String(obj[col] ?? '')).join('\x00')
-      obj.__ag_rowId = keyValues || String(rowIdx)
-      const pending = pendingChanges?.get(obj.__ag_rowId as string)
-      if (pending) Object.assign(obj, pending.changes)
-      return obj
-    })
-    if (insertDrafts?.size) {
-      for (const [rowId, values] of insertDrafts) {
-        const obj: Record<string, unknown> = {}
-        result.columns.forEach(col => {
-          obj[col] = values[col] ?? null
-        })
-        obj.__ag_rowId = rowId
-        obj.__lagun_insertDraft = true
-        rows.push(obj)
-      }
-    }
-    return rows
-  }, [result.rows, result.columns, primaryKeyColumns, pendingChanges, insertDrafts])
+  const rowData = useMemo(() => buildResultGridRowData({
+    result,
+    primaryKeyColumns,
+    pendingChanges,
+    insertDrafts,
+    insertDraftAnchors,
+  }), [result, primaryKeyColumns, pendingChanges, insertDrafts, insertDraftAnchors])
 
   const getRowId = useCallback((params: { data: Record<string, unknown> }) =>
     params.data.__ag_rowId as string,

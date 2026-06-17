@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { QueryResult } from '../../types'
+import { buildResultGridRowData } from '../../components/editor/ResultGrid'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -344,5 +345,64 @@ describe('applyEditsToRows — optimistic edit', () => {
 
     expect(out.exec_time_ms).toBe(99)
     expect(out.columns).toBe(cols)
+  })
+})
+
+describe('buildResultGridRowData — duplicated row draft placement', () => {
+  const result = makeResult(['id', 'name'], [
+    [1, 'Alice'],
+    [2, 'Bob'],
+    [3, 'Carol'],
+  ])
+
+  it('places a duplicated row draft immediately below the source row', () => {
+    const drafts = new Map<string, Record<string, unknown>>()
+    drafts.set('__insert__1', { id: 2, name: 'Bob' })
+    const anchors = new Map([['__insert__1', { afterRowId: '2' }]])
+
+    const rows = buildResultGridRowData({
+      result,
+      primaryKeyColumns: ['id'],
+      insertDrafts: drafts,
+      insertDraftAnchors: anchors,
+    })
+
+    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '__insert__1', '3'])
+    expect(rows[2].__lagun_insertDraft).toBe(true)
+    expect(rows[2].name).toBe('Bob')
+  })
+
+  it('preserves creation order for multiple drafts from the same source row', () => {
+    const drafts = new Map<string, Record<string, unknown>>()
+    drafts.set('__insert__1', { id: 2, name: 'Bob copy 1' })
+    drafts.set('__insert__2', { id: 2, name: 'Bob copy 2' })
+    const anchors = new Map([
+      ['__insert__1', { afterRowId: '2' }],
+      ['__insert__2', { afterRowId: '2' }],
+    ])
+
+    const rows = buildResultGridRowData({
+      result,
+      primaryKeyColumns: ['id'],
+      insertDrafts: drafts,
+      insertDraftAnchors: anchors,
+    })
+
+    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '__insert__1', '__insert__2', '3'])
+  })
+
+  it('appends drafts when the source row is no longer in the result set', () => {
+    const drafts = new Map<string, Record<string, unknown>>()
+    drafts.set('__insert__1', { id: 99, name: 'Detached' })
+    const anchors = new Map([['__insert__1', { afterRowId: '99' }]])
+
+    const rows = buildResultGridRowData({
+      result,
+      primaryKeyColumns: ['id'],
+      insertDrafts: drafts,
+      insertDraftAnchors: anchors,
+    })
+
+    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '3', '__insert__1'])
   })
 })

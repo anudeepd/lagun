@@ -7,7 +7,7 @@ import { useQueryLogStore } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
-import ResultGrid, { type ResultGridHandle } from './ResultGrid'
+import ResultGrid, { type InsertDraftAnchor, type ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X, Eye } from 'lucide-react'
 import Button from '../ui/Button'
@@ -435,6 +435,7 @@ function TableTab({ tab }: Props) {
     Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   >(new Map())
   const [insertDrafts, setInsertDrafts] = useState<Map<string, Record<string, unknown>>>(new Map())
+  const [insertDraftAnchors, setInsertDraftAnchors] = useState<Map<string, InsertDraftAnchor>>(new Map())
   const pendingChangesRef = useRef(pendingChanges)
   const insertDraftsRef = useRef(insertDrafts)
   useEffect(() => {
@@ -531,6 +532,7 @@ function TableTab({ tab }: Props) {
     setColSearch('')
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
+    setInsertDraftAnchors(new Map())
   }, [tab.sessionId, tab.database, tab.table])
 
   useEffect(() => {
@@ -617,6 +619,11 @@ function TableTab({ tab }: Props) {
       insertDraftsRef.current = next
       return next
     })
+    setInsertDraftAnchors(prev => {
+      const next = new Map(prev)
+      next.set(draftId, { afterRowId: row.__ag_rowId as string })
+      return next
+    })
     setStatusMsg('Duplicated row as an insert draft. Edit values, then Apply.')
     setTimeout(() => setStatusMsg(null), 4000)
   }, [columns])
@@ -669,6 +676,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
     }
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
+    setInsertDraftAnchors(new Map())
     if (currentDrafts.size > 0) {
       setStatusMsg(`✓ Inserted ${currentDrafts.size} duplicated row${currentDrafts.size !== 1 ? 's' : ''}`)
       setTimeout(() => setStatusMsg(null), 4000)
@@ -1103,6 +1111,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
               hiddenColumns={hiddenColumns}
               pendingChanges={pendingChanges}
               insertDrafts={insertDrafts}
+              insertDraftAnchors={insertDraftAnchors}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">

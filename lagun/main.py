@@ -31,7 +31,7 @@ APP_CSP = (
 )
 
 
-app = FastAPI(title="Lagun API", version="0.1.25", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.26", lifespan=lifespan)
 
 
 @app.middleware("http")
