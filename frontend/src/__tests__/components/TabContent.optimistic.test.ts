@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { QueryResult } from '../../types'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
+import { normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -216,6 +217,88 @@ describe('filterDeletedRows — optimistic delete', () => {
     const out = filterDeletedRows(result, deleted, pk)
 
     expect(out).not.toBe(result)
+  })
+})
+
+describe('buildResultGridRowData — row identity', () => {
+  it('uses unique row ids for duplicate result rows without primary keys', () => {
+    const result = makeResult(['name', 'role'], [
+      ['Sam', 'admin'],
+      ['Sam', 'admin'],
+      ['Sam', 'admin'],
+    ])
+
+    const rows = buildResultGridRowData({ result, primaryKeyColumns: [] })
+    const rowIds = rows.map(row => row.__ag_rowId)
+
+    expect(new Set(rowIds).size).toBe(3)
+  })
+
+  it('keeps primary-key row ids stable when primary keys are provided', () => {
+    const result = makeResult(['id', 'name'], [
+      [1, 'Sam'],
+      [2, 'Sam'],
+    ])
+
+    const rows = buildResultGridRowData({ result, primaryKeyColumns: ['id'] })
+
+    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2'])
+  })
+})
+
+describe('query result export metadata', () => {
+  it('uses the active result statement instead of the full editor SQL', () => {
+    const editorSql = 'SELECT 1; SELECT 2;'
+    const executedResults = [
+      { result: makeResult(['one'], [[1]]), sql: 'SELECT 1' },
+      { result: makeResult(['two'], [[2]]), sql: 'SELECT 2' },
+    ]
+    const activeResultIdx = 1
+
+    expect(executedResults[activeResultIdx].sql).toBe('SELECT 2')
+    expect(executedResults[activeResultIdx].sql).not.toBe(editorSql)
+  })
+})
+
+describe('data filter error handling', () => {
+  it('keeps the previous visible result when a later load has an error', () => {
+    const current = makeResult(['id'], [[1]])
+    const next = makeResult([], [])
+    next.error = 'Unknown column nope'
+
+    expect(shouldKeepPreviousResultOnLoad(next, current)).toBe(true)
+  })
+
+  it('allows an initial error result when nothing is visible yet', () => {
+    const next = makeResult([], [])
+    next.error = 'Unknown column nope'
+
+    expect(shouldKeepPreviousResultOnLoad(next, null)).toBe(false)
+  })
+})
+
+describe('data tab persisted filter state', () => {
+  it('normalizes saved Data tab filter values for reload', () => {
+    expect(normalizeDataTabState({
+      view: 'data',
+      globalSearch: 'sam',
+      whereFilter: 'email LIKE "%@example.com"',
+      appliedWhere: 'email LIKE "%@example.com"',
+      showFilterBar: true,
+      limit: 500,
+    })).toEqual({
+      view: 'data',
+      globalSearch: 'sam',
+      whereFilter: 'email LIKE "%@example.com"',
+      appliedWhere: 'email LIKE "%@example.com"',
+      showFilterBar: true,
+      limit: 500,
+    })
+  })
+
+  it('opens the filter bar when old saved state has filter text but no bar flag', () => {
+    expect(normalizeDataTabState({ whereFilter: 'id = 1' }).showFilterBar).toBe(true)
+    expect(normalizeDataTabState({ appliedWhere: 'id = 1' }).showFilterBar).toBe(true)
   })
 })
 

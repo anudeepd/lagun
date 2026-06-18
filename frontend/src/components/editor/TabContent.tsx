@@ -1,20 +1,20 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import type { Tab, QueryResult, ColumnInfo } from '../../types'
+import type { Tab, QueryResult, ColumnInfo, DataTabState } from '../../types'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
-import ResultGrid, { type InsertDraftAnchor, type ResultGridHandle } from './ResultGrid'
+import ResultGrid, { buildResultGridRowId, type InsertDraftAnchor, type ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
-import { RefreshCw, Download, Upload, Search, Filter, X, Eye } from 'lucide-react'
+import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText } from 'lucide-react'
 import Button from '../ui/Button'
 import ReactCodeMirror from '@uiw/react-codemirror'
 import { sql, MySQL } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { keymap } from '@codemirror/view'
+import { EditorView, keymap } from '@codemirror/view'
 import { Prec } from '@codemirror/state'
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
@@ -25,7 +25,13 @@ const ExportDialog = lazy(() => import('../table/ExportDialog'))
 const ImportDialog = lazy(() => import('../table/ImportDialog'))
 
 const KEY_WORD_WRAP = 'lagun-query-word-wrap'
+const KEY_FILTER_WORD_WRAP = 'lagun-data-filter-word-wrap'
 const KEY_EDITOR_HEIGHT = 'lagun-query-editor-height'
+
+interface ExecutedQueryResult {
+  result: QueryResult
+  sql: string
+}
 
 try {
   const oldWrap = localStorage.getItem('queryWordWrap')
@@ -86,6 +92,21 @@ function splitStatements(sql: string): string[] {
   return statements
 }
 
+export function shouldKeepPreviousResultOnLoad(nextResult: QueryResult, currentResult: QueryResult | null): boolean {
+  return Boolean(nextResult.error && currentResult !== null)
+}
+
+export function normalizeDataTabState(state?: DataTabState): Required<DataTabState> {
+  return {
+    view: state?.view ?? 'schema',
+    globalSearch: state?.globalSearch ?? '',
+    whereFilter: state?.whereFilter ?? '',
+    appliedWhere: state?.appliedWhere ?? '',
+    showFilterBar: state?.showFilterBar ?? Boolean(state?.whereFilter || state?.appliedWhere),
+    limit: state?.limit ?? 1000,
+  }
+}
+
 const MIN_EDITOR_HEIGHT = 100
 const MAX_EDITOR_HEIGHT_FRACTION = 0.7
 
@@ -110,7 +131,7 @@ function QueryTab({ tab }: Props) {
   // Re-initialize local state when switching to a different tab's content
   useEffect(() => { setSql(storeSql) }, [tab.id])
 
-  const [results, setResults] = useState<QueryResult[]>([])
+  const [results, setResults] = useState<ExecutedQueryResult[]>([])
   const [resultIdx, setResultIdx] = useState(0)
   const [running, setRunning] = useState(false)
   const [limit, setLimit] = useState(1000)
@@ -272,7 +293,7 @@ function QueryTab({ tab }: Props) {
     if (statements.length === 0) return
 
     setRunning(true)
-    const newResults: QueryResult[] = []
+    const newResults: ExecutedQueryResult[] = []
     try {
       for (const stmt of statements) {
         const controller = new AbortController()
@@ -288,7 +309,7 @@ function QueryTab({ tab }: Props) {
           }
           throw e
         }
-        newResults.push(r)
+        newResults.push({ result: r, sql: stmt })
         try {
           addEntry({
             sql: stmt,
@@ -316,7 +337,7 @@ function QueryTab({ tab }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-full" ref={editorContainerRef}>
+    <div className="flex flex-col h-full min-h-0" ref={editorContainerRef}>
       <div style={{ height: editorHeight }} className="flex-shrink-0">
         <QueryEditor
           value={sql}
@@ -340,10 +361,10 @@ function QueryTab({ tab }: Props) {
         onMouseDown={handleEditorDividerMouseDown}
         className="h-1.5 flex-shrink-0 bg-surface-800 hover:bg-brand-500 cursor-row-resize transition-colors"
       />
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {results.length > 1 && (
           <div className="flex flex-shrink-0 bg-surface-900 border-b border-surface-800 overflow-x-auto">
-            {results.map((r, i) => (
+            {results.map((entry, i) => (
               <button
                 key={i}
                 onClick={() => setResultIdx(i)}
@@ -353,18 +374,18 @@ function QueryTab({ tab }: Props) {
                     : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800'
                 }`}
               >
-                {r.error
+                {entry.result.error
                   ? `✗ Result ${i + 1}`
-                  : r.columns.length > 0
-                    ? `Result ${i + 1} (${r.row_count} rows)`
-                    : `Result ${i + 1} (${r.affected_rows ?? 0} affected)`}
+                  : entry.result.columns.length > 0
+                    ? `Result ${i + 1} (${entry.result.row_count} rows)`
+                    : `Result ${i + 1} (${entry.result.affected_rows ?? 0} affected)`}
               </button>
             ))}
           </div>
         )}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden min-h-0">
           {results.length > 0 ? (
-            <ResultGrid key={resultIdx} ref={gridRef} result={results[resultIdx]} />
+            <ResultGrid key={resultIdx} ref={gridRef} result={results[resultIdx].result} />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
               Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
@@ -374,25 +395,34 @@ function QueryTab({ tab }: Props) {
       </div>
       <div className="flex items-center border-t border-surface-800">
         <div className="flex-1">
-          <ResultToolbar result={results[resultIdx] ?? null} running={running} />
+          <ResultToolbar result={results[resultIdx]?.result ?? null} running={running} />
         </div>
-        {results[resultIdx] && !results[resultIdx].error && results[resultIdx].columns.length > 0 && (
-          <button
-            onClick={() => {
-              setExportOverride(
-                gridRef.current?.isAnyFilterPresent() ? gridRef.current.getFilteredData() : undefined
-              )
-              setShowExport(true)
-            }}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-            title="Export result"
-          >
-            <Download size={11} /> Export
-          </button>
+        {results[resultIdx] && !results[resultIdx].result.error && results[resultIdx].result.columns.length > 0 && (
+          <div className="flex items-center">
+            <button
+              onClick={() => gridRef.current?.clearSort()}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              title="Clear result sorting"
+            >
+              Clear Sort
+            </button>
+            <button
+              onClick={() => {
+                setExportOverride(
+                  gridRef.current?.isAnyFilterPresent() ? gridRef.current.getFilteredData() : undefined
+                )
+                setShowExport(true)
+              }}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              title="Export result"
+            >
+              <Download size={11} /> Export
+            </button>
+          </div>
         )}
       </div>
 
-      {showExport && tab.database && sql.trim() && (
+      {showExport && tab.database && results[resultIdx]?.sql && (
         <Suspense fallback={null}>
           <ExportDialog
             open={showExport}
@@ -400,7 +430,7 @@ function QueryTab({ tab }: Props) {
             sessionId={tab.sessionId}
             database={tab.database}
             table="query_result"
-            sql={sql.trim()}
+            sql={results[resultIdx].sql}
             rowsOverride={exportOverride}
           />
         </Suspense>
@@ -410,12 +440,13 @@ function QueryTab({ tab }: Props) {
 }
 
 function TableTab({ tab }: Props) {
-  const [view, setView] = useState<'schema' | 'data'>('schema')
+  const initialDataState = normalizeDataTabState(tab.dataState)
+  const [view, setView] = useState<'schema' | 'data'>(initialDataState.view)
   const [result, setResult] = useState<QueryResult | null>(null)
   const [columns, setColumns] = useState<ColumnInfo[]>([])
   const [initialLoading, setInitialLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
-  const [limit, setLimit] = useState(1000)
+  const [limit, setLimit] = useState(initialDataState.limit)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
   const [selectedRows, setSelectedRows] = useState<Record<string, unknown>[]>([])
   const [showDataExport, setShowDataExport] = useState(false)
@@ -423,10 +454,14 @@ function TableTab({ tab }: Props) {
   const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
   const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
-  const [globalSearch, setGlobalSearch] = useState('')
-  const [whereFilter, setWhereFilter] = useState('')
-  const [appliedWhere, setAppliedWhere] = useState('')
-  const [showFilterBar, setShowFilterBar] = useState(false)
+  const [globalSearch, setGlobalSearch] = useState(initialDataState.globalSearch)
+  const [whereFilter, setWhereFilter] = useState(initialDataState.whereFilter)
+  const [appliedWhere, setAppliedWhere] = useState(initialDataState.appliedWhere)
+  const [showFilterBar, setShowFilterBar] = useState(initialDataState.showFilterBar)
+  const [filterWordWrap, setFilterWordWrap] = useState(() => {
+    const saved = localStorage.getItem(KEY_FILTER_WORD_WRAP)
+    return saved !== null ? saved === 'true' : true
+  })
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set())
   const [showColPicker, setShowColPicker] = useState(false)
   const [colSearch, setColSearch] = useState('')
@@ -445,12 +480,13 @@ function TableTab({ tab }: Props) {
   const loadAbortRef = useRef<AbortController | null>(null)
   const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
+  const setTableDataState = useTabStore(s => s.setTableDataState)
   const { invalidateTablesForDb, loadTables } = useSchemaStore()
 
   const pkColumns = columns.filter(c => c.is_primary_key).map(c => c.name)
   const rowKeyColumns = pkColumns.length > 0 ? pkColumns : columns.map(c => c.name)
 
-  const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string) => {
+  const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string, commitWhereOnSuccess?: string) => {
     if (!tab.database || !tab.table) return
     const effectiveLimit = overrideLimit ?? limit
     const effectiveSearch = searchOverride !== undefined ? searchOverride : globalSearch
@@ -493,7 +529,15 @@ function TableTab({ tab }: Props) {
       }
 
       const res = await api.executeQuery(tab.sessionId, selectSql, undefined, effectiveLimit, controller.signal)
-      setResult(res)
+      if (shouldKeepPreviousResultOnLoad(res, result)) {
+        setStatusMsg(`Filter error: ${res.error}`)
+        setTimeout(() => setStatusMsg(null), 7000)
+      } else {
+        setResult(res)
+        if (!res.error && commitWhereOnSuccess !== undefined) {
+          setAppliedWhere(commitWhereOnSuccess)
+        }
+      }
       try { addEntry({ sql: selectSql, sessionId: tab.sessionId, database: tab.database, rowCount: res.row_count ?? undefined, execTimeMs: res.exec_time_ms ?? (Date.now() - start), error: res.error ?? undefined }) } catch { /* ignore */ }
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
@@ -520,20 +564,46 @@ function TableTab({ tab }: Props) {
   }, [view])
 
   useEffect(() => {
-    setView('schema')
+    const nextState = normalizeDataTabState(tab.dataState)
+    setView(nextState.view)
     setResult(null)
     setColumns([])
-    setGlobalSearch('')
-    setWhereFilter('')
-    setAppliedWhere('')
-    setShowFilterBar(false)
+    setGlobalSearch(nextState.globalSearch)
+    setWhereFilter(nextState.whereFilter)
+    setAppliedWhere(nextState.appliedWhere)
+    setShowFilterBar(nextState.showFilterBar)
+    setLimit(nextState.limit)
     setHiddenColumns(new Set())
     setShowColPicker(false)
     setColSearch('')
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
-  }, [tab.sessionId, tab.database, tab.table])
+  }, [tab.id, tab.sessionId, tab.database, tab.table])
+
+  useEffect(() => {
+    setTableDataState(tab.id, { view })
+  }, [tab.id, view, setTableDataState])
+
+  useEffect(() => {
+    setTableDataState(tab.id, { globalSearch })
+  }, [tab.id, globalSearch, setTableDataState])
+
+  useEffect(() => {
+    setTableDataState(tab.id, { whereFilter })
+  }, [tab.id, whereFilter, setTableDataState])
+
+  useEffect(() => {
+    setTableDataState(tab.id, { appliedWhere })
+  }, [tab.id, appliedWhere, setTableDataState])
+
+  useEffect(() => {
+    setTableDataState(tab.id, { showFilterBar })
+  }, [tab.id, showFilterBar, setTableDataState])
+
+  useEffect(() => {
+    setTableDataState(tab.id, { limit })
+  }, [tab.id, limit, setTableDataState])
 
   useEffect(() => {
     if (!showColPicker) return
@@ -634,6 +704,7 @@ function TableTab({ tab }: Props) {
     // missing from pendingChanges — the WHERE clause would work correctly
     // (using old values) but the edit wouldn't be sent at all.
     gridRef.current?.stopEditing()
+    await new Promise(resolve => setTimeout(resolve, 0))
 
     const currentPending = pendingChangesRef.current
     const currentDrafts = insertDraftsRef.current
@@ -687,11 +758,10 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       setResult(prev => {
         if (!prev) return prev
         const keyCols = rowKeyColumns.length > 0 ? rowKeyColumns : prev.columns
-        const newRows = prev.rows.map((row) => {
-          const rowId = keyCols.map(pk => {
-            const colIndex = prev.columns.indexOf(pk)
-            return String(row[colIndex] ?? '')
-          }).join('\x00')
+        const newRows = prev.rows.map((row, rowIdx) => {
+          const rowObj: Record<string, unknown> = {}
+          prev.columns.forEach((col, colIdx) => { rowObj[col] = row[colIdx] })
+          const rowId = buildResultGridRowId(rowObj, rowIdx, keyCols, pkColumns.length === 0)
           const edit = currentPending.get(rowId)
           if (!edit) return row
           const updatedRow = [...row]
@@ -772,8 +842,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
   }
 
   const handleApplyFilter = useCallback(() => {
-    setAppliedWhere(whereFilter)
-    loadDataRef.current(undefined, globalSearch, whereFilter)
+    loadDataRef.current(undefined, globalSearch, whereFilter, whereFilter)
   }, [whereFilter, globalSearch])
 
   const handleClearFilter = () => {
@@ -786,6 +855,14 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
     setGlobalSearch('')
     // The debounce useEffect will trigger loadData with empty search
   }
+
+  const handleFilterWordWrapChange = useCallback(() => {
+    setFilterWordWrap(wrap => {
+      const next = !wrap
+      localStorage.setItem(KEY_FILTER_WORD_WRAP, String(next))
+      return next
+    })
+  }, [])
 
   // Stable ref so the CodeMirror keymap extension never needs to be recreated
   const applyFilterRef = useRef(handleApplyFilter)
@@ -828,29 +905,42 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
     })
   }, [functions])
 
+  const filterWrapExtension = useMemo(() => EditorView.lineWrapping, [])
   const filterKeymapExtension = useMemo(() =>
     Prec.highest(keymap.of([
-      { key: 'Enter',     run: () => { applyFilterRef.current(); return true } },
       { key: 'Mod-Enter', run: () => { applyFilterRef.current(); return true } },
     ])),
   [])
+  const filterExtensions = useMemo(
+    () => filterWordWrap
+      ? [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterWrapExtension, filterKeymapExtension]
+      : [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterKeymapExtension],
+    [
+      filterWordWrap,
+      filterSqlExtension,
+      filterColumnCompletionExtension,
+      filterFunctionCompletionExtension,
+      filterWrapExtension,
+      filterKeymapExtension,
+    ]
+  )
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
-        <span className="text-xs text-slate-400">{tab.database}.{tab.table}</span>
-        <div className="flex-1" />
+      <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
+        <span className="text-xs text-slate-400 min-w-0 truncate max-w-full">{tab.database}.{tab.table}</span>
+        <div className="flex-1 min-w-4" />
         {/* Global search input — shown in data view */}
         {view === 'data' && (
-          <div className="relative flex items-center">
+          <div className="relative flex items-center min-w-40">
             <Search size={11} className="absolute left-2 text-slate-500 pointer-events-none" />
             <input
               type="text"
               value={globalSearch}
               onChange={e => setGlobalSearch(e.target.value)}
               placeholder="Search all columns…"
-              className="bg-surface-800 border border-surface-700 rounded pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500 w-44"
+              className="bg-surface-800 border border-surface-700 rounded pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500 w-44 max-w-full"
             />
             {globalSearch && (
               <button onClick={handleClearSearch} className="absolute right-1.5 text-slate-500 hover:text-slate-300">
@@ -1035,9 +1125,9 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
 
       {/* WHERE filter bar */}
       {view === 'data' && showFilterBar && (
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-700">
+        <div className="flex items-start flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-700">
           <span className="text-xs text-slate-500 font-mono shrink-0">WHERE</span>
-          <div className="flex-1 rounded overflow-hidden border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
+          <div className="flex-1 min-w-[220px] rounded overflow-hidden border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
             <ReactCodeMirror
               value={whereFilter}
               onChange={val => {
@@ -1047,9 +1137,10 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
                   loadData(undefined, globalSearch, '')
                 }
               }}
-              extensions={[filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterKeymapExtension]}
+              extensions={filterExtensions}
               theme={oneDark}
-              height="28px"
+              minHeight="28px"
+              maxHeight="96px"
               placeholder="e.g. id = 5 AND name LIKE 'John%'"
               basicSetup={{
                 lineNumbers: false,
@@ -1060,6 +1151,16 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
             />
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
+            <Button
+              variant="icon"
+              size="sm"
+              onClick={handleFilterWordWrapChange}
+              aria-pressed={filterWordWrap}
+              aria-label="Toggle WHERE filter word wrap"
+              title={filterWordWrap ? 'Disable WHERE filter word wrap' : 'Enable WHERE filter word wrap'}
+            >
+              <WrapText size={12} />
+            </Button>
             <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-surface-800 border border-surface-700 rounded">
               {isMac ? '⌘↵' : 'Ctrl+↵'}
             </kbd>
@@ -1082,7 +1183,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden min-h-0">
         {view === 'schema' && tab.database && tab.table ? (
           <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Loading schema…</div>}>
             <TableSchemaView
@@ -1102,6 +1203,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
               result={result}
               editable={columns.length > 0 && !initialLoading && !refreshing}
               primaryKeyColumns={rowKeyColumns}
+              includeRowIndexInId={pkColumns.length === 0}
               onCellEdit={handleCellEdit}
               onDeleteRows={handleDeleteRows}
               onDuplicateRow={handleDuplicateRow}
@@ -1123,11 +1225,26 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
 
       {statusMsg && (
         <div className="px-3 py-1.5 bg-surface-900 border-t border-surface-800">
-          <p className="text-xs font-mono text-slate-400 truncate">{statusMsg}</p>
+          <p className="text-xs font-mono text-slate-400 break-all">{statusMsg}</p>
         </div>
       )}
 
-      {view === 'data' && result && <ResultToolbar result={result} running={false} />}
+      {view === 'data' && result && (
+        <div className="flex items-center border-t border-surface-800">
+          <div className="flex-1 min-w-0">
+            <ResultToolbar result={result} running={false} />
+          </div>
+          {!result.error && result.columns.length > 0 && (
+            <button
+              onClick={() => gridRef.current?.clearSort()}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              title="Clear data sorting"
+            >
+              Clear Sort
+            </button>
+          )}
+        </div>
+      )}
 
       {showDataExport && tab.database && tab.table && (
         <Suspense fallback={null}>

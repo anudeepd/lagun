@@ -106,6 +106,15 @@ export interface CreateIndexRequest {
 
 export type TabType = 'query' | 'table'
 
+export interface DataTabState {
+  view?: 'schema' | 'data'
+  globalSearch?: string
+  whereFilter?: string
+  appliedWhere?: string
+  showFilterBar?: boolean
+  limit?: number
+}
+
 export interface Tab {
   id: string
   label: string
@@ -114,4 +123,5 @@ export interface Tab {
   database?: string
   table?: string
   sql?: string
+  dataState?: DataTabState
 }

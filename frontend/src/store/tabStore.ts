@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Tab } from '../types'
+import type { DataTabState, Tab } from '../types'
 
 function uuid() {
   return crypto.randomUUID?.() ??
@@ -23,6 +23,7 @@ interface TabState {
   setActiveTab: (id: string) => void
   setSql: (tabId: string, sql: string) => void
   setTabDatabase: (tabId: string, database: string) => void
+  setTableDataState: (tabId: string, patch: DataTabState) => void
   injectSqlToTab: (tabId: string, sql: string, database?: string) => void
   consumePendingSql: (tabId: string) => void
   moveTab: (fromId: string, toId: string) => void
@@ -105,6 +106,14 @@ export const useTabStore = create<TabState>()(
 
       setTabDatabase: (tabId, database) => set(s => ({
         tabs: s.tabs.map(t => t.id === tabId ? { ...t, database, label: `Query — ${database}` } : t),
+      })),
+
+      setTableDataState: (tabId, patch) => set(s => ({
+        tabs: s.tabs.map(t =>
+          t.id === tabId && t.type === 'table'
+            ? { ...t, dataState: { ...t.dataState, ...patch } }
+            : t
+        ),
       })),
 
       injectSqlToTab: (tabId, sql, database) => set(s => ({

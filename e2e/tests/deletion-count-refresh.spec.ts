@@ -103,18 +103,17 @@ test.describe('Deletion count refresh', () => {
     // Verify count is still 8 after server refresh
     await expect(page.getByText(rowCountLabel(afterFirst))).toBeVisible({ timeout: 5_000 })
 
-    // Select two more rows via keyboard (more reliable than checkbox clicks in AG Grid).
-    // Focus the grid, then use Space to toggle selection and ArrowDown to move.
-    await page.locator('.ag-root-wrapper').click()
-    await page.keyboard.press('Space')       // select first row
-    await page.keyboard.press('ArrowDown')
-    await page.keyboard.press('Space')       // select second row
-    await page.waitForTimeout(300)
+    // Select two more rows by checkbox. Keyboard Space can start editing in
+    // editable grids, which is not what this deletion test is exercising.
+    const refreshedRowCheckboxes = page.locator('.ag-row .ag-checkbox-input')
+    await expect(refreshedRowCheckboxes).toHaveCount(afterFirst)
+    await refreshedRowCheckboxes.nth(0).click({ force: true })
+    await refreshedRowCheckboxes.nth(1).click({ force: true })
 
     // Right-click on a data cell to open context menu
     await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
 
-    const secondDeleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: /Delete/ })
+    const secondDeleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: 'Delete 2 rows' })
     await expect(secondDeleteBtn).toBeVisible({ timeout: 3_000 })
     await secondDeleteBtn.click()
 

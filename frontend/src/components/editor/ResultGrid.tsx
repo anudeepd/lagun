@@ -9,6 +9,7 @@ export interface ResultGridHandle {
   getFilteredData: () => { columns: string[], rows: unknown[][] }
   stopEditing: () => void
   deselectAll: () => void
+  clearSort: () => void
 }
 
 export interface InsertDraftAnchor {
@@ -74,6 +75,18 @@ interface Props {
   pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   insertDrafts?: Map<string, Record<string, unknown>>
   insertDraftAnchors?: Map<string, InsertDraftAnchor>
+  includeRowIndexInId?: boolean
+}
+
+export function buildResultGridRowId(
+  row: Record<string, unknown>,
+  rowIdx: number,
+  keyColumns: string[],
+  includeRowIndexInId = keyColumns.length === 0,
+): string {
+  const keyValues = keyColumns.map(col => String(row[col] ?? '')).join('\x00')
+  if (includeRowIndexInId) return `${keyValues}\x00${rowIdx}`
+  return keyValues || String(rowIdx)
 }
 
 export function buildResultGridRowData({
@@ -82,21 +95,23 @@ export function buildResultGridRowData({
   pendingChanges,
   insertDrafts,
   insertDraftAnchors,
+  includeRowIndexInId,
 }: {
   result: QueryResult
   primaryKeyColumns?: string[]
   pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   insertDrafts?: Map<string, Record<string, unknown>>
   insertDraftAnchors?: Map<string, InsertDraftAnchor>
+  includeRowIndexInId?: boolean
 }): Record<string, unknown>[] {
   const rows = result.rows.map((row, rowIdx) => {
     const obj: Record<string, unknown> = {}
     result.columns.forEach((col, i) => {
       obj[col] = row[i]
     })
+    obj.__ag_rowIndex = rowIdx
     const keyCols = primaryKeyColumns.length > 0 ? primaryKeyColumns : result.columns
-    const keyValues = keyCols.map(col => String(obj[col] ?? '')).join('\x00')
-    obj.__ag_rowId = keyValues || String(rowIdx)
+    obj.__ag_rowId = buildResultGridRowId(obj, rowIdx, keyCols, includeRowIndexInId ?? primaryKeyColumns.length === 0)
     const pending = pendingChanges?.get(obj.__ag_rowId as string)
     if (pending) Object.assign(obj, pending.changes)
     return obj
@@ -144,7 +159,7 @@ export function buildResultGridRowData({
   return [...orderedRows, ...unanchoredDrafts]
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors }: Props, ref) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
@@ -167,6 +182,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     },
     stopEditing: () => { agApiRef.current?.stopEditing() },
     deselectAll: () => { agApiRef.current?.deselectAll() },
+    clearSort: () => {
+      agApiRef.current?.applyColumnState({ defaultState: { sort: null } })
+    },
   }))
 
   const pendingChangesRef = useRef(pendingChanges)
@@ -210,7 +228,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     pendingChanges,
     insertDrafts,
     insertDraftAnchors,
-  }), [result, primaryKeyColumns, pendingChanges, insertDrafts, insertDraftAnchors])
+    includeRowIndexInId,
+  }), [result, primaryKeyColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId])
 
   const getRowId = useCallback((params: { data: Record<string, unknown> }) =>
     params.data.__ag_rowId as string,
@@ -410,6 +429,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         preventDefaultOnContextMenu
         stopEditingWhenCellsLoseFocus
         singleClickEdit
+        alwaysMultiSort
+        sortingOrder={['asc', 'desc', null]}
       />
       {menu && (
         <GridContextMenu

@@ -36,9 +36,9 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-surface-950 text-slate-100">
+    <div className="flex h-dvh min-h-0 overflow-hidden bg-surface-950 text-slate-100">
       {/* Left sidebar */}
-      <div style={{ width: sidebarWidth }} className="flex-shrink-0 flex">
+      <div style={{ width: sidebarWidth }} className="flex-shrink-0 flex min-h-0 max-w-[45vw]">
         <Sidebar />
         <div
           onMouseDown={handleResizeMouseDown}
@@ -47,9 +47,9 @@ export default function AppLayout() {
       </div>
 
       {/* Main area */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0 min-h-0">
         <TabBar />
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden min-h-0">
           {tabs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-4">
               <Logo size="lg" showText={false} className="opacity-40" />
@@ -59,7 +59,7 @@ export default function AppLayout() {
             tabs.map(tab => (
               <div
                 key={tab.id}
-                className={`h-full ${activeTabId === tab.id ? '' : 'hidden'}`}
+                className={`h-full min-h-0 ${activeTabId === tab.id ? '' : 'hidden'}`}
               >
                 <TabContent tab={tab} />
               </div>

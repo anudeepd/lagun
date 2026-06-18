@@ -18,7 +18,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'uv run lagun serve --port 8080',
+    command: 'uv run lagun serve --port 8080 --no-open',
     port: 8080,
     reuseExistingServer: true,
     cwd: '..',

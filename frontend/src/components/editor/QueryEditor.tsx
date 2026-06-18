@@ -188,15 +188,15 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
   )
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-surface-900 border-b border-surface-800">
-        <div className="flex items-center gap-2">
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex items-center justify-between flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
+        <div className="flex items-center gap-2 min-w-0">
           {databases && databases.length > 0 ? (
             <select
               value={database ?? ''}
               onChange={e => onDatabaseChange?.(e.target.value)}
               className={clsx(
-                'bg-surface-800 border rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500',
+                'bg-surface-800 border rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 max-w-[220px]',
                 database
                   ? 'border-surface-700 text-slate-300'
                   : 'border-amber-600 text-amber-400'
@@ -206,12 +206,12 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               {databases.map(db => <option key={db} value={db}>{db}</option>)}
             </select>
           ) : database ? (
-            <span className="text-xs text-slate-500 bg-surface-800 px-2 py-0.5 rounded">
+            <span className="text-xs text-slate-500 bg-surface-800 px-2 py-0.5 rounded truncate max-w-[220px]">
               {database}
             </span>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap justify-end gap-2">
           {onLimitChange && (
             <div className="flex items-center gap-1 text-xs text-slate-500">
               <span>Limit</span>
@@ -259,7 +259,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
           </Button>
         </div>
       </div>
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden min-h-0">
         <ReactCodeMirror
           ref={editorRef}
           value={value}
