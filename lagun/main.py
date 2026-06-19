@@ -30,6 +30,8 @@ APP_CSP = (
     "img-src 'self' data:; "
     "font-src 'self' data:"
 )
+APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
+HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
 app = FastAPI(title="Lagun API", version="0.1.28", lifespan=lifespan)
@@ -45,6 +47,8 @@ async def add_app_security_headers(request: Request, call_next):
     response = await call_next(request)
     if not request.url.path.startswith("/_auth/"):
         response.headers.setdefault("Content-Security-Policy", APP_CSP)
+    if request.url.path.startswith("/assets/"):
+        response.headers.setdefault("Cache-Control", HASHED_ASSET_CACHE_CONTROL)
     return response
 
 # CORS for development (Vite dev server)
@@ -137,5 +141,7 @@ async def spa_fallback(full_path: str):
     if _static:
         index = _static / "index.html"
         if index.exists():
-            return FileResponse(str(index))
+            return FileResponse(
+                str(index), headers={"Cache-Control": APP_SHELL_CACHE_CONTROL}
+            )
     return {"detail": "Frontend not built. Run: cd frontend && npm run build"}
