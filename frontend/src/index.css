@@ -58,3 +58,62 @@
     white-space: nowrap;
   }
 }
+
+@layer components {
+  .lagun-result-grid .ag-header-cell {
+    padding-left: 10px;
+    padding-right: 8px;
+  }
+
+  .lagun-result-grid .ag-header-cell-comp-wrapper {
+    min-width: 0;
+  }
+
+  .lagun-result-grid .ag-header-cell-label {
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .lagun-result-grid .ag-header-cell-text {
+    flex: 1 1 auto;
+    min-width: 48px;
+    color: #cbd5e1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .lagun-result-grid .ag-header-icon,
+  .lagun-result-grid .ag-sort-indicator-container,
+  .lagun-result-grid .ag-sort-indicator-icon,
+  .lagun-result-grid .ag-sort-order {
+    flex: 0 0 auto;
+  }
+
+  .lagun-result-grid .ag-sort-indicator-container {
+    align-items: center;
+    gap: 2px;
+  }
+
+  .lagun-result-grid .ag-sort-indicator-icon {
+    padding-left: 2px;
+  }
+
+  .lagun-result-grid .ag-sort-order {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    background: #334155;
+    color: #e2e8f0;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .lagun-result-grid .ag-cell {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}

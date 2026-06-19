@@ -9,7 +9,7 @@ import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
 import ResultGrid, { buildResultGridRowId, type InsertDraftAnchor, type ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
-import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText } from 'lucide-react'
+import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
 import ReactCodeMirror from '@uiw/react-codemirror'
 import { sql, MySQL } from '@codemirror/lang-sql'
@@ -138,6 +138,7 @@ function QueryTab({ tab }: Props) {
   const [functions, setFunctions] = useState<string[]>([])
   const [showExport, setShowExport] = useState(false)
   const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
+  const [resultSortActive, setResultSortActive] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [editorHeight, setEditorHeight] = useState(() => {
     const saved = localStorage.getItem(KEY_EDITOR_HEIGHT)
@@ -165,6 +166,10 @@ function QueryTab({ tab }: Props) {
       consumePendingSql(tab.id)
     }
   }, [pendingSql])
+
+  useEffect(() => {
+    setResultSortActive(false)
+  }, [resultIdx, results.length])
 
   const session = useSessionStore(s => s.sessions.find(x => x.id === tab.sessionId))
   const allDbs = databases[tab.sessionId] ?? []
@@ -385,7 +390,12 @@ function QueryTab({ tab }: Props) {
         )}
         <div className="flex-1 overflow-hidden min-h-0">
           {results.length > 0 ? (
-            <ResultGrid key={resultIdx} ref={gridRef} result={results[resultIdx].result} />
+            <ResultGrid
+              key={resultIdx}
+              ref={gridRef}
+              result={results[resultIdx].result}
+              onSortActiveChange={setResultSortActive}
+            />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
               Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
@@ -401,10 +411,15 @@ function QueryTab({ tab }: Props) {
           <div className="flex items-center">
             <button
               onClick={() => gridRef.current?.clearSort()}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              disabled={!resultSortActive}
+              className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors disabled:cursor-default ${
+                resultSortActive
+                  ? 'text-brand-400 hover:text-brand-300'
+                  : 'text-slate-600'
+              }`}
               title="Clear result sorting"
             >
-              Clear Sort
+              <ArrowUpDown size={11} /> Clear Sort
             </button>
             <button
               onClick={() => {
@@ -452,6 +467,7 @@ function TableTab({ tab }: Props) {
   const [showDataExport, setShowDataExport] = useState(false)
   const [functions, setFunctions] = useState<string[]>([])
   const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
+  const [dataSortActive, setDataSortActive] = useState(false)
   const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
   const [globalSearch, setGlobalSearch] = useState(initialDataState.globalSearch)
@@ -1031,6 +1047,20 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
             )}
           </div>
         )}
+        {view === 'data' && result && !result.error && result.columns.length > 0 && (
+          <button
+            onClick={() => gridRef.current?.clearSort()}
+            disabled={!dataSortActive}
+            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors disabled:cursor-default ${
+              dataSortActive
+                ? 'text-brand-400 bg-brand-950 border border-brand-800 hover:text-brand-300'
+                : 'text-slate-500'
+            }`}
+            title="Clear data sorting"
+          >
+            <ArrowUpDown size={11} /> Clear Sort
+          </button>
+        )}
         {/* Limit selector — only shown in data view */}
         {view === 'data' && (
           <div className="flex items-center gap-1 text-xs text-slate-500">
@@ -1125,8 +1155,8 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
 
       {/* WHERE filter bar */}
       {view === 'data' && showFilterBar && (
-        <div className="flex items-start flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-700">
-          <span className="text-xs text-slate-500 font-mono shrink-0">WHERE</span>
+        <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-700">
+          <span className="inline-flex h-7 items-center text-xs text-slate-500 font-mono shrink-0">WHERE</span>
           <div className="flex-1 min-w-[220px] rounded overflow-hidden border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
             <ReactCodeMirror
               value={whereFilter}
@@ -1214,6 +1244,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
               pendingChanges={pendingChanges}
               insertDrafts={insertDrafts}
               insertDraftAnchors={insertDraftAnchors}
+              onSortActiveChange={setDataSortActive}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
@@ -1234,15 +1265,6 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
           <div className="flex-1 min-w-0">
             <ResultToolbar result={result} running={false} />
           </div>
-          {!result.error && result.columns.length > 0 && (
-            <button
-              onClick={() => gridRef.current?.clearSort()}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-              title="Clear data sorting"
-            >
-              Clear Sort
-            </button>
-          )}
         </div>
       )}
 

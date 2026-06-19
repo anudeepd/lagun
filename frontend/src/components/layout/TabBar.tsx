@@ -3,6 +3,7 @@ import { X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
+import ConfirmDialog from '../ui/ConfirmDialog'
 
 interface ContextMenuState {
   tabId: string
@@ -15,6 +16,8 @@ export default function TabBar() {
   const { activeSessionId } = useSessionStore()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
+  const [closeTargetId, setCloseTargetId] = useState<string | null>(null)
+  const [confirmCloseAll, setConfirmCloseAll] = useState(false)
   // Close context menu on click outside
   useEffect(() => {
     const handleClick = () => setContextMenu(null)
@@ -60,6 +63,23 @@ export default function TabBar() {
   }
 
   const currentTab = contextMenu ? tabs.find(t => t.id === contextMenu.tabId) : null
+  const closeTarget = closeTargetId ? tabs.find(t => t.id === closeTargetId) : null
+
+  const requestCloseTab = (tabId: string) => {
+    setContextMenu(null)
+    setCloseTargetId(tabId)
+  }
+
+  const handleConfirmCloseTab = () => {
+    if (!closeTargetId) return
+    closeTab(closeTargetId)
+    setCloseTargetId(null)
+  }
+
+  const handleConfirmCloseAll = () => {
+    closeAllTabs()
+    setConfirmCloseAll(false)
+  }
 
   return (
     <div className="flex h-[40px] items-center bg-surface-900 border-b border-surface-800">
@@ -94,7 +114,7 @@ export default function TabBar() {
               </button>
               <span
                 role="button"
-                onClick={(e) => { e.stopPropagation(); closeTab(tab.id) }}
+                onClick={(e) => { e.stopPropagation(); requestCloseTab(tab.id) }}
                 className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
               >
                 <X size={10} />
@@ -117,7 +137,7 @@ export default function TabBar() {
         )}
         {tabs.length > 0 && (
           <button
-            onClick={closeAllTabs}
+            onClick={() => setConfirmCloseAll(true)}
             title="Close all tabs"
             className="flex items-center gap-1 px-3 py-2 text-xs text-slate-500 hover:text-red-400 hover:bg-surface-800 transition-colors whitespace-nowrap"
           >
@@ -151,13 +171,31 @@ export default function TabBar() {
           <div className="my-1 border-t border-surface-700" />
           <button
             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-surface-700 transition-colors"
-            onClick={() => { setContextMenu(null); closeTab(currentTab.id) }}
+            onClick={() => requestCloseTab(currentTab.id)}
           >
             <X size={12} />
             Close
           </button>
         </div>
       )}
+      <ConfirmDialog
+        open={!!closeTarget}
+        title="Close Tab"
+        message={`Close "${closeTarget?.label ?? ''}"? Unsaved editor text or table changes in this tab will be discarded.`}
+        confirmLabel="Close"
+        danger
+        onConfirm={handleConfirmCloseTab}
+        onClose={() => setCloseTargetId(null)}
+      />
+      <ConfirmDialog
+        open={confirmCloseAll}
+        title="Close All Tabs"
+        message={`Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'}? Unsaved editor text or table changes will be discarded.`}
+        confirmLabel="Close All"
+        danger
+        onConfirm={handleConfirmCloseAll}
+        onClose={() => setConfirmCloseAll(false)}
+      />
     </div>
   )
 }

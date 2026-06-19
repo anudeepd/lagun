@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { useSessionStore } from '../../store/sessionStore'
 import { useTabStore } from '../../store/tabStore'
 import SessionForm from './SessionForm'
+import ConfirmDialog from '../ui/ConfirmDialog'
 import type { Session } from '../../types'
 
 interface Props {
@@ -14,7 +15,14 @@ export default function SessionList({ onNew }: Props) {
   const { sessions, activeSessionId, setActiveSession, deleteSession } = useSessionStore()
   const { openQueryTab } = useTabStore()
   const [editSession, setEditSession] = useState<Session | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    await deleteSession(deleteTarget.id)
+    setDeleteTarget(null)
+  }
 
   if (sessions.length === 0) {
     return (
@@ -68,7 +76,7 @@ export default function SessionList({ onNew }: Props) {
                 </button>
                 <button
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-red-400"
-                  onClick={e => { e.stopPropagation(); deleteSession(s.id); setMenuId(null) }}
+                  onClick={e => { e.stopPropagation(); setDeleteTarget(s); setMenuId(null) }}
                 >
                   <Trash2 size={12} /> Delete
                 </button>
@@ -84,6 +92,15 @@ export default function SessionList({ onNew }: Props) {
           session={editSession}
         />
       )}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Connection"
+        message={`Delete connection "${deleteTarget?.name ?? ''}"? Saved credentials and related open tabs will be removed.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={handleConfirmDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

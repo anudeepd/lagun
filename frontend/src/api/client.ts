@@ -1,5 +1,26 @@
 const BASE = '/api/v1'
 
+function formatApiError(status: number, payload: unknown): string {
+  if (payload && typeof payload === 'object' && 'detail' in payload) {
+    const detail = (payload as { detail: unknown }).detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) {
+      return detail
+        .map(item => {
+          if (!item || typeof item !== 'object') return String(item)
+          const issue = item as { loc?: unknown[]; msg?: unknown }
+          const field = Array.isArray(issue.loc) ? issue.loc.filter(x => x !== 'body').join('.') : ''
+          const msg = typeof issue.msg === 'string' ? issue.msg : JSON.stringify(item)
+          return field ? `${field}: ${msg}` : msg
+        })
+        .join('\n')
+    }
+    return JSON.stringify(detail)
+  }
+  if (typeof payload === 'string' && payload.trim()) return payload
+  return `HTTP ${status}`
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...options?.headers as Record<string, string> }
   if (options?.body) {
@@ -10,8 +31,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    const text = await res.text()
+    let payload: unknown = text || res.statusText
+    try {
+      payload = text ? JSON.parse(text) : { detail: res.statusText }
+    } catch {
+      // Keep the plain response body.
+    }
+    throw new Error(formatApiError(res.status, payload))
   }
   if (res.status === 204) return undefined as T
   return res.json()

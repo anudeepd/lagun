@@ -12,6 +12,20 @@ _pools: dict[str, aiomysql.Pool] = {}
 _lock: asyncio.Lock | None = None
 
 
+class DatabaseConnectionError(Exception):
+    """Raised when a saved session cannot open a database connection."""
+
+    def __init__(self, session_name: str, host: str, port: int, username: str, cause: Exception):
+        self.session_name = session_name
+        self.host = host
+        self.port = port
+        self.username = username
+        self.cause = cause
+        super().__init__(
+            f"Could not connect to {host}:{port} as {username} for '{session_name}': {cause}"
+        )
+
+
 def _get_lock() -> asyncio.Lock:
     """Return a lazily-created lock bound to the current event loop."""
     global _lock
@@ -34,21 +48,30 @@ async def get_pool(session_id: str) -> aiomysql.Pool:
             safe_flags = CLIENT.MULTI_RESULTS
             if safe_flags & CLIENT.MULTI_STATEMENTS:
                 safe_flags ^= CLIENT.MULTI_STATEMENTS
-            pool = await aiomysql.create_pool(
-                host=session.host,
-                port=session.port,
-                user=session.username,
-                password=password or "",
-                db=session.default_db or "",
-                charset="utf8mb4",
-                autocommit=True,
-                minsize=1,
-                maxsize=5,
-                connect_timeout=10,
-                ssl=ssl_ctx,
-                local_infile=False,
-                client_flag=safe_flags,
-            )
+            try:
+                pool = await aiomysql.create_pool(
+                    host=session.host,
+                    port=session.port,
+                    user=session.username,
+                    password=password or "",
+                    db=session.default_db or "",
+                    charset="utf8mb4",
+                    autocommit=True,
+                    minsize=1,
+                    maxsize=5,
+                    connect_timeout=10,
+                    ssl=ssl_ctx,
+                    local_infile=False,
+                    client_flag=safe_flags,
+                )
+            except Exception as exc:
+                raise DatabaseConnectionError(
+                    session.name,
+                    session.host,
+                    session.port,
+                    session.username,
+                    exc,
+                ) from exc
             _pools[session_id] = pool
         return _pools[session_id]
 

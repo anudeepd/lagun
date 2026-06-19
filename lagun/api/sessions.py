@@ -1,5 +1,6 @@
 """Sessions API: CRUD + connection test."""
 import asyncio
+import ssl as ssl_mod
 import time
 from fastapi import APIRouter, HTTPException
 
@@ -53,16 +54,17 @@ async def delete_session(session_id: str):
 # Simple rate limiter for probe endpoint
 _probe_semaphore = asyncio.Semaphore(3)  # max 3 concurrent probes
 _probe_timestamps: list[float] = []
-_PROBE_RATE_LIMIT = 10  # max probes per minute
+_PROBE_RATE_LIMIT = 60  # max probes per minute
 _PROBE_WINDOW = 60.0  # seconds
 
 
-async def _probe_connection(host: str, port: int, user: str, password: str) -> TestResult:
+async def _probe_connection(host: str, port: int, user: str, password: str, ssl_enabled: bool = False) -> TestResult:
     t0 = time.monotonic()
     conn = None
     try:
+        ssl_ctx = ssl_mod.create_default_context() if ssl_enabled else None
         conn = await aiomysql.connect(
-            host=host, port=port, user=user, password=password, connect_timeout=5,
+            host=host, port=port, user=user, password=password, connect_timeout=5, ssl=ssl_ctx,
         )
         latency = (time.monotonic() - t0) * 1000
         async with conn.cursor() as cur:
@@ -91,7 +93,7 @@ async def probe_connection(data: ProbeRequest):
         if len(_probe_timestamps) >= _PROBE_RATE_LIMIT:
             raise HTTPException(429, "Too many probe requests. Please wait before trying again.")
         _probe_timestamps.append(now)
-        return await _probe_connection(data.host, data.port, data.username, data.password)
+        return await _probe_connection(data.host, data.port, data.username, data.password, data.ssl_enabled)
 
 
 @router.post("/sessions/{session_id}/test", response_model=TestResult)
@@ -100,4 +102,4 @@ async def test_session(session_id: str):
     if not session:
         raise HTTPException(404, "Session not found")
     password = await get_session_password(session_id)
-    return await _probe_connection(session.host, session.port, session.username, password or "")
+    return await _probe_connection(session.host, session.port, session.username, password or "", session.ssl_enabled)

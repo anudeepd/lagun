@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { server } from '../server'
@@ -52,8 +52,13 @@ describe('SessionList', () => {
       fireEvent.click(menuBtn)
       const deleteBtn = await screen.findByText('Delete')
       await userEvent.click(deleteBtn)
-      // Session should be removed from state after delete API call
-      expect(useSessionStore.getState().sessions).toHaveLength(0)
+      expect(screen.getByRole('heading', { name: 'Delete Connection' })).toBeInTheDocument()
+      expect(useSessionStore.getState().sessions).toHaveLength(1)
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+      await waitFor(() => {
+        expect(useSessionStore.getState().sessions).toHaveLength(0)
+      })
     }
   })
 })

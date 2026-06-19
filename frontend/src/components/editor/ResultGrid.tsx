@@ -10,6 +10,7 @@ export interface ResultGridHandle {
   stopEditing: () => void
   deselectAll: () => void
   clearSort: () => void
+  isAnySortPresent: () => boolean
 }
 
 export interface InsertDraftAnchor {
@@ -36,6 +37,12 @@ const darkTheme = themeQuartz.withParams({
 })
 
 const DATE_TYPES = new Set(['datetime', 'timestamp', 'date', 'time'])
+const COLUMN_WIDTH_SAMPLE_SIZE = 40
+
+function displayLength(value: unknown): number {
+  if (value == null) return 4
+  return String(value).length
+}
 
 function localNow(dataType: string): string {
   const pad = (n: number) => String(n).padStart(2, '0')
@@ -76,6 +83,7 @@ interface Props {
   insertDrafts?: Map<string, Record<string, unknown>>
   insertDraftAnchors?: Map<string, InsertDraftAnchor>
   includeRowIndexInId?: boolean
+  onSortActiveChange?: (active: boolean) => void
 }
 
 export function buildResultGridRowId(
@@ -159,7 +167,7 @@ export function buildResultGridRowData({
   return [...orderedRows, ...unanchoredDrafts]
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId }: Props, ref) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId, onSortActiveChange }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
@@ -171,8 +179,18 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     [result.columns, hiddenColumns]
   )
 
+  const isAnySortPresent = useCallback(() =>
+    agApiRef.current?.getColumnState().some(col => !!col.sort) ?? false,
+    []
+  )
+
+  const emitSortActiveChange = useCallback(() => {
+    onSortActiveChange?.(isAnySortPresent())
+  }, [isAnySortPresent, onSortActiveChange])
+
   useImperativeHandle(ref, () => ({
     isAnyFilterPresent: () => agApiRef.current?.isAnyFilterPresent() ?? false,
+    isAnySortPresent,
     getFilteredData: () => {
       const rows: unknown[][] = []
       agApiRef.current?.forEachNodeAfterFilterAndSort(node => {
@@ -184,8 +202,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     deselectAll: () => { agApiRef.current?.deselectAll() },
     clearSort: () => {
       agApiRef.current?.applyColumnState({ defaultState: { sort: null } })
+      onSortActiveChange?.(false)
     },
-  }))
+  }), [isAnySortPresent, onSortActiveChange])
 
   const pendingChangesRef = useRef(pendingChanges)
   pendingChangesRef.current = pendingChanges
@@ -196,30 +215,38 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }, [pendingChanges, insertDrafts])
 
   const columnDefs = useMemo(() =>
-    result.columns.map(col => ({
-      field: col,
-      headerName: col,
-      editable: editable && col !== '__rowIndex',
-      resizable: true,
-      sortable: true,
-      filter: true,
-      hide: hiddenColumns?.has(col) ?? false,
-      // Ensure header name is always fully visible: ~8px per char at 12px monospace + 60px for padding/icons
-      minWidth: Math.max(80, col.length * 8 + 60),
-      cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
-        const base = { fontFamily: 'ui-monospace, monospace', fontSize: '12px' }
-        const rowId = params.data?.__ag_rowId as string | undefined
-        if (params.data?.__lagun_insertDraft) {
-          return { ...base, backgroundColor: '#064e3b', color: '#bbf7d0' }
-        }
-        if (rowId && pendingChangesRef.current?.get(rowId)?.changes[col] !== undefined) {
-          return { ...base, backgroundColor: '#7c3a00', color: '#fed7aa' }
-        }
-        return base
-      },
-      headerClass: 'text-xs font-semibold',
-    })),
-    [result.columns, editable, hiddenColumns]
+    result.columns.map((col, colIdx) => {
+      const sampledCellWidth = result.rows
+        .slice(0, COLUMN_WIDTH_SAMPLE_SIZE)
+        .reduce((max, row) => Math.max(max, displayLength(row[colIdx])), 0)
+
+      return {
+        field: col,
+        headerName: col,
+        headerTooltip: col,
+        tooltipField: col,
+        editable: editable && col !== '__rowIndex',
+        resizable: true,
+        sortable: true,
+        filter: true,
+        hide: hiddenColumns?.has(col) ?? false,
+        // Reserve fixed room for filter/sort/multi-sort indicators so labels do not disappear behind controls.
+        minWidth: Math.ceil(Math.max(120, col.length * 7.5 + 104, Math.min(sampledCellWidth, 36) * 7.2 + 32)),
+        cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
+          const base = { fontFamily: 'ui-monospace, monospace', fontSize: '12px' }
+          const rowId = params.data?.__ag_rowId as string | undefined
+          if (params.data?.__lagun_insertDraft) {
+            return { ...base, backgroundColor: '#064e3b', color: '#bbf7d0' }
+          }
+          if (rowId && pendingChangesRef.current?.get(rowId)?.changes[col] !== undefined) {
+            return { ...base, backgroundColor: '#7c3a00', color: '#fed7aa' }
+          }
+          return base
+        },
+        headerClass: 'text-xs font-semibold',
+      }
+    }),
+    [result.columns, result.rows, editable, hiddenColumns]
   )
 
   const rowData = useMemo(() => buildResultGridRowData({
@@ -409,13 +436,14 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }
 
   return (
-    <div className="h-full">
+    <div className="h-full lagun-result-grid">
       <AgGridReact
         theme={darkTheme}
         columnDefs={columnDefs}
         rowData={rowData}
         getRowId={getRowId}
-        onGridReady={e => { agApiRef.current = e.api }}
+        onGridReady={e => { agApiRef.current = e.api; emitSortActiveChange() }}
+        onSortChanged={emitSortActiveChange}
         onCellValueChanged={onCellValueChanged}
         onSelectionChanged={handleSelectionChanged}
         onRowClicked={selectable ? handleRowClicked : undefined}

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from lagun.db.session_store import init_db
+from lagun.db.pool import DatabaseConnectionError
 from lagun.api import sessions, query, schema, table_ops, export, import_data, config
 
 
@@ -31,7 +32,12 @@ APP_CSP = (
 )
 
 
-app = FastAPI(title="Lagun API", version="0.1.27", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.28", lifespan=lifespan)
+
+
+@app.exception_handler(DatabaseConnectionError)
+async def database_connection_error_handler(request: Request, exc: DatabaseConnectionError):
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
 @app.middleware("http")

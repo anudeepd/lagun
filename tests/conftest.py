@@ -1,4 +1,6 @@
 """Shared fixtures for lagun tests."""
+import asyncio
+
 import pytest
 import pytest_asyncio
 import aiomysql
@@ -6,6 +8,7 @@ from httpx import AsyncClient, ASGITransport
 
 import lagun.db.session_store as _store_mod
 import lagun.db.pool as _pool_mod
+import lagun.db.crypto as _crypto_mod
 
 
 @pytest.fixture(scope="session")
@@ -30,6 +33,18 @@ def patch_db_path(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def patch_crypto_key_path(tmp_path):
+    """Redirect credential encryption fallback key to the per-test temp dir."""
+    original_path = _crypto_mod._FALLBACK_PATH
+    original_fernet = _crypto_mod._fernet
+    _crypto_mod._FALLBACK_PATH = tmp_path / "master.key"
+    _crypto_mod._fernet = None
+    yield
+    _crypto_mod._FALLBACK_PATH = original_path
+    _crypto_mod._fernet = original_fernet
+
+
+@pytest.fixture(autouse=True)
 def reset_pool_state():
     """Reset pool module globals before/after each test.
 
@@ -44,7 +59,25 @@ def reset_pool_state():
 
 
 @pytest_asyncio.fixture
-async def client():
+async def keep_event_loop_awake():
+    """Keep Python 3.13 test loops responsive to aiosqlite worker callbacks."""
+    async def tick():
+        while True:
+            await asyncio.sleep(0.05)
+
+    task = asyncio.create_task(tick())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest_asyncio.fixture
+async def client(keep_event_loop_awake):
     """Fresh HTTP client pointing at the FastAPI app."""
     from lagun.db.session_store import init_db
     await init_db()

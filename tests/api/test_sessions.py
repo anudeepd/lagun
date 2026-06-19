@@ -98,8 +98,8 @@ async def test_create_session_validates_port_range(client):
 
 async def test_probe_bad_host_returns_ok_false(client):
     r = await client.post("/api/v1/sessions/probe", json={
-        "host": "nonexistent.invalid",
-        "port": 3306,
+        "host": "127.0.0.1",
+        "port": 1,
         "username": "user",
         "password": "pass",
     })
@@ -107,6 +107,23 @@ async def test_probe_bad_host_returns_ok_false(client):
     data = r.json()
     assert data["ok"] is False
     assert data["error"] is not None
+
+
+async def test_saved_session_connection_error_is_user_facing(client):
+    r = await client.post("/api/v1/sessions", json={
+        "name": "Bad DB",
+        "host": "127.0.0.1",
+        "port": 1,
+        "username": "bad_user",
+        "password": "bad_password",
+    })
+    assert r.status_code == 201
+
+    sid = r.json()["id"]
+    r2 = await client.get(f"/api/v1/sessions/{sid}/databases")
+    assert r2.status_code == 502
+    detail = r2.json()["detail"]
+    assert "Could not connect to 127.0.0.1:1 as bad_user" in detail
 
 
 async def test_probe_good_connection(client, mysql_container):

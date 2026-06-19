@@ -24,6 +24,10 @@ const defaults = {
   ssl_enabled: false,
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
 export default function SessionForm({ open, onClose, session }: Props) {
   const { createSession, updateSession, testSession } = useSessionStore()
   const [form, setForm] = useState(defaults)
@@ -63,18 +67,39 @@ export default function SessionForm({ open, onClose, session }: Props) {
     setForm(f => ({ ...f, [field]: val }))
 
   const handleSave = async () => {
-    setSaving(true)
     setError(null)
+    const name = form.name.trim()
+    const username = form.username.trim()
+    const port = parseInt(form.port)
+    const queryLimit = parseInt(form.query_limit)
+    if (!name) {
+      setError('Connection name is required.')
+      return
+    }
+    if (!username) {
+      setError('Username is required.')
+      return
+    }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setError('Port must be a number between 1 and 65535.')
+      return
+    }
+    if (!Number.isInteger(queryLimit) || queryLimit < 1 || queryLimit > 100000) {
+      setError('Query limit must be a number between 1 and 100000.')
+      return
+    }
+
+    setSaving(true)
     try {
       const data = {
-        name: form.name,
-        host: form.host,
-        port: parseInt(form.port),
-        username: form.username,
+        name,
+        host: form.host.trim() || 'localhost',
+        port,
+        username,
         // Only include password if the user actually typed one (empty = keep existing)
         ...(form.password ? { password: form.password } : {}),
         default_db: form.default_db || undefined,
-        query_limit: parseInt(form.query_limit),
+        query_limit: queryLimit,
         ssl_enabled: form.ssl_enabled,
         selected_databases: selectedDbs,
       }
@@ -85,7 +110,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
       }
       onClose()
     } catch (e) {
-      setError(String(e))
+      setError(errorMessage(e))
     } finally {
       setSaving(false)
     }
@@ -112,6 +137,8 @@ export default function SessionForm({ open, onClose, session }: Props) {
       } else {
         setTestResult({ ok: false, msg: r.error ?? 'Connection failed' })
       }
+    } catch (e) {
+      setTestResult({ ok: false, msg: errorMessage(e) })
     } finally {
       setTesting(false)
     }
