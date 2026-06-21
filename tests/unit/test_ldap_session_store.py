@@ -6,6 +6,12 @@ from lagun.db.connections_config import sync_connections_config
 from lagun.models.session import SessionCreate
 
 
+def test_lagun_db_environment_override(monkeypatch, tmp_path):
+    path = tmp_path / "persistent" / "lagun.db"
+    monkeypatch.setenv("LAGUN_DB", str(path))
+    assert session_store._default_db_path() == path
+
+
 async def test_private_connections_are_visible_only_to_their_owner(keep_event_loop_awake):
     await session_store.init_db()
     alice = await session_store.create_session(SessionCreate(name="Alice", username="db"), "alice")

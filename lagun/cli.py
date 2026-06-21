@@ -2,6 +2,7 @@
 import os
 import asyncio
 import logging
+from pathlib import Path
 
 import click
 import uvicorn
@@ -11,6 +12,19 @@ import uvicorn
 @click.version_option(package_name="lagun")
 def main():
     """Lagun — web-based MySQL/MariaDB editor."""
+
+
+def _configure_logging(log_file: Path | None) -> None:
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=handlers,
+    )
 
 
 @main.command()
@@ -24,17 +38,16 @@ def main():
               help="Path to ldapgate YAML config to enable LDAP authentication.")
 @click.option("--connections-config", default=None, type=click.Path(exists=True, dir_okay=False, resolve_path=True),
               help="Server-managed LDAP connection profiles YAML file.")
-def serve(host: str, port: int, open_browser: bool, reload: bool, ldap_config: str | None, connections_config: str | None):
+@click.option("--log-file", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Append application logs to this file.")
+def serve(host: str, port: int, open_browser: bool, reload: bool, ldap_config: str | None, connections_config: str | None, log_file: Path | None):
     """Start the Lagun web server."""
     url = f"http://{host}:{port}"
 
     # LDAPGate logs authentication events through normal Python loggers.
-    # Configure the root handler so they appear in the service console/journal.
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    _configure_logging(log_file)
+    if log_file:
+        os.environ["LAGUN_LOG_FILE"] = str(log_file)
 
     if ldap_config:
         os.environ["LAGUN_LDAP_CONFIG"] = ldap_config
@@ -57,6 +70,7 @@ def serve(host: str, port: int, open_browser: bool, reload: bool, ldap_config: s
         port=port,
         reload=reload,
         log_level="info",
+        log_config=None,
     )
 
 

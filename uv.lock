@@ -607,7 +607,7 @@ wheels = [
 
 [[package]]
 name = "lagun"
-version = "0.1.30"
+version = "0.1.31"
 source = { editable = "." }
 dependencies = [
     { name = "aiomysql" },
@@ -618,6 +618,7 @@ dependencies = [
     { name = "keyring" },
     { name = "pydantic" },
     { name = "python-multipart" },
+    { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 

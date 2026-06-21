@@ -1,5 +1,6 @@
 """aiosqlite CRUD for saved sessions."""
 import json
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -11,7 +12,13 @@ import aiosqlite
 from lagun.db.crypto import encrypt_password, decrypt_password
 from lagun.models.session import SessionCreate, SessionRead, SessionUpdate
 
-_DB_PATH = Path.home() / ".lagun" / "lagun.db"
+
+def _default_db_path() -> Path:
+    """Return the persistent store path, with an operator-controlled override."""
+    return Path(os.getenv("LAGUN_DB", Path.home() / ".lagun" / "lagun.db")).expanduser()
+
+
+_DB_PATH = _default_db_path()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (

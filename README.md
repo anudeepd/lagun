@@ -80,7 +80,9 @@ those are visible only to their owner. Edit this file and restart Lagun to
 change shared access.
 
 LDAP API activity is recorded in Lagun's local `lagun.db`, not in MariaDB.
-Read it from the server with `lagun audit` and purge old entries with
+By default that database is `~/.lagun/lagun.db`; set `LAGUN_DB` to relocate the
+whole local store (saved connections, settings, and audit events), for example
+`LAGUN_DB=/var/lib/lagun/lagun.db`. Read it from the server with `lagun audit` and purge old entries with
 `lagun audit purge --older-than 90`.
 
 For direct local HTTP usage, set `proxy.secure_cookies: false` in the ldapgate

@@ -1,6 +1,7 @@
 """FastAPI application factory."""
 import os
 import json
+import logging
 import re
 import time
 from contextlib import asynccontextmanager
@@ -18,6 +19,15 @@ from lagun.db.connections_config import sync_connections_config
 from lagun.auth import ldap_enabled
 from lagun.db.pool import DatabaseConnectionError
 from lagun.api import sessions, query, schema, table_ops, export, import_data, config
+
+
+if _log_file := os.getenv("LAGUN_LOG_FILE"):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=[logging.StreamHandler(), logging.FileHandler(_log_file, encoding="utf-8")],
+    )
 
 
 @asynccontextmanager
@@ -43,7 +53,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.30", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.31", lifespan=lifespan)
 
 
 def _audit_details(body: bytes) -> str | None:
