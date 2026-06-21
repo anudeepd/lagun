@@ -52,6 +52,37 @@ pip install 'lagun[ldap]'
 lagun serve --ldap-config /path/to/ldapgate.yaml
 ```
 
+### Shared connections and audit log
+
+For LDAP deployments, an administrator can provide connections centrally and
+limit each one to selected LDAP usernames:
+
+```bash
+export LAGUN_DBS_PASSWORD='database-password'
+lagun serve --ldap-config /etc/lagun/ldap.yaml --connections-config /etc/lagun/connections.yaml
+```
+
+```yaml
+connections:
+  - id: dbs-production
+    name: DBS Production
+    host: mariadb.internal
+    port: 3306
+    username: shared_mariadb_user
+    password_env: LAGUN_DBS_PASSWORD
+    default: true
+    allowed_users: [alice, bob]
+```
+
+Listed users can use the connection but cannot edit it. Removing it in the UI
+only hides it for that user. LDAP users may also create private connections;
+those are visible only to their owner. Edit this file and restart Lagun to
+change shared access.
+
+LDAP API activity is recorded in Lagun's local `lagun.db`, not in MariaDB.
+Read it from the server with `lagun audit` and purge old entries with
+`lagun audit purge --older-than 90`.
+
 For direct local HTTP usage, set `proxy.secure_cookies: false` in the ldapgate
 config. Keep `secure_cookies: true` in production and run Lagun behind HTTPS
 with `trusted_proxies` configured so LDAPGate can honor `X-Forwarded-Proto`.

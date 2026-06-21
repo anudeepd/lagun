@@ -10,6 +10,8 @@ export interface Session {
   selected_databases: string[]
   created_at: string
   updated_at: string
+  managed?: boolean
+  is_default?: boolean
 }
 
 export interface SessionCreate {

@@ -1,5 +1,8 @@
 """FastAPI application factory."""
 import os
+import json
+import re
+import time
 from contextlib import asynccontextmanager
 from importlib.resources import files
 from pathlib import Path
@@ -10,6 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
 from lagun.db.session_store import init_db
+from lagun.db import session_store
+from lagun.db.connections_config import sync_connections_config
+from lagun.auth import ldap_enabled
 from lagun.db.pool import DatabaseConnectionError
 from lagun.api import sessions, query, schema, table_ops, export, import_data, config
 
@@ -17,6 +23,9 @@ from lagun.api import sessions, query, schema, table_ops, export, import_data, c
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    if os.getenv("LAGUN_CONNECTIONS_CONFIG") and not os.getenv("LAGUN_LDAP_CONFIG"):
+        raise RuntimeError("--connections-config requires --ldap-config")
+    await sync_connections_config(os.getenv("LAGUN_CONNECTIONS_CONFIG"))
     yield
     from lagun.db.pool import close_all_pools
     await close_all_pools()
@@ -34,7 +43,49 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.28", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.30", lifespan=lifespan)
+
+
+def _audit_details(body: bytes) -> str | None:
+    """Keep useful request details while never persisting submitted passwords."""
+    if not body or len(body) > 32_000:
+        return None
+    try:
+        data = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if isinstance(data, dict):
+        for key in list(data):
+            if "password" in key.lower():
+                data[key] = "[redacted]"
+    return json.dumps(data, ensure_ascii=False)[:16_000]
+
+
+@app.middleware("http")
+async def ldap_connection_access_and_audit(request: Request, call_next):
+    """Enforce session ownership and write a private audit row in LDAP mode."""
+    username = getattr(request.state, "user", None) if ldap_enabled() else None
+    session_match = re.match(r"^/api/v1/sessions/([^/]+)(?:/|$)", request.url.path)
+    session_id = session_match.group(1) if session_match and session_match.group(1) != "probe" else None
+    started = time.monotonic()
+    if username and request.url.path in {"/api/v1/config/export", "/api/v1/config/import"}:
+        response = JSONResponse(status_code=403, content={"detail": "Connection config import/export is disabled in LDAP mode"})
+    elif username and session_id and not await session_store.can_access_session(session_id, username):
+        response = JSONResponse(status_code=404, content={"detail": "Session not found"})
+    else:
+        response = await call_next(request)
+    duration = round((time.monotonic() - started) * 1000, 2)
+    if username and request.url.path.startswith("/api/v1/"):
+        try:
+            await session_store.record_audit_event(
+                username=username, method=request.method, path=request.url.path,
+                session_id=session_id, details=_audit_details(await request.body()),
+                status_code=response.status_code, duration_ms=duration,
+            )
+        except Exception:
+            # Activity logging must never make a database action fail.
+            pass
+    return response
 
 
 @app.exception_handler(DatabaseConnectionError)

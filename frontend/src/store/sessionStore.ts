@@ -29,7 +29,10 @@ export const useSessionStore = create<SessionState>()(
         set({ loading: true, error: null })
         try {
           const sessions = await api.getSessions()
-          set({ sessions, loading: false })
+          const activeSessionId = sessions.some(s => s.id === get().activeSessionId)
+            ? get().activeSessionId
+            : (sessions.find(s => s.is_default)?.id ?? sessions[0]?.id ?? null)
+          set({ sessions, activeSessionId, loading: false })
         } catch (e) {
           set({ error: String(e), loading: false })
         }

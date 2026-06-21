@@ -2,26 +2,28 @@
 import asyncio
 import ssl as ssl_mod
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 import aiomysql
 
 from lagun.db import session_store, pool as pool_mod
 from lagun.db.session_store import get_session_password
 from lagun.db.utils import SYSTEM_DBS
+from lagun.auth import request_username
 from lagun.models.session import SessionCreate, SessionRead, SessionUpdate, TestResult, ProbeRequest
 
 router = APIRouter(tags=["sessions"])
 
 
 @router.get("/sessions", response_model=list[SessionRead])
-async def list_sessions():
-    return await session_store.list_sessions()
+async def list_sessions(request: Request):
+    username = request_username(request)
+    return await session_store.list_sessions_for_user(username) if username else await session_store.list_sessions()
 
 
 @router.post("/sessions", response_model=SessionRead, status_code=201)
-async def create_session(data: SessionCreate):
-    return await session_store.create_session(data)
+async def create_session(data: SessionCreate, request: Request):
+    return await session_store.create_session(data, owner_username=request_username(request))
 
 
 @router.get("/sessions/{session_id}", response_model=SessionRead)
@@ -37,13 +39,19 @@ async def update_session(session_id: str, data: SessionUpdate):
     s = await session_store.get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
+    if s.managed:
+        raise HTTPException(403, "This server-managed connection cannot be edited")
     # Invalidate pool so reconnection uses updated credentials
     await pool_mod.close_pool(session_id)
     return await session_store.update_session(session_id, data)
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, request: Request):
+    username = request_username(request)
+    if username and await session_store.is_managed_session(session_id):
+        await session_store.hide_shared_session(session_id, username)
+        return
     ok = await session_store.delete_session(session_id)
     if not ok:
         raise HTTPException(404, "Session not found")

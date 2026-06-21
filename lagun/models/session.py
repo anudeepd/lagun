@@ -40,6 +40,8 @@ class SessionRead(BaseModel):
     selected_databases: list[str]
     created_at: datetime
     updated_at: datetime
+    managed: bool = False
+    is_default: bool = False
     # password_enc is intentionally omitted
 
 

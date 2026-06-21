@@ -62,12 +62,12 @@ export default function SessionList({ onNew }: Props) {
                 className="absolute right-0 top-6 bg-surface-800 border border-surface-700 rounded shadow-lg z-50 py-1 w-40"
                 onMouseLeave={() => setMenuId(null)}
               >
-                <button
+                {!s.managed && <button
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
                   onClick={e => { e.stopPropagation(); openQueryTab(s.id); setMenuId(null) }}
                 >
                   <Terminal size={12} /> New Query
-                </button>
+                </button>}
                 <button
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
                   onClick={e => { e.stopPropagation(); setEditSession(s); setMenuId(null) }}
@@ -78,7 +78,7 @@ export default function SessionList({ onNew }: Props) {
                   className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-red-400"
                   onClick={e => { e.stopPropagation(); setDeleteTarget(s); setMenuId(null) }}
                 >
-                  <Trash2 size={12} /> Delete
+                  <Trash2 size={12} /> {s.managed ? 'Remove' : 'Delete'}
                 </button>
               </div>
             )}
@@ -95,8 +95,10 @@ export default function SessionList({ onNew }: Props) {
       <ConfirmDialog
         open={!!deleteTarget}
         title="Delete Connection"
-        message={`Delete connection "${deleteTarget?.name ?? ''}"? Saved credentials and related open tabs will be removed.`}
-        confirmLabel="Delete"
+        message={deleteTarget?.managed
+          ? `Remove "${deleteTarget.name}" from your connections? Other users keep access.`
+          : `Delete connection "${deleteTarget?.name ?? ''}"? Saved credentials and related open tabs will be removed.`}
+        confirmLabel={deleteTarget?.managed ? 'Remove' : 'Delete'}
         danger
         onConfirm={handleConfirmDelete}
         onClose={() => setDeleteTarget(null)}
