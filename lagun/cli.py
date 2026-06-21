@@ -96,18 +96,6 @@ def audit(ctx: click.Context, username: str | None, since: str | None, limit: in
         _print_audit_events(asyncio.run(run()))
 
 
-@audit.command("show")
-@click.option("--user", "username", default=None)
-@click.option("--since", default=None, help="ISO date/time, for example 2026-06-21.")
-@click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 10000))
-def audit_show(username: str | None, since: str | None, limit: int):
-    from lagun.db.session_store import init_db, list_audit_events
-    async def run():
-        await init_db()
-        return await list_audit_events(username, since, limit)
-    _print_audit_events(asyncio.run(run()))
-
-
 @audit.command("purge")
 @click.option("--older-than", default=90, show_default=True, type=click.IntRange(1), help="Age in days.")
 def audit_purge(older_than: int):

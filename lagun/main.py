@@ -53,7 +53,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.31", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.32", lifespan=lifespan)
 
 
 def _audit_details(body: bytes) -> str | None:
@@ -87,9 +87,17 @@ async def ldap_connection_access_and_audit(request: Request, call_next):
     duration = round((time.monotonic() - started) * 1000, 2)
     if username and request.url.path.startswith("/api/v1/"):
         try:
+            content_length = request.headers.get("content-length")
+            details = None
+            if content_length:
+                try:
+                    if int(content_length) <= 32_000:
+                        details = _audit_details(await request.body())
+                except ValueError:
+                    pass
             await session_store.record_audit_event(
                 username=username, method=request.method, path=request.url.path,
-                session_id=session_id, details=_audit_details(await request.body()),
+                session_id=session_id, details=details,
                 status_code=response.status_code, duration_ms=duration,
             )
         except Exception:
