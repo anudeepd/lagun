@@ -49,6 +49,20 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   } | null>(null)
   const [importTarget, setImportTarget] = useState<{ db: string; table: string } | null>(null)
   const { bookmarks, toggle: toggleBookmark, isBookmarked } = useBookmarks(sessionId)
+  const allDbs = databases[sessionId] ?? []
+  const dbs = selectedDatabases && selectedDatabases.length > 0
+    ? allDbs.filter(db => selectedDatabases.includes(db))
+    : allDbs
+  const hasSchemaSelection = Boolean(selectedDatabases?.length)
+  const expandedSearchDbs = dbs.filter(db => expandedDbs.has(db))
+  const searchScopeDbs = query && expandedSearchDbs.length > 0 ? expandedSearchDbs : dbs
+  const searchPlaceholder = showBookmarksOnly
+    ? 'Filter bookmarks...'
+    : query && expandedSearchDbs.length > 0
+      ? `Filter ${expandedSearchDbs.length === 1 ? expandedSearchDbs[0] : `${expandedSearchDbs.length} open schemas`}`
+      : hasSchemaSelection
+        ? 'Filter selected schemas...'
+        : 'Filter tables...'
 
   useEffect(() => {
     loadDatabases(sessionId)
@@ -70,7 +84,8 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   const handleQueryChange = (q: string) => {
     setQuery(q)
     if (q) {
-      dbs.forEach(db => {
+      const scopeDbs = expandedDbs.size > 0 ? dbs.filter(db => expandedDbs.has(db)) : dbs
+      scopeDbs.forEach(db => {
         setExpandedDbs(prev => new Set([...prev, db]))
         if (!tables[`${sessionId}/${db}`]) loadTables(sessionId, db)
       })
@@ -103,13 +118,8 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     }
   }
 
-  const allDbs = databases[sessionId] ?? []
-  const dbs = selectedDatabases && selectedDatabases.length > 0
-    ? allDbs.filter(db => selectedDatabases.includes(db))
-    : allDbs
-
   const q = query.toLowerCase()
-  const visibleDbs = dbs.map(db => {
+  const visibleDbs = searchScopeDbs.map(db => {
     const tbls: TableInfo[] = tables[`${sessionId}/${db}`] ?? []
     let filtered = tbls
     if (showBookmarksOnly) filtered = filtered.filter(t => isBookmarked(db, t.name))
@@ -171,7 +181,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             type="text"
             value={query}
             onChange={e => handleQueryChange(e.target.value)}
-            placeholder={showBookmarksOnly ? 'Filter bookmarks…' : 'Filter tables…'}
+            placeholder={searchPlaceholder}
             className="bg-transparent text-xs text-slate-300 placeholder-slate-600 flex-1 outline-none min-w-0"
           />
           {query && (
@@ -220,7 +230,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                     className="flex items-center gap-1.5 w-full pl-7 pr-2 py-0.5 hover:bg-surface-800 text-slate-400 hover:text-slate-200 group"
                     onClick={() => openTableTab(sessionId, db, tbl.name)}
                     onContextMenu={e => handleTableContext(e, db, tbl.name)}
-                    title={tbl.name}
+                    title={`${db}.${tbl.name}`}
                   >
                     <Table2 size={11} className="flex-shrink-0 text-slate-500" />
                     <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>

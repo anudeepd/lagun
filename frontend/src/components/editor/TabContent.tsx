@@ -29,6 +29,7 @@ const KEY_FILTER_WORD_WRAP = 'lagun-data-filter-word-wrap'
 const KEY_EDITOR_HEIGHT = 'lagun-query-editor-height'
 
 interface ExecutedQueryResult {
+  id: string
   result: QueryResult
   sql: string
 }
@@ -105,6 +106,17 @@ export function normalizeDataTabState(state?: DataTabState): Required<DataTabSta
     showFilterBar: state?.showFilterBar ?? Boolean(state?.whereFilter || state?.appliedWhere),
     limit: state?.limit ?? 1000,
   }
+}
+
+export function buildQueryResultExportData(
+  result: QueryResult | undefined,
+  grid: Pick<ResultGridHandle, 'isAnyFilterPresent' | 'getFilteredData'> | null,
+): { columns: string[], rows: unknown[][] } | undefined {
+  if (!result) return undefined
+  if (grid?.isAnyFilterPresent()) {
+    return grid.getFilteredData()
+  }
+  return { columns: result.columns, rows: result.rows }
 }
 
 const MIN_EDITOR_HEIGHT = 100
@@ -299,8 +311,9 @@ function QueryTab({ tab }: Props) {
 
     setRunning(true)
     const newResults: ExecutedQueryResult[] = []
+    const executionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     try {
-      for (const stmt of statements) {
+      for (const [statementIdx, stmt] of statements.entries()) {
         const controller = new AbortController()
         abortControllerRef.current = controller
         const start = Date.now()
@@ -314,7 +327,7 @@ function QueryTab({ tab }: Props) {
           }
           throw e
         }
-        newResults.push({ result: r, sql: stmt })
+        newResults.push({ id: `${executionId}-${statementIdx}`, result: r, sql: stmt })
         try {
           addEntry({
             sql: stmt,
@@ -340,6 +353,10 @@ function QueryTab({ tab }: Props) {
     abortControllerRef.current = null
     try { await api.killQuery(tab.sessionId) } catch { /* ignore */ }
   }
+
+  const getCurrentResultExportData = useCallback(() => {
+    return buildQueryResultExportData(results[resultIdx]?.result, gridRef.current)
+  }, [results, resultIdx])
 
   return (
     <div className="flex flex-col h-full min-h-0" ref={editorContainerRef}>
@@ -391,7 +408,7 @@ function QueryTab({ tab }: Props) {
         <div className="flex-1 overflow-hidden min-h-0">
           {results.length > 0 ? (
             <ResultGrid
-              key={resultIdx}
+              key={results[resultIdx].id}
               ref={gridRef}
               result={results[resultIdx].result}
               onSortActiveChange={setResultSortActive}
@@ -423,9 +440,7 @@ function QueryTab({ tab }: Props) {
             </button>
             <button
               onClick={() => {
-                setExportOverride(
-                  gridRef.current?.isAnyFilterPresent() ? gridRef.current.getFilteredData() : undefined
-                )
+                setExportOverride(getCurrentResultExportData())
                 setShowExport(true)
               }}
               className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
@@ -441,12 +456,16 @@ function QueryTab({ tab }: Props) {
         <Suspense fallback={null}>
           <ExportDialog
             open={showExport}
-            onClose={() => setShowExport(false)}
+            onClose={() => {
+              setShowExport(false)
+              setExportOverride(undefined)
+            }}
             sessionId={tab.sessionId}
             database={tab.database}
             table="query_result"
             sql={results[resultIdx].sql}
             rowsOverride={exportOverride}
+            rowsOverrideLabel="displayed rows"
           />
         </Suspense>
       )}

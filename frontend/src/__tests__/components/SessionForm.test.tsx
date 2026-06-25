@@ -75,6 +75,7 @@ describe('SessionForm', () => {
       )
     )
     render(<SessionForm open={true} onClose={() => {}} />)
+    await userEvent.type(screen.getByPlaceholderText('My Database'), 'Existing DB')
     await userEvent.click(screen.getByText('Create'))
     await waitFor(() => expect(screen.getByText(/Duplicate name|Error/i)).toBeInTheDocument())
   })

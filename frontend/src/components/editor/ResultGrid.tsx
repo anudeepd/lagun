@@ -204,7 +204,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       agApiRef.current?.applyColumnState({ defaultState: { sort: null } })
       onSortActiveChange?.(false)
     },
-  }), [isAnySortPresent, onSortActiveChange])
+  }), [isAnySortPresent, onSortActiveChange, visibleColumns])
 
   const pendingChangesRef = useRef(pendingChanges)
   pendingChangesRef.current = pendingChanges

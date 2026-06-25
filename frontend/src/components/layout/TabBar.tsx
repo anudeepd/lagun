@@ -3,6 +3,7 @@ import { X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
+import type { Tab } from '../../types'
 import ConfirmDialog from '../ui/ConfirmDialog'
 
 interface ContextMenuState {
@@ -65,6 +66,15 @@ export default function TabBar() {
   const currentTab = contextMenu ? tabs.find(t => t.id === contextMenu.tabId) : null
   const closeTarget = closeTargetId ? tabs.find(t => t.id === closeTargetId) : null
 
+  const getTabTitle = (tab: Tab) => {
+    if (tab.type === 'query') {
+      return tab.database ? `Query tab for ${tab.database}` : 'Query tab'
+    }
+    return tab.database ? `Table tab for ${tab.database}.${tab.table ?? tab.label}` : `Table tab for ${tab.label}`
+  }
+
+  const getCloseTitle = (tab: Tab) => `Close ${getTabTitle(tab).toLowerCase()}`
+
   const requestCloseTab = (tabId: string) => {
     setContextMenu(null)
     setCloseTargetId(tabId)
@@ -94,6 +104,7 @@ export default function TabBar() {
               onDrop={(e) => handleDrop(e, tab.id)}
               onDragEnd={handleDragEnd}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
+              title={getTabTitle(tab)}
               className={clsx(
                 'group flex items-center gap-1.5 px-3 py-2 text-xs border-r border-surface-800 whitespace-nowrap transition-colors flex-shrink-0 cursor-move',
                 activeTabId === tab.id
@@ -104,17 +115,22 @@ export default function TabBar() {
             >
               <button
                 onClick={() => setActiveTab(tab.id)}
+                title={getTabTitle(tab)}
                 className="flex items-center gap-1.5"
               >
                 {tab.type === 'query'
                   ? <Terminal size={12} className="flex-shrink-0" />
                   : <Table size={12} className="flex-shrink-0" />
                 }
-                <span className="truncate max-w-[120px]">{tab.label}</span>
+                {tab.type === 'table' && tab.database && (
+                  <span className="max-w-[72px] truncate text-[10px] text-slate-500">{tab.database}</span>
+                )}
+                <span className="truncate max-w-[120px]">{tab.type === 'table' ? tab.table ?? tab.label : tab.label}</span>
               </button>
               <span
                 role="button"
                 onClick={(e) => { e.stopPropagation(); requestCloseTab(tab.id) }}
+                title={getCloseTitle(tab)}
                 className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
               >
                 <X size={10} />

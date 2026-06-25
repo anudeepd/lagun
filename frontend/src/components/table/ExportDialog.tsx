@@ -18,6 +18,8 @@ interface Props {
   pkValues?: Record<string, unknown>[]
   /** When provided, bypass backend and export these pre-fetched (filtered) rows */
   rowsOverride?: { columns: string[], rows: unknown[][] }
+  /** Human-readable description for rowsOverride rows */
+  rowsOverrideLabel?: string
   /** PK column names used for DELETE SQL generation when rowsOverride is set */
   pkColumnsForSql?: string[]
 }
@@ -111,7 +113,7 @@ export function buildFrontendContent(
   return deleteLines + '\n\n' + `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES\n${values};\n`
 }
 
-export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, pkColumnsForSql = [] }: Props) {
+export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, rowsOverrideLabel = 'filtered rows', pkColumnsForSql = [] }: Props) {
   const [format, setFormat] = useState<'insert' | 'delete' | 'delete+insert' | 'csv'>(customSql ? 'csv' : 'insert')
   const [insertMode, setInsertMode] = useState<'batch' | 'single'>('single')
   const [batchSize, setBatchSize] = useState('500')
@@ -349,7 +351,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
         )}
         <p className="text-xs text-slate-500">
           {rowsOverride
-            ? <>Exporting <strong className="text-slate-300">{rowsOverride.rows.length} filtered rows</strong> from <code className="text-slate-300">{table}</code> (grid filter active).</>
+            ? <>Exporting <strong className="text-slate-300">{rowsOverride.rows.length} {rowsOverrideLabel}</strong> from <code className="text-slate-300">{table}</code>.</>
             : pkValues
               ? <>Exporting <strong className="text-slate-300">{pkValues.length} selected rows</strong> from <code className="text-slate-300">{table}</code>.</>
               : <>Exports all rows from <code className="text-slate-300">{table}</code>. Large tables are streamed in batches.</>

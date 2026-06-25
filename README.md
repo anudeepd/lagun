@@ -71,13 +71,16 @@ connections:
     username: shared_mariadb_user
     password_env: LAGUN_DBS_PASSWORD
     default: true
+    selected_databases: [app, analytics]
     allowed_users: [alice, bob]
 ```
 
 Listed users can use the connection but cannot edit it. Removing it in the UI
 only hides it for that user. LDAP users may also create private connections;
 those are visible only to their owner. Edit this file and restart Lagun to
-change shared access.
+change shared access. Set `selected_databases` to limit the visible schema
+browser/search scope for a managed connection; omit it or use an empty list to
+show all non-system schemas the database user can access.
 
 LDAP API activity is recorded in Lagun's local `lagun.db`, not in MariaDB.
 By default that database is `~/.lagun/lagun.db`; set `LAGUN_DB` to relocate the

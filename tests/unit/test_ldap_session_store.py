@@ -46,6 +46,61 @@ connections:
     assert [s.name for s in await session_store.list_sessions_for_user("bob")] == ["Shared DB"]
 
 
+async def test_managed_connection_can_select_databases_from_config(tmp_path, monkeypatch, keep_event_loop_awake):
+    await session_store.init_db()
+    config = tmp_path / "connections.yaml"
+    config.write_text("""
+connections:
+  - id: shared-db
+    name: Shared DB
+    username: shared
+    password_env: TEST_SHARED_PASSWORD
+    selected_databases: [app, analytics]
+    allowed_users: [alice]
+""")
+    monkeypatch.setenv("TEST_SHARED_PASSWORD", "secret")
+
+    await sync_connections_config(str(config))
+    alice_session = (await session_store.list_sessions_for_user("alice"))[0]
+    assert alice_session.selected_databases == ["app", "analytics"]
+
+    config.write_text("""
+connections:
+  - id: shared-db
+    name: Shared DB
+    username: shared
+    password_env: TEST_SHARED_PASSWORD
+    selected_databases: [reporting]
+    allowed_users: [alice]
+""")
+
+    await sync_connections_config(str(config))
+    alice_session = (await session_store.list_sessions_for_user("alice"))[0]
+    assert alice_session.selected_databases == ["reporting"]
+
+
+async def test_managed_connection_rejects_invalid_selected_databases(tmp_path, monkeypatch, keep_event_loop_awake):
+    await session_store.init_db()
+    config = tmp_path / "connections.yaml"
+    config.write_text("""
+connections:
+  - id: shared-db
+    name: Shared DB
+    username: shared
+    password_env: TEST_SHARED_PASSWORD
+    selected_databases: app
+    allowed_users: [alice]
+""")
+    monkeypatch.setenv("TEST_SHARED_PASSWORD", "secret")
+
+    try:
+        await sync_connections_config(str(config))
+    except ValueError as exc:
+        assert "selected_databases" in str(exc)
+    else:
+        raise AssertionError("invalid selected_databases should fail config sync")
+
+
 async def test_audit_events_can_be_filtered_and_purged(keep_event_loop_awake):
     await session_store.init_db()
     await session_store.record_audit_event(

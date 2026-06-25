@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { QueryResult } from '../../types'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import { normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import { buildQueryResultExportData, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -250,13 +250,44 @@ describe('query result export metadata', () => {
   it('uses the active result statement instead of the full editor SQL', () => {
     const editorSql = 'SELECT 1; SELECT 2;'
     const executedResults = [
-      { result: makeResult(['one'], [[1]]), sql: 'SELECT 1' },
-      { result: makeResult(['two'], [[2]]), sql: 'SELECT 2' },
+      { id: 'run-1-0', result: makeResult(['one'], [[1]]), sql: 'SELECT 1' },
+      { id: 'run-1-1', result: makeResult(['two'], [[2]]), sql: 'SELECT 2' },
     ]
     const activeResultIdx = 1
 
     expect(executedResults[activeResultIdx].sql).toBe('SELECT 2')
     expect(executedResults[activeResultIdx].sql).not.toBe(editorSql)
+  })
+
+  it('exports the current displayed query rows, not a stale previous result', () => {
+    const previous = makeResult(['id'], [[1], [2], [3]])
+    const current = makeResult(
+      ['id'],
+      Array.from({ length: 10 }, (_, idx) => [idx + 1]),
+    )
+
+    expect(previous.rows).toHaveLength(3)
+
+    const out = buildQueryResultExportData(current, null)
+
+    expect(out?.rows).toHaveLength(10)
+    expect(out).toEqual({ columns: current.columns, rows: current.rows })
+  })
+
+  it('uses AG Grid filtered data only when a grid filter is active', () => {
+    const current = makeResult(
+      ['id'],
+      Array.from({ length: 10 }, (_, idx) => [idx + 1]),
+    )
+    const filtered = { columns: ['id'], rows: [[2], [4], [6]] }
+
+    const out = buildQueryResultExportData(current, {
+      isAnyFilterPresent: () => true,
+      getFilteredData: () => filtered,
+    })
+
+    expect(out).toBe(filtered)
+    expect(out?.rows).toHaveLength(3)
   })
 })
 
