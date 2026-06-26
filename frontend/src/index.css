@@ -116,4 +116,9 @@
     padding-left: 10px;
     padding-right: 10px;
   }
+
+  .cm-tooltip,
+  .cm-tooltip.cm-tooltip-autocomplete {
+    z-index: 10000;
+  }
 }

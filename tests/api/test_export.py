@@ -54,6 +54,38 @@ async def test_export_delete_format(client, session_id, test_db):
     assert "DELETE FROM" in body
 
 
+async def test_export_sql_omits_schema_by_default(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
+        "database": test_db,
+        "table": "users",
+        "format": "delete+insert",
+        "insert_mode": "single",
+    })
+    assert r.status_code == 200
+    body = r.text
+    assert "-- Lagun export: users" in body
+    assert f"-- Lagun export: {test_db}.users" not in body
+    assert "DELETE FROM `users`" in body
+    assert "INSERT INTO `users`" in body
+    assert f"DELETE FROM `{test_db}`.`users`" not in body
+    assert f"INSERT INTO `{test_db}`.`users`" not in body
+
+
+async def test_export_sql_can_include_schema(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
+        "database": test_db,
+        "table": "users",
+        "format": "delete+insert",
+        "insert_mode": "single",
+        "include_schema": True,
+    })
+    assert r.status_code == 200
+    body = r.text
+    assert f"-- Lagun export: {test_db}.users" in body
+    assert f"DELETE FROM `{test_db}`.`users`" in body
+    assert f"INSERT INTO `{test_db}`.`users`" in body
+
+
 async def test_export_insert_single_mode(client, session_id, test_db):
     r = await client.post(f"/api/v1/sessions/{session_id}/export", json={
         "database": test_db,

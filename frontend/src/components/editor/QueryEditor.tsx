@@ -2,8 +2,8 @@ import { useMemo, useRef, useCallback, type Ref } from 'react'
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { sql, MySQL, schemaCompletionSource } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorView, keymap } from '@codemirror/view'
-import { Prec } from '@codemirror/state'
+import { EditorView, keymap, tooltips } from '@codemirror/view'
+import { Prec, type Extension } from '@codemirror/state'
 import type { CompletionContext, CompletionResult, Completion } from '@codemirror/autocomplete'
 import { Play, Loader2, X, WrapText } from 'lucide-react'
 import clsx from 'clsx'
@@ -179,12 +179,15 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
     mac: 'Cmd-Enter',
     run: () => { if (!runningRef.current) onRunRef.current(); return true },
   }])), [])
+  const tooltipExtensions = useMemo((): Extension[] =>
+    typeof document === 'undefined' ? [] : [tooltips({ parent: document.body })],
+  [])
 
   const extensions = useMemo(
     () => wordWrap
-      ? [sqlExtension, EditorView.lineWrapping, runKeymap]
-      : [sqlExtension, runKeymap],
-    [sqlExtension, runKeymap, wordWrap]
+      ? [sqlExtension, EditorView.lineWrapping, runKeymap, tooltipExtensions]
+      : [sqlExtension, runKeymap, tooltipExtensions],
+    [sqlExtension, runKeymap, tooltipExtensions, wordWrap]
   )
 
   return (

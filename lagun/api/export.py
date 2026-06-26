@@ -27,6 +27,17 @@ def _safe_filename_part(s: str) -> str:
     return _SAFE_FILENAME.sub('_', s) if s else 'export'
 
 
+def _target_table_sql(database: str, table_name: str, include_schema: bool = False) -> str:
+    tbl_q = quote_ident(table_name)
+    if not include_schema:
+        return tbl_q
+    return f"{quote_ident(database)}.{tbl_q}"
+
+
+def _target_table_label(database: str, table_name: str, include_schema: bool = False) -> str:
+    return f"{database}.{table_name}" if include_schema else table_name
+
+
 class ExportRequest(BaseModel):
     database: str
     table: Optional[str] = None
@@ -34,6 +45,7 @@ class ExportRequest(BaseModel):
     format: Literal["insert", "delete", "delete+insert", "csv"] = "insert"
     batch_size: int = 500
     insert_mode: Literal["batch", "single"] = "single"
+    include_schema: bool = False
     pk_values: Optional[list] = None  # list of dicts: [{pk_col: val, ...}, ...]
     # CSV-specific options (ignored for other formats)
     csv_delimiter: str = ","
@@ -87,9 +99,10 @@ async def export_data(session_id: str, req: ExportRequest):
                 cols = [d[0] for d in cur.description]
                 cols_sql = ", ".join(quote_ident(c) for c in cols)
                 tbl = req.table or "exported_data"
-                tbl_q = quote_ident(tbl)
+                tbl_q = _target_table_sql(req.database, tbl, req.include_schema)
+                tbl_label = _target_table_label(req.database, tbl, req.include_schema)
 
-                yield f"-- Lagun export: {req.database}.{tbl}\n"
+                yield f"-- Lagun export: {tbl_label}\n"
                 yield f"-- Format: INSERT ({req.insert_mode})\n\n"
 
                 if req.insert_mode == "single":
@@ -130,13 +143,13 @@ async def export_data(session_id: str, req: ExportRequest):
                 pk_rows = await cur.fetchall()
                 pk_cols = [r[0] for r in pk_rows]
 
-                tbl_q = f"{quote_ident(req.database)}.{quote_ident(req.table or 'tbl')}"
+                tbl_q = _target_table_sql(req.database, req.table or 'tbl', req.include_schema)
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
                 # Fall back to all columns if no primary key (HeidiSQL approach)
                 where_cols = pk_cols if pk_cols else cols
 
-                yield f"-- Lagun export: {req.database}.{req.table}\n-- Format: DELETE\n\n"
+                yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE\n\n"
 
                 while True:
                     rows = await cur.fetchmany(req.batch_size)
@@ -164,14 +177,14 @@ async def export_data(session_id: str, req: ExportRequest):
                 pk_rows = await cur.fetchall()
                 pk_cols = [r[0] for r in pk_rows]
 
-                tbl_q = f"{quote_ident(req.database)}.{quote_ident(req.table or 'tbl')}"
+                tbl_q = _target_table_sql(req.database, req.table or 'tbl', req.include_schema)
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
                 cols_sql = ", ".join(quote_ident(c) for c in cols)
                 # Fall back to all columns if no primary key (HeidiSQL approach)
                 where_cols = pk_cols if pk_cols else cols
 
-                yield f"-- Lagun export: {req.database}.{req.table}\n-- Format: DELETE+INSERT ({req.insert_mode})\n\n"
+                yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE+INSERT ({req.insert_mode})\n\n"
 
                 if req.insert_mode == "single":
                     while True:

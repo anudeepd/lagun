@@ -30,6 +30,16 @@ function sqlLiteral(v: unknown): string {
   return `'${String(v).split("'").join("''")}'`
 }
 
+function quoteIdent(identifier: string): string {
+  return `\`${identifier.replace(/`/g, '``')}\``
+}
+
+export function buildQualifiedTableName(database: string, table: string, includeSchema = false): string {
+  return includeSchema
+    ? `${quoteIdent(database)}.${quoteIdent(table)}`
+    : quoteIdent(table)
+}
+
 export function buildFrontendContent(
   format: 'insert' | 'delete' | 'delete+insert' | 'csv',
   database: string,
@@ -38,6 +48,7 @@ export function buildFrontendContent(
   pkCols: string[],
   csvOpts: { delimiter: string, quoteChar: string, escapeChar: string, lineTerminator: string, encoding: string },
   insertMode: 'batch' | 'single' = 'batch',
+  includeSchema = false,
 ): string {
   if (format === 'csv') {
     const { delimiter: d, quoteChar: q, escapeChar: e, lineTerminator: nl } = csvOpts
@@ -72,51 +83,54 @@ export function buildFrontendContent(
   }
 
   if (format === 'insert') {
-    const cols = data.columns.map(c => `\`${c}\``).join(', ')
+    const target = buildQualifiedTableName(database, table, includeSchema)
+    const cols = data.columns.map(quoteIdent).join(', ')
     if (insertMode === 'single') {
       return data.rows.map(r => {
         const vals = `(${r.map(sqlLiteral).join(', ')})`
-        return `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES ${vals};\n`
+        return `INSERT INTO ${target} (${cols}) VALUES ${vals};\n`
       }).join('')
     }
     const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
-    return `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES\n${values};\n`
+    return `INSERT INTO ${target} (${cols}) VALUES\n${values};\n`
   }
 
+  const target = buildQualifiedTableName(database, table, includeSchema)
   const effectivePks = pkCols.length > 0 ? pkCols : data.columns
   const deleteLines = data.rows.map(r => {
     const where = effectivePks
       .map(pk => {
         const idx = data.columns.indexOf(pk)
-        return `\`${pk}\` = ${sqlLiteral(idx >= 0 ? r[idx] : null)}`
+        return `${quoteIdent(pk)} = ${sqlLiteral(idx >= 0 ? r[idx] : null)}`
       })
       .join(' AND ')
-    return `DELETE FROM \`${database}\`.\`${table}\` WHERE ${where};`
+    return `DELETE FROM ${target} WHERE ${where};`
   }).join('\n')
 
   if (format === 'delete') return deleteLines + '\n'
 
   // delete+insert
-  const cols = data.columns.map(c => `\`${c}\``).join(', ')
+  const cols = data.columns.map(quoteIdent).join(', ')
   if (insertMode === 'single') {
     return data.rows.map(r => {
       const idx = effectivePks.map(pk => data.columns.indexOf(pk))
       const where = effectivePks
-        .map((pk, i) => `\`${pk}\` = ${sqlLiteral(idx[i] >= 0 ? r[idx[i]] : null)}`)
+        .map((pk, i) => `${quoteIdent(pk)} = ${sqlLiteral(idx[i] >= 0 ? r[idx[i]] : null)}`)
         .join(' AND ')
       const vals = `(${r.map(sqlLiteral).join(', ')})`
-      return `DELETE FROM \`${database}\`.\`${table}\` WHERE ${where};\n` +
-             `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES ${vals};\n`
+      return `DELETE FROM ${target} WHERE ${where};\n` +
+             `INSERT INTO ${target} (${cols}) VALUES ${vals};\n`
     }).join('')
   }
   const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
-  return deleteLines + '\n\n' + `INSERT INTO \`${database}\`.\`${table}\` (${cols}) VALUES\n${values};\n`
+  return deleteLines + '\n\n' + `INSERT INTO ${target} (${cols}) VALUES\n${values};\n`
 }
 
 export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, rowsOverrideLabel = 'filtered rows', pkColumnsForSql = [] }: Props) {
   const [format, setFormat] = useState<'insert' | 'delete' | 'delete+insert' | 'csv'>(customSql ? 'csv' : 'insert')
   const [insertMode, setInsertMode] = useState<'batch' | 'single'>('single')
   const [batchSize, setBatchSize] = useState('500')
+  const [includeSchema, setIncludeSchema] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -148,6 +162,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       format,
       batch_size: Number.isNaN(parsedBatchSize) || parsedBatchSize < 1 ? 500 : parsedBatchSize,
       ...(format === 'insert' || format === 'delete+insert' ? { insert_mode: insertMode } : {}),
+      ...(format !== 'csv' ? { include_schema: includeSchema } : {}),
       ...(pkValues ? { pk_values: pkValues } : {}),
       ...(format === 'csv' ? {
         csv_delimiter: effectiveDelimiter,
@@ -173,7 +188,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       let blob: Blob
       let filename: string
       if (rowsOverride) {
-        const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode)
+        const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)
         blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
         filename = `${database}_${table}_filtered.${format === 'csv' ? 'csv' : 'sql'}`
       } else {
@@ -207,7 +222,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     try {
       let text: string
       if (rowsOverride) {
-        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode)
+        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)
       } else {
         const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
           method: 'POST',
@@ -265,6 +280,17 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             <option value="batch">Batch (all rows in one INSERT)</option>
             <option value="single">Single (one INSERT per row)</option>
           </Select>
+        )}
+        {format !== 'csv' && (
+          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includeSchema}
+              onChange={e => setIncludeSchema(e.target.checked)}
+              className="accent-brand-500"
+            />
+            <span>Include schema name</span>
+          </label>
         )}
         <Input
           label="Batch Size"

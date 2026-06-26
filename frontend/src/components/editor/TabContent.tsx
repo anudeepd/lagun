@@ -14,8 +14,8 @@ import Button from '../ui/Button'
 import ReactCodeMirror from '@uiw/react-codemirror'
 import { sql, MySQL } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
-import { EditorView, keymap } from '@codemirror/view'
-import { Prec } from '@codemirror/state'
+import { EditorView, keymap, tooltips } from '@codemirror/view'
+import { Prec, type Extension } from '@codemirror/state'
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
 import { isMac, modKey } from '../../utils/platform'
@@ -32,6 +32,11 @@ interface ExecutedQueryResult {
   id: string
   result: QueryResult
   sql: string
+}
+
+interface QueryExportContext {
+  sql: string
+  rowsOverride?: { columns: string[], rows: unknown[][] }
 }
 
 try {
@@ -119,8 +124,79 @@ export function buildQueryResultExportData(
   return { columns: result.columns, rows: result.rows }
 }
 
+export function buildQueryExportContext(
+  entry: ExecutedQueryResult | undefined,
+  grid: Pick<ResultGridHandle, 'isAnyFilterPresent' | 'getFilteredData'> | null,
+): QueryExportContext | null {
+  if (!entry) return null
+  return {
+    sql: entry.sql,
+    rowsOverride: buildQueryResultExportData(entry.result, grid),
+  }
+}
+
+export function buildTableDataExportData(
+  result: QueryResult | null,
+  grid: Pick<ResultGridHandle, 'getFilteredData'> | null,
+): { columns: string[], rows: unknown[][] } | undefined {
+  if (!result || result.error) return undefined
+  return grid?.getFilteredData() ?? { columns: result.columns, rows: result.rows }
+}
+
+export function buildSelectedRowsExportData(
+  result: QueryResult | null,
+  rows: Record<string, unknown>[],
+): { columns: string[], rows: unknown[][] } | undefined {
+  if (!result || result.error || rows.length === 0) return undefined
+  return {
+    columns: result.columns,
+    rows: rows.map(row => result.columns.map(col => row[col] ?? null)),
+  }
+}
+
+function quoteDataTabIdent(identifier: string): string {
+  return `\`${identifier.replace(/`/g, '``')}\``
+}
+
+export function buildTableDataSelectSql(
+  database: string,
+  table: string,
+  columns: ColumnInfo[],
+  globalSearch: string,
+  whereFilter: string,
+): string {
+  let selectSql = `SELECT * FROM ${quoteDataTabIdent(database)}.${quoteDataTabIdent(table)}`
+  const conditions: string[] = []
+
+  if (globalSearch.trim() && columns.length > 0) {
+    const escaped = globalSearch.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_')
+    const likeParts = columns.map(c => `${quoteDataTabIdent(c.name)} LIKE '%${escaped}%'`)
+    conditions.push(`(${likeParts.join(' OR ')})`)
+  }
+
+  if (whereFilter.trim()) {
+    conditions.push(`(${whereFilter.trim()})`)
+  }
+
+  if (conditions.length > 0) {
+    selectSql += ` WHERE ${conditions.join(' AND ')}`
+  }
+
+  const orderColumns = columns.filter(c => c.is_primary_key).map(c => c.name)
+  if (orderColumns.length > 0) {
+    selectSql += ` ORDER BY ${orderColumns.map(quoteDataTabIdent).join(', ')}`
+  }
+
+  return selectSql
+}
+
 const MIN_EDITOR_HEIGHT = 100
 const MAX_EDITOR_HEIGHT_FRACTION = 0.7
+
+interface DataExportContext {
+  rowsOverride?: { columns: string[], rows: unknown[][] }
+  rowsOverrideLabel?: string
+}
 
 function QueryTab({ tab }: Props) {
   const storeSql = useTabStore(s => s.tabs.find(t => t.id === tab.id)?.sql ?? '')
@@ -148,8 +224,7 @@ function QueryTab({ tab }: Props) {
   const [running, setRunning] = useState(false)
   const [limit, setLimit] = useState(1000)
   const [functions, setFunctions] = useState<string[]>([])
-  const [showExport, setShowExport] = useState(false)
-  const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
+  const [queryExportContext, setQueryExportContext] = useState<QueryExportContext | null>(null)
   const [resultSortActive, setResultSortActive] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [editorHeight, setEditorHeight] = useState(() => {
@@ -354,10 +429,6 @@ function QueryTab({ tab }: Props) {
     try { await api.killQuery(tab.sessionId) } catch { /* ignore */ }
   }
 
-  const getCurrentResultExportData = useCallback(() => {
-    return buildQueryResultExportData(results[resultIdx]?.result, gridRef.current)
-  }, [results, resultIdx])
-
   return (
     <div className="flex flex-col h-full min-h-0" ref={editorContainerRef}>
       <div style={{ height: editorHeight }} className="flex-shrink-0">
@@ -440,8 +511,7 @@ function QueryTab({ tab }: Props) {
             </button>
             <button
               onClick={() => {
-                setExportOverride(getCurrentResultExportData())
-                setShowExport(true)
+                setQueryExportContext(buildQueryExportContext(results[resultIdx], gridRef.current))
               }}
               className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
               title="Export result"
@@ -452,19 +522,16 @@ function QueryTab({ tab }: Props) {
         )}
       </div>
 
-      {showExport && tab.database && results[resultIdx]?.sql && (
+      {queryExportContext && tab.database && (
         <Suspense fallback={null}>
           <ExportDialog
-            open={showExport}
-            onClose={() => {
-              setShowExport(false)
-              setExportOverride(undefined)
-            }}
+            open={true}
+            onClose={() => setQueryExportContext(null)}
             sessionId={tab.sessionId}
             database={tab.database}
             table="query_result"
-            sql={results[resultIdx].sql}
-            rowsOverride={exportOverride}
+            sql={queryExportContext.sql}
+            rowsOverride={queryExportContext.rowsOverride}
             rowsOverrideLabel="displayed rows"
           />
         </Suspense>
@@ -483,9 +550,8 @@ function TableTab({ tab }: Props) {
   const [limit, setLimit] = useState(initialDataState.limit)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
   const [selectedRows, setSelectedRows] = useState<Record<string, unknown>[]>([])
-  const [showDataExport, setShowDataExport] = useState(false)
+  const [dataExportContext, setDataExportContext] = useState<DataExportContext | null>(null)
   const [functions, setFunctions] = useState<string[]>([])
-  const [exportOverride, setExportOverride] = useState<{ columns: string[], rows: unknown[][] } | undefined>()
   const [dataSortActive, setDataSortActive] = useState(false)
   const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
@@ -513,13 +579,20 @@ function TableTab({ tab }: Props) {
     insertDraftsRef.current = insertDrafts
   })
   const loadAbortRef = useRef<AbortController | null>(null)
+  const loadSeqRef = useRef(0)
   const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
   const setTableDataState = useTabStore(s => s.setTableDataState)
   const { invalidateTablesForDb, loadTables } = useSchemaStore()
 
-  const pkColumns = columns.filter(c => c.is_primary_key).map(c => c.name)
-  const rowKeyColumns = pkColumns.length > 0 ? pkColumns : columns.map(c => c.name)
+  const pkColumns = useMemo(() =>
+    columns.filter(c => c.is_primary_key).map(c => c.name),
+    [columns],
+  )
+  const rowKeyColumns = useMemo(() =>
+    pkColumns.length > 0 ? pkColumns : columns.map(c => c.name),
+    [columns, pkColumns],
+  )
 
   const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string, commitWhereOnSuccess?: string) => {
     if (!tab.database || !tab.table) return
@@ -531,6 +604,9 @@ function TableTab({ tab }: Props) {
     loadAbortRef.current?.abort()
     const controller = new AbortController()
     loadAbortRef.current = controller
+    const requestSeq = ++loadSeqRef.current
+    const isCurrentRequest = () =>
+      loadAbortRef.current === controller && loadSeqRef.current === requestSeq && !controller.signal.aborted
 
     setSelectedRows([])
 
@@ -544,26 +620,12 @@ function TableTab({ tab }: Props) {
     try {
       // Fetch columns first so we can build LIKE conditions across all columns
       const cols = await api.getColumns(tab.sessionId, tab.database, tab.table, controller.signal)
+      if (!isCurrentRequest()) return
       setColumns(cols)
 
-      let selectSql = `SELECT * FROM \`${tab.database}\`.\`${tab.table}\``
-      const conditions: string[] = []
-
-      if (effectiveSearch.trim() && cols.length > 0) {
-        const escaped = effectiveSearch.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_')
-        const likeParts = cols.map(c => `\`${c.name}\` LIKE '%${escaped}%'`)
-        conditions.push(`(${likeParts.join(' OR ')})`)
-      }
-
-      if (effectiveWhere.trim()) {
-        conditions.push(`(${effectiveWhere.trim()})`)
-      }
-
-      if (conditions.length > 0) {
-        selectSql += ` WHERE ${conditions.join(' AND ')}`
-      }
-
+      const selectSql = buildTableDataSelectSql(tab.database, tab.table, cols, effectiveSearch, effectiveWhere)
       const res = await api.executeQuery(tab.sessionId, selectSql, undefined, effectiveLimit, controller.signal)
+      if (!isCurrentRequest()) return
       if (shouldKeepPreviousResultOnLoad(res, result)) {
         setStatusMsg(`Filter error: ${res.error}`)
         setTimeout(() => setStatusMsg(null), 7000)
@@ -576,8 +638,6 @@ function TableTab({ tab }: Props) {
       try { addEntry({ sql: selectSql, sessionId: tab.sessionId, database: tab.database, rowCount: res.row_count ?? undefined, execTimeMs: res.exec_time_ms ?? (Date.now() - start), error: res.error ?? undefined }) } catch { /* ignore */ }
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
-        setInitialLoading(false)
-        setRefreshing(false)
         return
       }
       throw e
@@ -591,6 +651,13 @@ function TableTab({ tab }: Props) {
 
   const loadDataRef = useRef(loadData)
   loadDataRef.current = loadData
+
+  useEffect(() => {
+    return () => {
+      loadSeqRef.current += 1
+      loadAbortRef.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     if (view === 'data' && !result) {
@@ -614,6 +681,7 @@ function TableTab({ tab }: Props) {
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
+    setDataExportContext(null)
   }, [tab.id, tab.sessionId, tab.database, tab.table])
 
   useEffect(() => {
@@ -941,6 +1009,9 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
   }, [functions])
 
   const filterWrapExtension = useMemo(() => EditorView.lineWrapping, [])
+  const filterTooltipExtensions = useMemo((): Extension[] =>
+    typeof document === 'undefined' ? [] : [tooltips({ parent: document.body })],
+  [])
   const filterKeymapExtension = useMemo(() =>
     Prec.highest(keymap.of([
       { key: 'Mod-Enter', run: () => { applyFilterRef.current(); return true } },
@@ -948,8 +1019,8 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
   [])
   const filterExtensions = useMemo(
     () => filterWordWrap
-      ? [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterWrapExtension, filterKeymapExtension]
-      : [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterKeymapExtension],
+      ? [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterWrapExtension, filterKeymapExtension, filterTooltipExtensions]
+      : [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterKeymapExtension, filterTooltipExtensions],
     [
       filterWordWrap,
       filterSqlExtension,
@@ -957,6 +1028,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       filterFunctionCompletionExtension,
       filterWrapExtension,
       filterKeymapExtension,
+      filterTooltipExtensions,
     ]
   )
 
@@ -1152,12 +1224,16 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
         {view === 'data' && result && !result.error && (
           <button
             onClick={() => {
-              if (selectedRows.length === 0 && (gridRef.current?.isAnyFilterPresent() || hiddenColumns.size > 0)) {
-                setExportOverride(gridRef.current?.getFilteredData())
-              } else {
-                setExportOverride(undefined)
+              if (selectedRows.length > 0) {
+                setDataExportContext({
+                  rowsOverride: buildSelectedRowsExportData(result, selectedRows),
+                  rowsOverrideLabel: 'selected rows',
+                })
+                return
               }
-              setShowDataExport(true)
+              setDataExportContext({
+                rowsOverride: buildTableDataExportData(result, gridRef.current),
+              })
             }}
             className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
             title="Export data"
@@ -1176,7 +1252,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       {view === 'data' && showFilterBar && (
         <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-700">
           <span className="inline-flex h-7 items-center text-xs text-slate-500 font-mono shrink-0">WHERE</span>
-          <div className="flex-1 min-w-[220px] rounded overflow-hidden border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
+          <div className="flex-1 min-w-[220px] rounded overflow-visible border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
             <ReactCodeMirror
               value={whereFilter}
               onChange={val => {
@@ -1287,22 +1363,16 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
         </div>
       )}
 
-      {showDataExport && tab.database && tab.table && (
+      {dataExportContext && tab.database && tab.table && (
         <Suspense fallback={null}>
           <ExportDialog
-            open={showDataExport}
-            onClose={() => setShowDataExport(false)}
+            open={true}
+            onClose={() => setDataExportContext(null)}
             sessionId={tab.sessionId}
             database={tab.database}
             table={tab.table}
-            pkValues={selectedRows.length > 0
-              ? selectedRows.map(r => {
-                  // Fall back to all columns if no primary key (HeidiSQL approach)
-                  const keyCols = pkColumns.length > 0 ? pkColumns : columns.map(c => c.name)
-                  return Object.fromEntries(keyCols.map(col => [col, r[col]]))
-                })
-              : undefined}
-            rowsOverride={exportOverride}
+            rowsOverride={dataExportContext.rowsOverride}
+            rowsOverrideLabel={dataExportContext.rowsOverrideLabel ?? 'displayed rows'}
             pkColumnsForSql={pkColumns}
           />
         </Suspense>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import type { QueryResult } from '../../types'
+import type { ColumnInfo, QueryResult } from '../../types'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import { buildQueryResultExportData, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import { buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -61,6 +61,20 @@ function makeResult(
     rows,
     row_count: overrides.row_count ?? rows.length,
     exec_time_ms: overrides.exec_time_ms ?? 12,
+  }
+}
+
+function makeColumn(name: string, isPrimaryKey = false): ColumnInfo {
+  return {
+    name,
+    data_type: 'varchar',
+    column_type: 'varchar(255)',
+    is_nullable: true,
+    column_default: null,
+    is_primary_key: isPrimaryKey,
+    is_auto_increment: false,
+    extra: '',
+    comment: '',
   }
 }
 
@@ -288,6 +302,89 @@ describe('query result export metadata', () => {
 
     expect(out).toBe(filtered)
     expect(out?.rows).toHaveLength(3)
+  })
+
+  it('freezes query export SQL with the matching result rows', () => {
+    const first = { id: 'run-1-0', result: makeResult(['one'], [[1]]), sql: 'SELECT 1' }
+    const second = { id: 'run-1-1', result: makeResult(['two'], [[2]]), sql: 'SELECT 2' }
+
+    const out = buildQueryExportContext(first, null)
+
+    expect(second.sql).toBe('SELECT 2')
+    expect(out).toEqual({
+      sql: 'SELECT 1',
+      rowsOverride: { columns: ['one'], rows: [[1]] },
+    })
+  })
+})
+
+describe('table data export metadata', () => {
+  it('exports the currently displayed table rows from the grid snapshot', () => {
+    const current = makeResult(
+      ['id'],
+      Array.from({ length: 10 }, (_, idx) => [idx + 1]),
+    )
+    const displayed = { columns: ['id'], rows: [[2], [4], [6]] }
+
+    const out = buildTableDataExportData(current, {
+      getFilteredData: () => displayed,
+    })
+
+    expect(out).toBe(displayed)
+  })
+
+  it('falls back to the loaded table result when the grid is unavailable', () => {
+    const current = makeResult(['id'], [[1], [2], [3]])
+
+    expect(buildTableDataExportData(current, null)).toEqual({
+      columns: current.columns,
+      rows: current.rows,
+    })
+  })
+
+  it('does not export an errored table result snapshot', () => {
+    const errored = makeResult([], [])
+    errored.error = 'Unknown column nope'
+
+    expect(buildTableDataExportData(errored, null)).toBeUndefined()
+  })
+
+  it('exports selected table rows from the current displayed row objects', () => {
+    const result = makeResult(['id', 'name'], [
+      [1, 'Alice'],
+      [2, 'Bob'],
+    ])
+
+    expect(buildSelectedRowsExportData(result, [
+      { id: 2, name: 'Bob', __ag_rowId: '2' },
+    ])).toEqual({
+      columns: ['id', 'name'],
+      rows: [[2, 'Bob']],
+    })
+  })
+})
+
+describe('table data retrieval SQL', () => {
+  it('loads table data in primary-key order before the backend appends LIMIT', () => {
+    expect(buildTableDataSelectSql('db', 'users', [
+      makeColumn('id', true),
+      makeColumn('name'),
+    ], '', '')).toBe('SELECT * FROM `db`.`users` ORDER BY `id`')
+  })
+
+  it('keeps search and WHERE filters before primary-key ordering', () => {
+    expect(buildTableDataSelectSql('db', 'users', [
+      makeColumn('id', true),
+      makeColumn('name'),
+    ], 'sam', 'id > 10')).toBe(
+      "SELECT * FROM `db`.`users` WHERE (`id` LIKE '%sam%' OR `name` LIKE '%sam%') AND (id > 10) ORDER BY `id`",
+    )
+  })
+
+  it('does not invent an expensive fallback order when no primary key exists', () => {
+    expect(buildTableDataSelectSql('db', 'logs', [
+      makeColumn('message'),
+    ], '', '')).toBe('SELECT * FROM `db`.`logs`')
   })
 })
 

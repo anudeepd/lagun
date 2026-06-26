@@ -196,6 +196,7 @@ function insert(
   columns: string[],
   rows: unknown[][],
   insertMode: 'batch' | 'single' = 'single',
+  includeSchema = false,
 ): string {
   return buildFrontendContent('insert', DB, TBL, { columns, rows }, PK, {
     delimiter: ',',
@@ -203,7 +204,7 @@ function insert(
     escapeChar: '"',
     lineTerminator: '\r\n',
     encoding: 'utf-8',
-  }, insertMode)
+  }, insertMode, includeSchema)
 }
 
 function deleteInsert(
@@ -211,6 +212,7 @@ function deleteInsert(
   rows: unknown[][],
   pkCols: string[],
   insertMode: 'batch' | 'single' = 'single',
+  includeSchema = false,
 ): string {
   return buildFrontendContent('delete+insert', DB, TBL, { columns, rows }, pkCols, {
     delimiter: ',',
@@ -218,21 +220,26 @@ function deleteInsert(
     escapeChar: '"',
     lineTerminator: '\r\n',
     encoding: 'utf-8',
-  }, insertMode)
+  }, insertMode, includeSchema)
 }
 
 describe('insert format', () => {
   it('batch mode — all rows in one INSERT', () => {
     const out = insert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], 'batch')
-    expect(out).toBe('INSERT INTO `db`.`tbl` (`id`, `name`) VALUES\n(1, \'Alice\'),\n(2, \'Bob\');\n')
+    expect(out).toBe('INSERT INTO `tbl` (`id`, `name`) VALUES\n(1, \'Alice\'),\n(2, \'Bob\');\n')
   })
 
   it('single mode — one INSERT per row', () => {
     const out = insert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], 'single')
     expect(out).toBe(
-      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (1, 'Alice');\n" +
-      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (2, 'Bob');\n"
+      "INSERT INTO `tbl` (`id`, `name`) VALUES (1, 'Alice');\n" +
+      "INSERT INTO `tbl` (`id`, `name`) VALUES (2, 'Bob');\n"
     )
+  })
+
+  it('includes schema when requested', () => {
+    const out = insert(['id', 'name'], [[1, 'Alice']], 'single', true)
+    expect(out).toBe("INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (1, 'Alice');\n")
   })
 
   it('escapes single quotes in values', () => {
@@ -256,9 +263,20 @@ describe('delete format', () => {
       encoding: 'utf-8',
     })
     expect(out).toBe(
-      'DELETE FROM `db`.`tbl` WHERE `id` = 1;\n' +
-      'DELETE FROM `db`.`tbl` WHERE `id` = 2;\n'
+      'DELETE FROM `tbl` WHERE `id` = 1;\n' +
+      'DELETE FROM `tbl` WHERE `id` = 2;\n'
     )
+  })
+
+  it('includes schema when requested', () => {
+    const out = buildFrontendContent('delete', DB, TBL, { columns: ['id', 'name'], rows: [[1, 'Alice']] }, ['id'], {
+      delimiter: ',',
+      quoteChar: '"',
+      escapeChar: '"',
+      lineTerminator: '\r\n',
+      encoding: 'utf-8',
+    }, 'single', true)
+    expect(out).toBe('DELETE FROM `db`.`tbl` WHERE `id` = 1;\n')
   })
 })
 
@@ -266,10 +284,10 @@ describe('delete+insert format', () => {
   it('batch mode — one DELETE per row + one INSERT for the batch', () => {
     const out = deleteInsert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], ['id'], 'batch')
     expect(out).toBe(
-      'DELETE FROM `db`.`tbl` WHERE `id` = 1;\n' +
-      'DELETE FROM `db`.`tbl` WHERE `id` = 2;\n' +
+      'DELETE FROM `tbl` WHERE `id` = 1;\n' +
+      'DELETE FROM `tbl` WHERE `id` = 2;\n' +
       '\n' +
-      'INSERT INTO `db`.`tbl` (`id`, `name`) VALUES\n' +
+      'INSERT INTO `tbl` (`id`, `name`) VALUES\n' +
       "(1, 'Alice'),\n" +
       "(2, 'Bob');\n"
     )
@@ -278,10 +296,18 @@ describe('delete+insert format', () => {
   it('single mode — one DELETE + one INSERT per row', () => {
     const out = deleteInsert(['id', 'name'], [[1, 'Alice'], [2, 'Bob']], ['id'], 'single')
     expect(out).toBe(
+      'DELETE FROM `tbl` WHERE `id` = 1;\n' +
+      "INSERT INTO `tbl` (`id`, `name`) VALUES (1, 'Alice');\n" +
+      'DELETE FROM `tbl` WHERE `id` = 2;\n' +
+      "INSERT INTO `tbl` (`id`, `name`) VALUES (2, 'Bob');\n"
+    )
+  })
+
+  it('includes schema when requested', () => {
+    const out = deleteInsert(['id', 'name'], [[1, 'Alice']], ['id'], 'single', true)
+    expect(out).toBe(
       'DELETE FROM `db`.`tbl` WHERE `id` = 1;\n' +
-      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (1, 'Alice');\n" +
-      'DELETE FROM `db`.`tbl` WHERE `id` = 2;\n' +
-      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (2, 'Bob');\n"
+      "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (1, 'Alice');\n"
     )
   })
 })
