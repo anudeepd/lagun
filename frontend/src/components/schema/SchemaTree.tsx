@@ -157,8 +157,8 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   const noBookmarks = showBookmarksOnly && bookmarks.size === 0
 
   return (
-    <div className="py-1" onClick={closeMenu}>
-      <div className="flex items-center justify-between px-3 py-1">
+    <div className="flex h-full min-h-0 flex-col py-1" onClick={closeMenu}>
+      <div className="flex flex-shrink-0 items-center justify-between px-3 py-1">
         <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Databases</span>
         <div className="flex items-center gap-1">
           <button
@@ -174,7 +174,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
         </div>
       </div>
 
-      <div className="px-2 pb-1">
+      <div className="flex-shrink-0 px-2 pb-1">
         <div className="flex items-center gap-1.5 bg-surface-800 rounded px-2 py-1">
           <Search size={10} className="text-slate-500 flex-shrink-0" />
           <input
@@ -192,63 +192,65 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
         </div>
       </div>
 
-      {noBookmarks ? (
-        <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-          <Star size={18} className="text-slate-700" />
-          <p className="text-xs text-slate-600">No bookmarks yet.<br />Hover a table and click ★ to add one.</p>
-        </div>
-      ) : (
-        visibleDbs.map(({ db, tbls }) => {
-          const isOpen = expandedDbs.has(db)
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {noBookmarks ? (
+          <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+            <Star size={18} className="text-slate-700" />
+            <p className="text-xs text-slate-600">No bookmarks yet.<br />Hover a table and click ★ to add one.</p>
+          </div>
+        ) : (
+          visibleDbs.map(({ db, tbls }) => {
+            const isOpen = expandedDbs.has(db)
 
-          return (
-            <div key={db}>
-              <button
-                className="flex items-center gap-1.5 w-full px-2 py-1 hover:bg-surface-800 text-slate-300 group"
-                onClick={() => toggleDb(db)}
-                onContextMenu={e => handleTableContext(e, db)}
-                title={db}
-              >
-                {isOpen ? <ChevronDown size={12} className="flex-shrink-0" /> : <ChevronRight size={12} className="flex-shrink-0" />}
-                <Database size={12} className="flex-shrink-0 text-yellow-400" />
-                <span className="text-xs truncate flex-1 text-left">{db}</span>
-                <span
-                  role="button"
-                  title="New query on this database"
-                  onClick={e => { e.stopPropagation(); openQueryTab(sessionId, db) }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-brand-400"
+            return (
+              <div key={db}>
+                <button
+                  className="flex items-center gap-1.5 w-full px-2 py-1 hover:bg-surface-800 text-slate-300 group"
+                  onClick={() => toggleDb(db)}
+                  onContextMenu={e => handleTableContext(e, db)}
+                  title={db}
                 >
-                  <Terminal size={10} />
-                </span>
-              </button>
-
-              {isOpen && tbls.map(tbl => {
-                const starred = isBookmarked(db, tbl.name)
-                return (
-                  <button
-                    key={tbl.name}
-                    className="flex items-center gap-1.5 w-full pl-7 pr-2 py-0.5 hover:bg-surface-800 text-slate-400 hover:text-slate-200 group"
-                    onClick={() => openTableTab(sessionId, db, tbl.name)}
-                    onContextMenu={e => handleTableContext(e, db, tbl.name)}
-                    title={`${db}.${tbl.name}`}
+                  {isOpen ? <ChevronDown size={12} className="flex-shrink-0" /> : <ChevronRight size={12} className="flex-shrink-0" />}
+                  <Database size={12} className="flex-shrink-0 text-yellow-400" />
+                  <span className="text-xs truncate flex-1 text-left">{db}</span>
+                  <span
+                    role="button"
+                    title="New query on this database"
+                    onClick={e => { e.stopPropagation(); openQueryTab(sessionId, db) }}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-brand-400"
                   >
-                    <Table2 size={11} className="flex-shrink-0 text-slate-500" />
-                    <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>
-                    <span
-                      role="button"
-                      title={starred ? 'Remove bookmark' : 'Bookmark table'}
-                      onClick={e => { e.stopPropagation(); toggleBookmark(db, tbl.name) }}
-                      className={`p-0.5 transition-colors ${starred ? 'text-yellow-400' : 'opacity-0 group-hover:opacity-100 text-slate-500 hover:text-yellow-400'}`}
+                    <Terminal size={10} />
+                  </span>
+                </button>
+
+                {isOpen && tbls.map(tbl => {
+                  const starred = isBookmarked(db, tbl.name)
+                  return (
+                    <button
+                      key={tbl.name}
+                      className="flex items-center gap-1.5 w-full pl-7 pr-2 py-0.5 hover:bg-surface-800 text-slate-400 hover:text-slate-200 group"
+                      onClick={() => openTableTab(sessionId, db, tbl.name)}
+                      onContextMenu={e => handleTableContext(e, db, tbl.name)}
+                      title={`${db}.${tbl.name}`}
                     >
-                      <Star size={10} fill={starred ? 'currentColor' : 'none'} />
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          )
-        })
-      )}
+                      <Table2 size={11} className="flex-shrink-0 text-slate-500" />
+                      <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>
+                      <span
+                        role="button"
+                        title={starred ? 'Remove bookmark' : 'Bookmark table'}
+                        onClick={e => { e.stopPropagation(); toggleBookmark(db, tbl.name) }}
+                        className={`p-0.5 transition-colors ${starred ? 'text-yellow-400' : 'opacity-0 group-hover:opacity-100 text-slate-500 hover:text-yellow-400'}`}
+                      >
+                        <Star size={10} fill={starred ? 'currentColor' : 'none'} />
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })
+        )}
+      </div>
 
       {contextMenu && (
         <div

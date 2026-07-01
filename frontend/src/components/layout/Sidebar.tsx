@@ -74,11 +74,11 @@ export default function Sidebar() {
 
       {/* Session list */}
       <div className="flex-shrink-0 border-b border-surface-800">
-        <SessionList onNew={() => setShowForm(true)} />
+        <SessionList />
       </div>
 
       {/* Schema tree for active session */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-hidden">
         {activeSessionId && (() => {
           const activeSession = sessions.find(s => s.id === activeSessionId)
           return (

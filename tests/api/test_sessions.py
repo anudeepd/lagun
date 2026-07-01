@@ -1,5 +1,4 @@
 """Integration tests for the sessions API."""
-import pytest
 
 
 # ---------------------------------------------------------------------------

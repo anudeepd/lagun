@@ -1,3 +1,5 @@
+import { redirectToLdapLogin } from '../utils/authRedirect'
+
 const BASE = '/api/v1'
 
 function formatApiError(status: number, payload: unknown): string {
@@ -21,24 +23,37 @@ function formatApiError(status: number, payload: unknown): string {
   return `HTTP ${status}`
 }
 
+export async function apiFetch(input: RequestInfo | URL, options?: RequestInit): Promise<Response> {
+  const res = await fetch(input, options)
+  if (res.status === 401) {
+    redirectToLdapLogin()
+    throw new Error('Authentication required. Redirecting to login.')
+  }
+  return res
+}
+
+async function errorMessageFromResponse(res: Response): Promise<string> {
+  const text = await res.text()
+  let payload: unknown = text || res.statusText
+  try {
+    payload = text ? JSON.parse(text) : { detail: res.statusText }
+  } catch {
+    // Keep the plain response body.
+  }
+  return formatApiError(res.status, payload)
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...options?.headers as Record<string, string> }
   if (options?.body) {
     headers['Content-Type'] ??= 'application/json'
   }
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiFetch(`${BASE}${path}`, {
     ...options,
     headers,
   })
   if (!res.ok) {
-    const text = await res.text()
-    let payload: unknown = text || res.statusText
-    try {
-      payload = text ? JSON.parse(text) : { detail: res.statusText }
-    } catch {
-      // Keep the plain response body.
-    }
-    throw new Error(formatApiError(res.status, payload))
+    throw new Error(await errorMessageFromResponse(res))
   }
   if (res.status === 204) return undefined as T
   return res.json()
@@ -189,14 +204,13 @@ export const api = {
 
   // Config export/import
   exportConfig: async (passphrase: string): Promise<void> => {
-    const res = await fetch(`${BASE}/config/export`, {
+    const res = await apiFetch(`${BASE}/config/export`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ passphrase }),
     })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }))
-      throw new Error(err.detail || `HTTP ${res.status}`)
+      throw new Error(await errorMessageFromResponse(res))
     }
     const blob = await res.blob()
     const disposition = res.headers.get('Content-Disposition') ?? ''
@@ -214,10 +228,9 @@ export const api = {
     const form = new FormData()
     form.append('file', file)
     form.append('passphrase', passphrase)
-    const res = await fetch(`${BASE}/config/import`, { method: 'POST', body: form })
+    const res = await apiFetch(`${BASE}/config/import`, { method: 'POST', body: form })
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }))
-      throw new Error(err.detail || `HTTP ${res.status}`)
+      throw new Error(await errorMessageFromResponse(res))
     }
     return res.json()
   },

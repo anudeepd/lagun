@@ -1,5 +1,4 @@
 """Tests for LDAP-owned and server-managed connection storage."""
-import os
 
 from lagun.db import session_store
 from lagun.db.connections_config import sync_connections_config

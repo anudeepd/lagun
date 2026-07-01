@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, X, Code2, Key } from 'lucide-react'
 import SyntaxHighlighter from 'react-syntax-highlighter'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
@@ -78,7 +78,7 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
     setTimeout(() => setStatusMsg(null), 3000)
   }
 
-  const reload = async (signal?: AbortSignal) => {
+  const reload = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
     try {
       const [cols, idxs, tables] = await Promise.all([
@@ -95,13 +95,13 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [sessionId, database, table, invalidateTable, loadColumns])
 
   useEffect(() => {
     const controller = new AbortController()
     reload(controller.signal)
     return () => controller.abort()
-  }, [sessionId, database, table])
+  }, [sessionId, database, table, reload])
 
   const handleTruncate = async () => {
     try {

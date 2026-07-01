@@ -19,32 +19,6 @@ function csv(
   })
 }
 
-function rows(body: string, delimiter = ','): string[][] {
-  return body.split(/\r?\n/).filter(Boolean).map(r => {
-    // minimal CSV parse: split on delimiter, strip surrounding quotes
-    const fields: string[] = []
-    let i = 0
-    while (i < r.length) {
-      if (r[i] === '"') {
-        let j = i + 1
-        let val = ''
-        while (j < r.length) {
-          if (r[j] === '"' && r[j + 1] === '"') { val += '"'; j += 2 }
-          else if (r[j] === '"') { j++; break }
-          else { val += r[j++] }
-        }
-        fields.push(val)
-        i = j + 1
-      } else {
-        const end = r.indexOf(delimiter, i)
-        fields.push(end === -1 ? r.slice(i) : r.slice(i, end))
-        i = end === -1 ? r.length : end + 1
-      }
-    }
-    return fields
-  })
-}
-
 describe('escape() — quoting triggers', () => {
   it('plain value not quoted, header always quoted', () => {
     const out = csv(['a'], [['hello']])

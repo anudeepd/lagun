@@ -1,7 +1,6 @@
 """aiomysql connection pool registry, keyed by session ID."""
 import asyncio
 import ssl as ssl_mod
-from typing import Optional
 
 import aiomysql
 from pymysql.constants import CLIENT

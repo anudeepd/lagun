@@ -5,7 +5,6 @@ import os
 import secrets
 import tempfile
 from datetime import datetime, timezone
-from typing import Optional
 
 from cryptography.fernet import InvalidToken
 from fastapi import APIRouter, Form, HTTPException, UploadFile
@@ -14,7 +13,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from lagun.db import session_store
-from lagun.db.crypto import decrypt_password, encrypt_with_passphrase, decrypt_with_passphrase
+from lagun.db.crypto import decrypt_password, decrypt_with_passphrase, encrypt_with_passphrase
 from lagun.models.session import SessionCreate
 
 router = APIRouter(tags=["config"])

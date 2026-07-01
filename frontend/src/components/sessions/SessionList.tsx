@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Wifi, WifiOff, MoreVertical, Edit, Trash2, Terminal } from 'lucide-react'
+import { Wifi, MoreVertical, Edit, Trash2, Terminal } from 'lucide-react'
 import clsx from 'clsx'
 import { useSessionStore } from '../../store/sessionStore'
 import { useTabStore } from '../../store/tabStore'
@@ -7,11 +7,7 @@ import SessionForm from './SessionForm'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import type { Session } from '../../types'
 
-interface Props {
-  onNew: () => void
-}
-
-export default function SessionList({ onNew }: Props) {
+export default function SessionList() {
   const { sessions, activeSessionId, setActiveSession, deleteSession } = useSessionStore()
   const { openQueryTab } = useTabStore()
   const [editSession, setEditSession] = useState<Session | null>(null)

@@ -23,6 +23,7 @@ def test_login_template_uses_nonce_for_inline_assets():
     template = (
         Path(__file__).resolve().parents[1] / "lagun" / "templates" / "login.html"
     ).read_text()
+    assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg">' in template
     assert '<style nonce="{{ csrf_nonce }}">' in template
     assert '<script nonce="{{ csrf_nonce }}">' in template
     assert '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">' in template

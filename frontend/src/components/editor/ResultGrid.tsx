@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
@@ -86,18 +87,18 @@ interface Props {
   onSortActiveChange?: (active: boolean) => void
 }
 
-export function buildResultGridRowId(
+export const buildResultGridRowId = (
   row: Record<string, unknown>,
   rowIdx: number,
   keyColumns: string[],
   includeRowIndexInId = keyColumns.length === 0,
-): string {
+): string => {
   const keyValues = keyColumns.map(col => String(row[col] ?? '')).join('\x00')
   if (includeRowIndexInId) return `${keyValues}\x00${rowIdx}`
   return keyValues || String(rowIdx)
 }
 
-export function buildResultGridRowData({
+export const buildResultGridRowData = ({
   result,
   primaryKeyColumns = [],
   pendingChanges,
@@ -111,7 +112,7 @@ export function buildResultGridRowData({
   insertDrafts?: Map<string, Record<string, unknown>>
   insertDraftAnchors?: Map<string, InsertDraftAnchor>
   includeRowIndexInId?: boolean
-}): Record<string, unknown>[] {
+}): Record<string, unknown>[] => {
   const rows = result.rows.map((row, rowIdx) => {
     const obj: Record<string, unknown> = {}
     result.columns.forEach((col, i) => {
@@ -364,7 +365,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       validRowIds.has(r.__ag_rowId as string) && !r.__lagun_insertDraft
     )
     const targetRows = selected.length > 0 ? selected : [menu.rowData]
-    const { __ag_rowId, __lagun_insertDraft, ...displayRow } = menu.rowData
+    const displayRow = { ...menu.rowData }
+    delete displayRow.__ag_rowId
+    delete displayRow.__lagun_insertDraft
 
     const items: ContextMenuItem[] = [
       {

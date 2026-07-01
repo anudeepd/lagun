@@ -5,6 +5,7 @@ import Button from '../ui/Button'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
 import { useSchemaStore } from '../../store/schemaStore'
+import { apiFetch } from '../../api/client'
 
 interface Props {
   open: boolean
@@ -97,7 +98,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         const formData = new FormData()
         formData.append('file', file)
         formData.append('config', buildConfigJson())
-        const res = await fetch(`/api/v1/sessions/${sessionId}/import/preview`, {
+        const res = await apiFetch(`/api/v1/sessions/${sessionId}/import/preview`, {
           method: 'POST',
           body: formData,
         })
@@ -139,7 +140,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
       const formData = new FormData()
       formData.append('file', file)
       formData.append('config', buildConfigJson())
-      const res = await fetch(`/api/v1/sessions/${sessionId}/import`, {
+      const res = await apiFetch(`/api/v1/sessions/${sessionId}/import`, {
         method: 'POST',
         body: formData,
       })

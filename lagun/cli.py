@@ -58,10 +58,14 @@ def serve(host: str, port: int, open_browser: bool, reload: bool, ldap_config: s
     click.echo(f"Starting Lagun at {url}")
 
     if open_browser:
-        import threading, webbrowser, time
+        import threading
+        import time
+        import webbrowser
+
         def _open():
             time.sleep(1.5)
             webbrowser.open(url)
+
         threading.Thread(target=_open, daemon=True).start()
 
     uvicorn.run(

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import type { Tab, QueryResult, ColumnInfo, DataTabState } from '../../types'
@@ -18,7 +19,7 @@ import { EditorView, keymap, tooltips } from '@codemirror/view'
 import { Prec, type Extension } from '@codemirror/state'
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
-import { isMac, modKey } from '../../utils/platform'
+import { isMac } from '../../utils/platform'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const ExportDialog = lazy(() => import('../table/ExportDialog'))
@@ -98,11 +99,11 @@ function splitStatements(sql: string): string[] {
   return statements
 }
 
-export function shouldKeepPreviousResultOnLoad(nextResult: QueryResult, currentResult: QueryResult | null): boolean {
+export const shouldKeepPreviousResultOnLoad = (nextResult: QueryResult, currentResult: QueryResult | null): boolean => {
   return Boolean(nextResult.error && currentResult !== null)
 }
 
-export function normalizeDataTabState(state?: DataTabState): Required<DataTabState> {
+export const normalizeDataTabState = (state?: DataTabState): Required<DataTabState> => {
   return {
     view: state?.view ?? 'schema',
     globalSearch: state?.globalSearch ?? '',
@@ -113,10 +114,10 @@ export function normalizeDataTabState(state?: DataTabState): Required<DataTabSta
   }
 }
 
-export function buildQueryResultExportData(
+export const buildQueryResultExportData = (
   result: QueryResult | undefined,
   grid: Pick<ResultGridHandle, 'isAnyFilterPresent' | 'getFilteredData'> | null,
-): { columns: string[], rows: unknown[][] } | undefined {
+): { columns: string[], rows: unknown[][] } | undefined => {
   if (!result) return undefined
   if (grid?.isAnyFilterPresent()) {
     return grid.getFilteredData()
@@ -124,10 +125,10 @@ export function buildQueryResultExportData(
   return { columns: result.columns, rows: result.rows }
 }
 
-export function buildQueryExportContext(
+export const buildQueryExportContext = (
   entry: ExecutedQueryResult | undefined,
   grid: Pick<ResultGridHandle, 'isAnyFilterPresent' | 'getFilteredData'> | null,
-): QueryExportContext | null {
+): QueryExportContext | null => {
   if (!entry) return null
   return {
     sql: entry.sql,
@@ -135,18 +136,18 @@ export function buildQueryExportContext(
   }
 }
 
-export function buildTableDataExportData(
+export const buildTableDataExportData = (
   result: QueryResult | null,
   grid: Pick<ResultGridHandle, 'getFilteredData'> | null,
-): { columns: string[], rows: unknown[][] } | undefined {
+): { columns: string[], rows: unknown[][] } | undefined => {
   if (!result || result.error) return undefined
   return grid?.getFilteredData() ?? { columns: result.columns, rows: result.rows }
 }
 
-export function buildSelectedRowsExportData(
+export const buildSelectedRowsExportData = (
   result: QueryResult | null,
   rows: Record<string, unknown>[],
-): { columns: string[], rows: unknown[][] } | undefined {
+): { columns: string[], rows: unknown[][] } | undefined => {
   if (!result || result.error || rows.length === 0) return undefined
   return {
     columns: result.columns,
@@ -158,13 +159,13 @@ function quoteDataTabIdent(identifier: string): string {
   return `\`${identifier.replace(/`/g, '``')}\``
 }
 
-export function buildTableDataSelectSql(
+export const buildTableDataSelectSql = (
   database: string,
   table: string,
   columns: ColumnInfo[],
   globalSearch: string,
   whereFilter: string,
-): string {
+): string => {
   let selectSql = `SELECT * FROM ${quoteDataTabIdent(database)}.${quoteDataTabIdent(table)}`
   const conditions: string[] = []
 
@@ -217,7 +218,8 @@ function QueryTab({ tab }: Props) {
   }, [tab.id, setSqlStore])
 
   // Re-initialize local state when switching to a different tab's content
-  useEffect(() => { setSql(storeSql) }, [tab.id])
+  // storeSql intentionally omitted — adding it would overwrite local edits on every debounce sync
+  useEffect(() => { setSql(storeSql) }, [tab.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [results, setResults] = useState<ExecutedQueryResult[]>([])
   const [resultIdx, setResultIdx] = useState(0)
@@ -252,7 +254,7 @@ function QueryTab({ tab }: Props) {
       if (pendingSql.database) setTabDatabase(tab.id, pendingSql.database)
       consumePendingSql(tab.id)
     }
-  }, [pendingSql])
+  }, [pendingSql, consumePendingSql, setTabDatabase, tab.id])
 
   useEffect(() => {
     setResultSortActive(false)
@@ -271,7 +273,7 @@ function QueryTab({ tab }: Props) {
 
   useEffect(() => {
     loadDatabases(tab.sessionId)
-  }, [tab.sessionId])
+  }, [tab.sessionId, loadDatabases])
 
   // Synchronously extract alias→table map from the current SQL (no debounce needed — pure string parsing)
   const aliasMap = useMemo(() => {
@@ -319,7 +321,7 @@ function QueryTab({ tab }: Props) {
   useEffect(() => {
     if (!tab.database) return
     loadTables(tab.sessionId, tab.database)
-  }, [tab.sessionId, tab.database])
+  }, [tab.sessionId, tab.database, loadTables])
 
   // Load user-defined functions for autocomplete
   useEffect(() => {
@@ -341,7 +343,7 @@ function QueryTab({ tab }: Props) {
       }
     }, 300)
     return () => clearTimeout(timer)
-  }, [sql, tab.sessionId, tab.database])
+  }, [sql, tab.sessionId, tab.database, loadColumns])
 
   const handleWordWrapChange = useCallback((wrap: boolean) => {
     setWordWrap(wrap)
@@ -660,9 +662,11 @@ function TableTab({ tab }: Props) {
   }, [])
 
   useEffect(() => {
-    if (view === 'data' && !result) {
-      loadData()
+    if (view === 'data') {
+      loadDataRef.current()
     }
+    // result intentionally omitted — adding it would cause infinite reload on every data fetch
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view])
 
   useEffect(() => {
@@ -682,6 +686,8 @@ function TableTab({ tab }: Props) {
     setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
     setDataExportContext(null)
+    // tab.dataState intentionally omitted — adding it would reset table state on every filter/limit change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.id, tab.sessionId, tab.database, tab.table])
 
   useEffect(() => {

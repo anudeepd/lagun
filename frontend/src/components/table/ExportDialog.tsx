@@ -1,6 +1,8 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useState } from 'react'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import { clipboardWrite } from '../../utils/clipboard'
+import { apiFetch } from '../../api/client'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Select from '../ui/Select'
@@ -34,13 +36,13 @@ function quoteIdent(identifier: string): string {
   return `\`${identifier.replace(/`/g, '``')}\``
 }
 
-export function buildQualifiedTableName(database: string, table: string, includeSchema = false): string {
+export const buildQualifiedTableName = (database: string, table: string, includeSchema = false): string => {
   return includeSchema
     ? `${quoteIdent(database)}.${quoteIdent(table)}`
     : quoteIdent(table)
 }
 
-export function buildFrontendContent(
+export const buildFrontendContent = (
   format: 'insert' | 'delete' | 'delete+insert' | 'csv',
   database: string,
   table: string,
@@ -49,7 +51,7 @@ export function buildFrontendContent(
   csvOpts: { delimiter: string, quoteChar: string, escapeChar: string, lineTerminator: string, encoding: string },
   insertMode: 'batch' | 'single' = 'batch',
   includeSchema = false,
-): string {
+): string => {
   if (format === 'csv') {
     const { delimiter: d, quoteChar: q, escapeChar: e, lineTerminator: nl } = csvOpts
     // CSV formula injection (=, +, -, @ prefix) is intentionally not sanitized —
@@ -192,7 +194,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
         blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
         filename = `${database}_${table}_filtered.${format === 'csv' ? 'csv' : 'sql'}`
       } else {
-        const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
+        const res = await apiFetch(`/api/v1/sessions/${sessionId}/export`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: buildBody(),
@@ -224,7 +226,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       if (rowsOverride) {
         text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)
       } else {
-        const res = await fetch(`/api/v1/sessions/${sessionId}/export`, {
+        const res = await apiFetch(`/api/v1/sessions/${sessionId}/export`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: buildBody(),
