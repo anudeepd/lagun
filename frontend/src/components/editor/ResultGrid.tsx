@@ -2,8 +2,10 @@
 import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
-import { Copy, Braces, Slash, Clock, Trash2, CopyPlus } from 'lucide-react'
-import type { CellClassParams, CellContextMenuEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
+import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine } from 'lucide-react'
+import type { CellClassParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
+import Modal from '../ui/Modal'
+import Button from '../ui/Button'
 
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
@@ -55,6 +57,25 @@ function localNow(dataType: string): string {
   return `${date} ${time}`
 }
 
+function isTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'))
+}
+
+function valueNeedsLargeEditor(value: unknown, eventTarget: EventTarget | null): boolean {
+  if (value != null && /[\n\r]/.test(String(value))) return true
+
+  if (eventTarget instanceof HTMLElement) {
+    const cell = eventTarget.closest<HTMLElement>('.ag-cell')
+    const content = cell?.querySelector<HTMLElement>('.ag-cell-value') ?? cell
+    if (content && content.clientWidth > 0) {
+      return content.scrollWidth > content.clientWidth + 1
+    }
+  }
+
+  return value != null && String(value).length > 80
+}
+
 interface MenuState {
   x: number
   y: number
@@ -62,6 +83,21 @@ interface MenuState {
   cellValue: unknown
   rowData: Record<string, unknown>
   selectedRows: Record<string, unknown>[]
+}
+
+interface ActiveCell {
+  rowIndex: number
+  columnName: string
+  value: unknown
+  data: Record<string, unknown>
+}
+
+interface CellEditorState {
+  columnName: string
+  oldValue: unknown
+  data: Record<string, unknown>
+  value: string
+  wasNull: boolean
 }
 
 interface Props {
@@ -170,8 +206,11 @@ export const buildResultGridRowData = ({
 
 const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId, onSortActiveChange }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [cellEditor, setCellEditor] = useState<CellEditorState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const activeCellRef = useRef<ActiveCell | null>(null)
   const autoSizedCols = useRef(new Set<string>())
   const lastHeaderClick = useRef<{ colId: string; time: number } | null>(null)
 
@@ -276,8 +315,61 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     flex: 1,
   }), [])
 
+  const canEditColumn = useCallback((columnName: string) =>
+    editable && columnName !== '__rowIndex',
+    [editable]
+  )
+
+  const openLargeCellEditor = useCallback((cell: Pick<ActiveCell, 'columnName' | 'value' | 'data'>) => {
+    if (!canEditColumn(cell.columnName)) return
+    setCellEditor({
+      columnName: cell.columnName,
+      oldValue: cell.value,
+      data: cell.data,
+      value: cell.value == null ? '' : String(cell.value),
+      wasNull: cell.value === null,
+    })
+    setMenu(null)
+  }, [canEditColumn])
+
+  const rememberActiveCell = useCallback((cell: ActiveCell | null) => {
+    activeCellRef.current = cell
+  }, [])
+
+  const handleCellClicked = useCallback((e: CellClickedEvent<Record<string, unknown>>) => {
+    if (!e.colDef.field || e.rowIndex == null || !e.data) return
+    rememberActiveCell({
+      rowIndex: e.rowIndex,
+      columnName: e.colDef.field,
+      value: e.value,
+      data: e.data,
+    })
+  }, [rememberActiveCell])
+
+  const handleCellFocused = useCallback((e: CellFocusedEvent) => {
+    if (e.rowIndex == null || !e.column) return
+    const columnName = typeof e.column === 'string' ? e.column : e.column.getColId()
+    const row = e.api.getDisplayedRowAtIndex(e.rowIndex)
+    const data = row?.data as Record<string, unknown> | undefined
+    if (!data) return
+    rememberActiveCell({
+      rowIndex: e.rowIndex,
+      columnName,
+      value: data[columnName],
+      data,
+    })
+  }, [rememberActiveCell])
+
   const onCellValueChanged = useCallback((params: CellValueChangedEvent) => {
     if (!onCellEdit || !params.colDef.field) return
+    const activeCell = activeCellRef.current
+    if (
+      activeCell &&
+      activeCell.columnName === params.colDef.field &&
+      activeCell.rowIndex === params.rowIndex
+    ) {
+      activeCellRef.current = { ...activeCell, value: params.newValue, data: params.data as Record<string, unknown> }
+    }
     onCellEdit({
       column: params.colDef.field,
       newValue: params.newValue,
@@ -285,6 +377,34 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       data: params.data as Record<string, unknown>,
     })
   }, [onCellEdit])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTextInputTarget(e.target)) return
+      const root = rootRef.current
+      if (!root || !root.contains(document.activeElement)) return
+      if ((agApiRef.current?.getEditingCells().length ?? 0) > 0) return
+
+      const activeCell = activeCellRef.current
+      if (!activeCell) return
+
+      const key = e.key.toLowerCase()
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && key === 'c') {
+        e.preventDefault()
+        clipboardWrite(String(activeCell.value ?? '')).catch(() => {})
+        return
+      }
+
+      if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Enter') {
+        if (!canEditColumn(activeCell.columnName)) return
+        e.preventDefault()
+        openLargeCellEditor(activeCell)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [canEditColumn, openLargeCellEditor])
 
   const handleSelectionChanged = useCallback((e: { api: { getSelectedRows: () => Record<string, unknown>[] } }) => {
     onSelectionChange?.(e.api.getSelectedRows())
@@ -308,7 +428,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     })
   }, [])
 
-  const handleCellDoubleClicked = useCallback((params: { column: { getColId: () => string; getActualWidth: () => number }; api: GridApi }) => {
+  const handleHeaderDoubleClicked = useCallback((params: { column: { getColId: () => string; getActualWidth: () => number }; api: GridApi }) => {
     const colId = params.column.getColId()
     if (autoSizedCols.current.has(colId)) {
       params.api.applyColumnState({ state: [{ colId, flex: 1 }] })
@@ -320,18 +440,37 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     }
   }, [])
 
+  const handleCellDoubleClicked = useCallback((e: CellDoubleClickedEvent<Record<string, unknown>>) => {
+    if (!e.colDef.field || e.rowIndex == null || !e.data || !canEditColumn(e.colDef.field)) return
+
+    const cell: ActiveCell = {
+      rowIndex: e.rowIndex,
+      columnName: e.colDef.field,
+      value: e.value,
+      data: e.data,
+    }
+    rememberActiveCell(cell)
+
+    if (valueNeedsLargeEditor(e.value, e.event?.target ?? null)) {
+      openLargeCellEditor(cell)
+      return
+    }
+
+    e.api.startEditingCell({ rowIndex: e.rowIndex, colKey: e.colDef.field })
+  }, [canEditColumn, openLargeCellEditor, rememberActiveCell])
+
   const handleColumnHeaderClicked = useCallback((e: ColumnHeaderClickedEvent) => {
     if (!('getActualWidth' in e.column)) return  // skip column groups
     const col = e.column
     const colId = col.getColId()
     const now = Date.now()
     if (lastHeaderClick.current?.colId === colId && now - lastHeaderClick.current.time < 300) {
-      handleCellDoubleClicked({ column: col, api: e.api })
+      handleHeaderDoubleClicked({ column: col, api: e.api })
       lastHeaderClick.current = null
     } else {
       lastHeaderClick.current = { colId, time: now }
     }
-  }, [handleCellDoubleClicked])
+  }, [handleHeaderDoubleClicked])
 
   const handleColumnResized = useCallback((e: { finished: boolean; source: string; column?: { getColId: () => string } | null }) => {
     if (e.finished && e.source === 'uiColumnDragged' && e.column) {
@@ -385,8 +524,18 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     ]
 
     if (editable) {
+      items.push({ type: 'separator' })
+      items.push({
+        type: 'item',
+        label: 'Edit cell...',
+        icon: <PencilLine size={12} />,
+        onClick: () => openLargeCellEditor({
+          columnName: menu.columnName,
+          value: menu.cellValue,
+          data: menu.rowData,
+        }),
+      })
       if (colInfo?.is_nullable) {
-        items.push({ type: 'separator' })
         items.push({
           type: 'item',
           label: 'Set to NULL',
@@ -428,7 +577,18 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     }
 
     return items
-  }, [menu, columns, editable, onCellEdit, onDeleteRows, onDuplicateRow, primaryKeyColumns, closeMenu, rowData])
+  }, [menu, columns, editable, onCellEdit, onDeleteRows, onDuplicateRow, primaryKeyColumns, closeMenu, rowData, openLargeCellEditor])
+
+  const handleApplyCellEditor = useCallback(() => {
+    if (!cellEditor) return
+    onCellEdit?.({
+      column: cellEditor.columnName,
+      newValue: cellEditor.value,
+      oldValue: cellEditor.oldValue,
+      data: cellEditor.data,
+    })
+    setCellEditor(null)
+  }, [cellEditor, onCellEdit])
 
   if (result.error) {
     return (
@@ -439,7 +599,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }
 
   return (
-    <div className="h-full lagun-result-grid">
+    <div ref={rootRef} className="h-full lagun-result-grid">
       <AgGridReact
         theme={darkTheme}
         columnDefs={columnDefs}
@@ -447,6 +607,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         getRowId={getRowId}
         onGridReady={e => { agApiRef.current = e.api; emitSortActiveChange() }}
         onSortChanged={emitSortActiveChange}
+        onCellClicked={handleCellClicked}
+        onCellFocused={handleCellFocused}
+        onCellDoubleClicked={handleCellDoubleClicked}
         onCellValueChanged={onCellValueChanged}
         onSelectionChanged={handleSelectionChanged}
         onRowClicked={selectable ? handleRowClicked : undefined}
@@ -459,7 +622,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         suppressContextMenu
         preventDefaultOnContextMenu
         stopEditingWhenCellsLoseFocus
-        singleClickEdit
+        suppressClickEdit
         alwaysMultiSort
         sortingOrder={['asc', 'desc', null]}
       />
@@ -470,6 +633,38 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           items={menuItems}
           onClose={closeMenu}
         />
+      )}
+      {cellEditor && (
+        <Modal
+          open={!!cellEditor}
+          onClose={() => setCellEditor(null)}
+          title="Edit cell"
+          width="max-w-3xl"
+          footer={(
+            <>
+              <Button variant="secondary" onClick={() => setCellEditor(null)}>Cancel</Button>
+              <Button variant="primary" onClick={handleApplyCellEditor}>Apply to grid</Button>
+            </>
+          )}
+        >
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-mono text-slate-300">{cellEditor.columnName}</span>
+              {cellEditor.wasNull && (
+                <span className="px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700 text-slate-400">
+                  NULL
+                </span>
+              )}
+            </div>
+            <textarea
+              className="w-full min-h-[320px] resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              value={cellEditor.value}
+              onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
+              spellCheck={false}
+              autoFocus
+            />
+          </div>
+        </Modal>
       )}
     </div>
   )

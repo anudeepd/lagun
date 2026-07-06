@@ -9,6 +9,7 @@ import ConfigImportDialog from '../sessions/ConfigImportDialog'
 import SchemaTree from '../schema/SchemaTree'
 import Button from '../ui/Button'
 import Logo from '../ui/Logo'
+import { submitLdapLogout } from '../../utils/authRedirect'
 
 export default function Sidebar() {
   const { sessions, activeSessionId } = useSessionStore()
@@ -22,7 +23,7 @@ export default function Sidebar() {
     form.method = 'POST'
     form.action = '/_auth/logout'
     document.body.appendChild(form)
-    form.submit()
+    submitLdapLogout(form)
   }
 
   return (

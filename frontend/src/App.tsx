@@ -3,6 +3,7 @@ import AppLayout from './components/layout/AppLayout'
 import { useSessionStore } from './store/sessionStore'
 import { useTabStore } from './store/tabStore'
 import { useServerConfigStore } from './store/serverConfigStore'
+import AuthRedirectOverlay from './components/ui/AuthRedirectOverlay'
 
 export default function App() {
   const loadSessions = useSessionStore(s => s.loadSessions)
@@ -29,5 +30,10 @@ export default function App() {
     })
   }, [loadSessions, loadServerConfig])
 
-  return <AppLayout />
+  return (
+    <>
+      <AppLayout />
+      <AuthRedirectOverlay />
+    </>
+  )
 }

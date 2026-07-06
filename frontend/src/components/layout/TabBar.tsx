@@ -92,9 +92,9 @@ export default function TabBar() {
   }
 
   return (
-    <div className="flex h-[40px] items-center bg-surface-900 border-b border-surface-800">
-      <div className="flex-1 overflow-hidden">
-        <div className="flex flex-nowrap overflow-x-auto space-x-1">
+    <div className="flex h-[46px] items-center bg-surface-900 border-b border-surface-800">
+      <div className="flex-1 h-full overflow-hidden">
+        <div className="flex h-full items-center flex-nowrap overflow-x-scroll overflow-y-hidden space-x-1">
           {tabs.map((tab) => (
             <div
               key={tab.id}
@@ -106,7 +106,7 @@ export default function TabBar() {
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
               title={getTabTitle(tab)}
               className={clsx(
-                'group flex items-center gap-1.5 px-3 py-2 text-xs border-r border-surface-800 whitespace-nowrap transition-colors flex-shrink-0 cursor-move',
+                'group flex h-[40px] items-center gap-1.5 px-3 py-2 text-xs border-r border-surface-800 whitespace-nowrap transition-colors flex-shrink-0 cursor-move',
                 activeTabId === tab.id
                   ? 'bg-surface-950 text-slate-100 border-t-2 border-t-brand-500'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800',
@@ -140,12 +140,12 @@ export default function TabBar() {
         </div>
       </div>
 
-      <div className="flex items-center space-x-2 px-2">
+      <div className="flex h-[40px] items-center">
         {activeSessionId && (
           <button
             onClick={() => openQueryTab(activeSessionId)}
             title="New query tab"
-            className="flex items-center gap-1 px-3 py-2 text-xs text-slate-500 hover:text-slate-200 hover:bg-surface-800 transition-colors whitespace-nowrap"
+            className="flex h-full items-center gap-1 px-3 text-xs text-slate-500 hover:text-slate-200 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
           >
             <Plus size={12} />
             <span className="hidden sm:inline">New Query</span>
@@ -155,7 +155,7 @@ export default function TabBar() {
           <button
             onClick={() => setConfirmCloseAll(true)}
             title="Close all tabs"
-            className="flex items-center gap-1 px-3 py-2 text-xs text-slate-500 hover:text-red-400 hover:bg-surface-800 transition-colors whitespace-nowrap"
+            className="flex h-full items-center gap-1 px-3 text-xs text-slate-500 hover:text-red-400 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
           >
             <PanelLeftClose size={12} />
             <span className="hidden sm:inline">Close All</span>
