@@ -26,7 +26,9 @@ export default function Modal({ open, onClose, title, children, footer, width = 
     const first = focusables[0]
     const last = focusables[focusables.length - 1]
 
-    first?.focus()
+    if (!container.contains(document.activeElement)) {
+      first?.focus()
+    }
 
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
