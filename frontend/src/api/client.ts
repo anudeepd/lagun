@@ -132,14 +132,14 @@ export const api = {
   rowInsert: (sessionId: string, payload: {
     database: string; table: string; values: Record<string, unknown>;
   }) =>
-    request<{ ok: boolean; insert_id?: number; error?: string }>(
+    request<{ ok: boolean; insert_id?: number; affected_rows: number; sql_executed: string; error?: string }>(
       `/sessions/${sessionId}/row-insert`,
       { method: 'POST', body: JSON.stringify(payload) }
     ),
   rowDelete: (sessionId: string, payload: {
     database: string; table: string; primary_keys: Record<string, unknown>[];
   }) =>
-    request<{ ok: boolean; affected_rows: number; error?: string }>(
+    request<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
       `/sessions/${sessionId}/rows`,
       { method: 'DELETE', body: JSON.stringify(payload) }
     ),

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
-from lagun.db.utils import quote_ident
+from lagun.db.utils import quote_ident, escape_string_literal
 from lagun.models.query import (
     QueryRequest, QueryResult,
     CellUpdateRequest, CellUpdateResult,
@@ -22,6 +22,7 @@ router = APIRouter(tags=["query"])
 
 # Maps session_id → set of MySQL thread_ids of currently running queries
 _active_queries: dict[str, set[int]] = {}
+_JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991
 
 
 async def _get_pool_or_404(session_id: str):
@@ -147,6 +148,8 @@ def _strip_quotes(sql: str) -> str:
 
 
 def _serialize(v: Any) -> Any:
+    if isinstance(v, int) and not isinstance(v, bool) and abs(v) > _JS_MAX_SAFE_INTEGER:
+        return str(v)
     if isinstance(v, (datetime.datetime, datetime.date, datetime.time, datetime.timedelta)):
         return str(v)
     if isinstance(v, decimal.Decimal):
@@ -168,9 +171,30 @@ def _build_pk_where(pk: dict[str, Any]) -> tuple[str, list[Any]]:
     return " AND ".join(clauses), values
 
 
+def _display_sql(sql: str, params: list[Any]) -> str:
+    parts = sql.split("%s")
+    display_parts: list[str] = []
+    for i, part in enumerate(parts):
+        display_parts.append(part)
+        if i < len(params):
+            display_parts.append(_display_value(params[i]))
+    return "".join(display_parts)
+
+
+def _display_value(value: Any) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float, decimal.Decimal)) and not isinstance(value, bool):
+        return str(value)
+    return f"'{escape_string_literal(str(value))}'"
+
+
 @router.post("/sessions/{session_id}/cell-update", response_model=CellUpdateResult)
 async def cell_update(session_id: str, req: CellUpdateRequest):
     pool, _ = await _get_pool_or_404(session_id)
+    display_sql = ""
 
     try:
         db_q = quote_ident(req.database)
@@ -181,29 +205,22 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
 
         sql = f"UPDATE {db_q}.{tbl_q} SET {col_q} = %s WHERE {pk_clauses}"
         params = [req.new_value] + pk_values
+        display_sql = _display_sql(sql, params)
 
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, params)
                 affected = cur.rowcount
 
-        # Build display SQL safely
-        parts = sql.split("%s")
-        display_parts = []
-        for i, part in enumerate(parts):
-            display_parts.append(part)
-            if i < len(params):
-                p = params[i]
-                display_parts.append("NULL" if p is None else repr(p))
-        display_sql = "".join(display_parts)
         return CellUpdateResult(ok=True, affected_rows=affected, sql_executed=display_sql)
     except Exception as exc:
-        return CellUpdateResult(ok=False, affected_rows=0, sql_executed="", error=str(exc))
+        return CellUpdateResult(ok=False, affected_rows=0, sql_executed=display_sql, error=str(exc))
 
 
 @router.post("/sessions/{session_id}/row-update", response_model=RowUpdateResult)
 async def row_update(session_id: str, req: RowUpdateRequest):
     pool, _ = await _get_pool_or_404(session_id)
+    display_sql = ""
     try:
         db_q = quote_ident(req.database)
         tbl_q = quote_ident(req.table)
@@ -212,46 +229,47 @@ async def row_update(session_id: str, req: RowUpdateRequest):
         pk_clauses, pk_values = _build_pk_where(req.primary_key)
         sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
         params = list(req.updates.values()) + pk_values
+        display_sql = _display_sql(sql, params)
 
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, params)
                 affected = cur.rowcount
 
-        # Build display SQL safely
-        parts = sql.split("%s")
-        display_parts = []
-        for i, part in enumerate(parts):
-            display_parts.append(part)
-            if i < len(params):
-                p = params[i]
-                display_parts.append("NULL" if p is None else repr(p))
-        display_sql = "".join(display_parts)
         return RowUpdateResult(ok=True, affected_rows=affected, sql_executed=display_sql)
     except Exception as exc:
-        return RowUpdateResult(ok=False, affected_rows=0, sql_executed="", error=str(exc))
+        return RowUpdateResult(ok=False, affected_rows=0, sql_executed=display_sql, error=str(exc))
 
 
 @router.post("/sessions/{session_id}/row-insert", response_model=RowInsertResult)
 async def row_insert(session_id: str, req: RowInsertRequest):
     pool, _ = await _get_pool_or_404(session_id)
+    display_sql = ""
     try:
         db_q = quote_ident(req.database)
         tbl_q = quote_ident(req.table)
         cols = ", ".join(quote_ident(c) for c in req.values)
         placeholders = ", ".join("%s" for _ in req.values)
         sql = f"INSERT INTO {db_q}.{tbl_q} ({cols}) VALUES ({placeholders})"
+        params = list(req.values.values())
+        display_sql = _display_sql(sql, params)
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, list(req.values.values()))
-                return RowInsertResult(ok=True, insert_id=cur.lastrowid)
+                await cur.execute(sql, params)
+                return RowInsertResult(
+                    ok=True,
+                    insert_id=cur.lastrowid,
+                    affected_rows=cur.rowcount,
+                    sql_executed=display_sql,
+                )
     except Exception as exc:
-        return RowInsertResult(ok=False, error=str(exc))
+        return RowInsertResult(ok=False, sql_executed=display_sql, error=str(exc))
 
 
 @router.delete("/sessions/{session_id}/rows", response_model=RowDeleteResult)
 async def row_delete(session_id: str, req: RowDeleteRequest):
     pool, _ = await _get_pool_or_404(session_id)
+    display_sqls: list[str] = []
     try:
         db_q = quote_ident(req.database)
         tbl_q = quote_ident(req.table)
@@ -267,6 +285,7 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                     for pk in req.primary_keys:
                         pk_clauses, pk_values = _build_pk_where(pk)
                         sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
+                        display_sqls.append(_display_sql(sql, pk_values))
                         await cur.execute(sql, pk_values)
                         total_affected += cur.rowcount
                     await cur.execute("COMMIT")
@@ -275,6 +294,6 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                     raise
                 finally:
                     await cur.execute("SET autocommit=1")
-        return RowDeleteResult(ok=True, affected_rows=total_affected)
+        return RowDeleteResult(ok=True, affected_rows=total_affected, sql_executed=";\n".join(display_sqls))
     except Exception as exc:
-        return RowDeleteResult(ok=False, affected_rows=0, error=str(exc))
+        return RowDeleteResult(ok=False, affected_rows=0, sql_executed=";\n".join(display_sqls), error=str(exc))

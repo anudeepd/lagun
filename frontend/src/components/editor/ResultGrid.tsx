@@ -19,6 +19,7 @@ export interface ResultGridHandle {
 export interface InsertDraftAnchor {
   afterRowId: string
 }
+export type DuplicateRowMode = 'withKeys' | 'withoutKeys'
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo } from '../../types'
 import { clipboardWrite } from '../../utils/clipboard'
@@ -114,7 +115,7 @@ interface Props {
   onSelectionChange?: (rows: Record<string, unknown>[]) => void
   columns?: ColumnInfo[]
   onDeleteRows?: (rows: Record<string, unknown>[]) => void
-  onDuplicateRow?: (row: Record<string, unknown>) => void
+  onDuplicateRow?: (row: Record<string, unknown>, mode: DuplicateRowMode) => void
   hiddenColumns?: Set<string>
   pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   insertDrafts?: Map<string, Record<string, unknown>>
@@ -558,9 +559,15 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       items.push({ type: 'separator' })
       items.push({
         type: 'item',
-        label: 'Duplicate row',
+        label: 'Duplicate row with keys',
         icon: <CopyPlus size={12} />,
-        onClick: () => { onDuplicateRow(menu.rowData); closeMenu() },
+        onClick: () => { onDuplicateRow(menu.rowData, 'withKeys'); closeMenu() },
+      })
+      items.push({
+        type: 'item',
+        label: 'Duplicate row without keys',
+        icon: <CopyPlus size={12} />,
+        onClick: () => { onDuplicateRow(menu.rowData, 'withoutKeys'); closeMenu() },
       })
     }
 
@@ -643,7 +650,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           footer={(
             <>
               <Button variant="secondary" onClick={() => setCellEditor(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleApplyCellEditor}>Apply to grid</Button>
+              <Button variant="primary" onClick={handleApplyCellEditor}>Apply</Button>
             </>
           )}
         >

@@ -8,7 +8,7 @@ import { useQueryLogStore } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
-import ResultGrid, { buildResultGridRowId, type InsertDraftAnchor, type ResultGridHandle } from './ResultGrid'
+import ResultGrid, { buildResultGridRowId, type DuplicateRowMode, type InsertDraftAnchor, type ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
@@ -189,6 +189,19 @@ export const buildTableDataSelectSql = (
   }
 
   return selectSql
+}
+
+export const buildDuplicateRowDraftValues = (
+  row: Record<string, unknown>,
+  columns: ColumnInfo[],
+  mode: DuplicateRowMode,
+): Record<string, unknown> => {
+  const values: Record<string, unknown> = {}
+  columns.forEach(col => {
+    if (mode === 'withoutKeys' && (col.is_primary_key || col.is_auto_increment)) return
+    values[col.name] = row[col.name] ?? null
+  })
+  return values
 }
 
 const MIN_EDITOR_HEIGHT = 100
@@ -786,12 +799,9 @@ function TableTab({ tab }: Props) {
     })
   }, [tab.database, tab.table, rowKeyColumns, initialLoading, refreshing])
 
-  const handleDuplicateRow = useCallback((row: Record<string, unknown>) => {
+  const handleDuplicateRow = useCallback((row: Record<string, unknown>, mode: DuplicateRowMode) => {
     const draftId = `__insert__${Date.now()}_${Math.random().toString(36).slice(2)}`
-    const values: Record<string, unknown> = {}
-    columns.forEach(col => {
-      values[col.name] = row[col.name] ?? null
-    })
+    const values = buildDuplicateRowDraftValues(row, columns, mode)
     setInsertDrafts(prev => {
       const next = new Map(prev)
       next.set(draftId, values)
@@ -803,7 +813,8 @@ function TableTab({ tab }: Props) {
       next.set(draftId, { afterRowId: row.__ag_rowId as string })
       return next
     })
-    setStatusMsg('Duplicated row as an insert draft. Edit values, then Apply.')
+    const label = mode === 'withoutKeys' ? 'without keys' : 'with keys'
+    setStatusMsg(`Duplicated row ${label} as an insert draft. Edit values, then Apply.`)
     setTimeout(() => setStatusMsg(null), 4000)
   }, [columns])
 
@@ -828,7 +839,16 @@ function TableTab({ tab }: Props) {
         primary_key,
         updates: changes,
       })
-try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, sessionId: tab.sessionId, database: tab.database, affectedRows: r.affected_rows ?? undefined, execTimeMs: Date.now() - start, error: r.error ?? undefined }) } catch { /* ignore */ }
+      try {
+        addEntry({
+          sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`,
+          sessionId: tab.sessionId,
+          database: tab.database,
+          affectedRows: r.affected_rows ?? undefined,
+          execTimeMs: Date.now() - start,
+          error: r.error ?? undefined,
+        })
+      } catch { /* ignore */ }
       if (!r.ok) {
         setStatusMsg(`✗ ${r.error}`)
         setTimeout(() => setStatusMsg(null), 4000)
@@ -847,7 +867,16 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
         table: tab.table,
         values,
       })
-      try { addEntry({ sql: `INSERT INTO \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.ok ? 1 : 0, execTimeMs: Date.now() - start, error: r.error ?? undefined }) } catch { /* ignore */ }
+      try {
+        addEntry({
+          sql: r.sql_executed || `INSERT INTO \`${tab.database}\`.\`${tab.table}\``,
+          sessionId: tab.sessionId,
+          database: tab.database,
+          affectedRows: r.affected_rows ?? (r.ok ? 1 : 0),
+          execTimeMs: Date.now() - start,
+          error: r.error ?? undefined,
+        })
+      } catch { /* ignore */ }
       if (!r.ok) {
         setStatusMsg(`✗ ${r.error}`)
         setTimeout(() => setStatusMsg(null), 4000)
@@ -898,12 +927,27 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
   const handleDeleteRows = async (rows: Record<string, unknown>[]) => {
     if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     const primary_keys = rows.map(row => Object.fromEntries(rowKeyColumns.map(pk => [pk, row[pk]])))
-    const r = await api.rowDelete(tab.sessionId, {
-      database: tab.database,
-      table: tab.table,
-      primary_keys,
-    })
+    let r: Awaited<ReturnType<typeof api.rowDelete>>
+    try {
+      r = await api.rowDelete(tab.sessionId, {
+        database: tab.database,
+        table: tab.table,
+        primary_keys,
+      })
+    } catch (e) {
+      setStatusMsg(`✗ ${e instanceof Error ? e.message : String(e)}`)
+      setTimeout(() => setStatusMsg(null), 4000)
+      return
+    }
     if (r.ok) {
+      if (r.affected_rows === 0) {
+        setStatusMsg('✗ Delete matched 0 rows — the row may have changed since it was loaded.')
+        try { addEntry({ sql: r.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: 0, execTimeMs: 0 }) } catch { /* ignore */ }
+        loadData()
+        setTimeout(() => setStatusMsg(null), 6000)
+        return
+      }
+
       // Optimistically remove deleted rows from the local result state
       setResult(prev => {
         if (!prev) return prev
@@ -935,7 +979,7 @@ try { addEntry({ sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`, s
       gridRef.current?.deselectAll()
 
       setStatusMsg(`✓ Deleted ${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''}`)
-      try { addEntry({ sql: `DELETE FROM \`${tab.database}\`.\`${tab.table}\` (${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''})`, sessionId: tab.sessionId, database: tab.database, affectedRows: r.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
+      try { addEntry({ sql: r.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
       invalidateTablesForDb(tab.sessionId!, tab.database!)
       loadTables(tab.sessionId!, tab.database!)
       loadData()

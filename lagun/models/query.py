@@ -43,6 +43,8 @@ class RowInsertRequest(BaseModel):
 class RowInsertResult(BaseModel):
     ok: bool
     insert_id: Optional[int] = None
+    affected_rows: int = 0
+    sql_executed: str = ""
     error: Optional[str] = None
 
 
@@ -69,4 +71,5 @@ class RowDeleteRequest(BaseModel):
 class RowDeleteResult(BaseModel):
     ok: bool
     affected_rows: int
+    sql_executed: str
     error: Optional[str] = None

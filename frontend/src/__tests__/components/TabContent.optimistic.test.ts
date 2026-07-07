@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ColumnInfo, QueryResult } from '../../types'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import { buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import { buildDuplicateRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -64,7 +64,7 @@ function makeResult(
   }
 }
 
-function makeColumn(name: string, isPrimaryKey = false): ColumnInfo {
+function makeColumn(name: string, isPrimaryKey = false, isAutoIncrement = false): ColumnInfo {
   return {
     name,
     data_type: 'varchar',
@@ -72,8 +72,8 @@ function makeColumn(name: string, isPrimaryKey = false): ColumnInfo {
     is_nullable: true,
     column_default: null,
     is_primary_key: isPrimaryKey,
-    is_auto_increment: false,
-    extra: '',
+    is_auto_increment: isAutoIncrement,
+    extra: isAutoIncrement ? 'auto_increment' : '',
     comment: '',
   }
 }
@@ -615,5 +615,79 @@ describe('buildResultGridRowData — duplicated row draft placement', () => {
     })
 
     expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '3', '__insert__1'])
+  })
+})
+
+describe('buildDuplicateRowDraftValues', () => {
+  const row = {
+    id: 42,
+    tenant_id: 'acme',
+    sequence: 7,
+    name: 'Widget',
+    notes: undefined,
+  }
+
+  it('copies primary key and auto-increment values when duplicating with keys', () => {
+    const values = buildDuplicateRowDraftValues(row, [
+      makeColumn('id', true, true),
+      makeColumn('tenant_id', true),
+      makeColumn('sequence', false, true),
+      makeColumn('name'),
+      makeColumn('notes'),
+    ], 'withKeys')
+
+    expect(values).toEqual({
+      id: 42,
+      tenant_id: 'acme',
+      sequence: 7,
+      name: 'Widget',
+      notes: null,
+    })
+  })
+
+  it('omits primary key columns when duplicating without keys', () => {
+    const values = buildDuplicateRowDraftValues(row, [
+      makeColumn('id', true),
+      makeColumn('tenant_id', true),
+      makeColumn('name'),
+    ], 'withoutKeys')
+
+    expect(values).toEqual({ name: 'Widget' })
+    expect(values).not.toHaveProperty('id')
+    expect(values).not.toHaveProperty('tenant_id')
+  })
+
+  it('omits auto-increment columns when duplicating without keys', () => {
+    const values = buildDuplicateRowDraftValues(row, [
+      makeColumn('sequence', false, true),
+      makeColumn('name'),
+    ], 'withoutKeys')
+
+    expect(values).toEqual({ name: 'Widget' })
+    expect(values).not.toHaveProperty('sequence')
+  })
+
+  it('keeps draft placement below the source row when key values are omitted', () => {
+    const result = makeResult(['id', 'name'], [
+      [1, 'Alice'],
+      [2, 'Bob'],
+    ])
+    const drafts = new Map<string, Record<string, unknown>>()
+    drafts.set('__insert__1', buildDuplicateRowDraftValues({ id: 2, name: 'Bob' }, [
+      makeColumn('id', true, true),
+      makeColumn('name'),
+    ], 'withoutKeys'))
+    const anchors = new Map([['__insert__1', { afterRowId: '2' }]])
+
+    const rows = buildResultGridRowData({
+      result,
+      primaryKeyColumns: ['id'],
+      insertDrafts: drafts,
+      insertDraftAnchors: anchors,
+    })
+
+    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '__insert__1'])
+    expect(rows[2].id).toBeNull()
+    expect(rows[2].name).toBe('Bob')
   })
 })
