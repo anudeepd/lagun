@@ -235,5 +235,5 @@ export const api = {
     return res.json()
   },
 
-  getServerConfig: () => request<{ ldap_enabled: boolean }>('/config/server'),
+  getServerConfig: () => request<{ ldap_enabled: boolean; ldap_idle_timeout: number }>('/config/server'),
 }

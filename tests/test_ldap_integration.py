@@ -1,6 +1,9 @@
 import types
 from pathlib import Path
 
+import pytest
+
+from lagun.api.config import get_server_config
 from lagun.main import APP_CSP, _ensure_ldapgate_static_paths
 
 
@@ -17,6 +20,17 @@ def test_ensure_ldapgate_static_paths_preserves_existing_paths():
 
     assert proxy.session_cookie_name == "lagun_session"
     assert proxy.static_paths == ["/custom", "/favicon.svg", "/favicon.ico"]
+
+
+@pytest.mark.asyncio
+async def test_server_config_exposes_ldap_idle_timeout(monkeypatch):
+    monkeypatch.setenv("LAGUN_LDAP_CONFIG", "/etc/lagun/ldap.yaml")
+    monkeypatch.setenv("LAGUN_LDAP_IDLE_TIMEOUT", "900")
+
+    assert await get_server_config() == {
+        "ldap_enabled": True,
+        "ldap_idle_timeout": 900,
+    }
 
 
 def test_login_template_uses_nonce_for_inline_assets():

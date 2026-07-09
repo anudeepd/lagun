@@ -4,10 +4,14 @@ import { useSessionStore } from './store/sessionStore'
 import { useTabStore } from './store/tabStore'
 import { useServerConfigStore } from './store/serverConfigStore'
 import AuthRedirectOverlay from './components/ui/AuthRedirectOverlay'
+import { redirectToLdapLogin } from './utils/authRedirect'
+import { startAuthIdleTimer } from './utils/authIdleTimer'
 
 export default function App() {
   const loadSessions = useSessionStore(s => s.loadSessions)
   const loadServerConfig = useServerConfigStore(s => s.load)
+  const ldapEnabled = useServerConfigStore(s => s.ldapEnabled)
+  const ldapIdleTimeout = useServerConfigStore(s => s.ldapIdleTimeout)
 
   useEffect(() => {
     loadServerConfig()
@@ -29,6 +33,12 @@ export default function App() {
       }
     })
   }, [loadSessions, loadServerConfig])
+
+  useEffect(() => startAuthIdleTimer({
+    enabled: ldapEnabled,
+    idleTimeoutSeconds: ldapIdleTimeout,
+    onIdle: redirectToLdapLogin,
+  }), [ldapEnabled, ldapIdleTimeout])
 
   return (
     <>

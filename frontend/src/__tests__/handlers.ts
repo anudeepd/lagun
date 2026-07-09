@@ -55,6 +55,10 @@ export const mockColumns = [
 ]
 
 export const handlers = [
+  http.get(`${BASE}/config/server`, () =>
+    HttpResponse.json({ ldap_enabled: false, ldap_idle_timeout: 0 })
+  ),
+
   // Sessions
   http.get(`${BASE}/sessions`, () => HttpResponse.json([mockSession])),
   http.post(`${BASE}/sessions`, () => HttpResponse.json(mockSession, { status: 201 })),

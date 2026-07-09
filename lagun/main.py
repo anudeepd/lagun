@@ -53,7 +53,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.39", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.40", lifespan=lifespan)
 
 
 def _audit_details(body: bytes) -> str | None:
@@ -200,6 +200,9 @@ if _ldap_config_path:
     _login_template = Path(__file__).parent / "templates" / "login.html"
     _ldap_config = load_config(_ldap_config_path)
     _ensure_ldapgate_static_paths(_ldap_config)
+    os.environ["LAGUN_LDAP_IDLE_TIMEOUT"] = str(
+        getattr(getattr(_ldap_config, "proxy", None), "idle_timeout", 0) or 0
+    )
     add_ldap_auth(app, _ldap_config, template_path=str(_login_template))
 
 

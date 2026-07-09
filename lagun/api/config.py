@@ -23,7 +23,15 @@ _EXPORT_VERSION = 1
 
 @router.get("/config/server")
 async def get_server_config():
-    return {"ldap_enabled": bool(os.getenv("LAGUN_LDAP_CONFIG"))}
+    ldap_enabled = bool(os.getenv("LAGUN_LDAP_CONFIG"))
+    try:
+        idle_timeout = int(os.getenv("LAGUN_LDAP_IDLE_TIMEOUT", "0"))
+    except ValueError:
+        idle_timeout = 0
+    return {
+        "ldap_enabled": ldap_enabled,
+        "ldap_idle_timeout": max(0, idle_timeout) if ldap_enabled else 0,
+    }
 _KDF_ITERATIONS = 600_000
 
 
