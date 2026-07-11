@@ -15,6 +15,7 @@
 - **In-line data editing** — edit cells, insert rows, delete rows directly in the grid
 - **Import & export** — CSV and SQL formats with streaming for large datasets; export respects active column filters
 - **Query history** — full SQL with word wrap, copy or load any entry back into the editor
+- **Large write scripts** — normal Execute can run 25+ writes in one backend transaction with rollback
 - **Bookmarks** — save and organize frequently used tables
 - **Connection management** — import and export connection configs
 - **Secure connections** — SSL/TLS, credentials stored in OS keyring, encrypted session backup
@@ -95,6 +96,18 @@ with `trusted_proxies` configured so LDAPGate can honor `X-Forwarded-Proto`.
 When LDAP is enabled, a logout button appears in the top-right corner of the tab bar.
 
 See the [ldapgate README](https://github.com/anudeepd/ldapgate) for config file documentation.
+
+## Large Write Scripts
+
+For large write scripts (25+ `INSERT`, `UPDATE`, or `DELETE` statements), Lagun
+can send the entire script to the backend in one request from the normal Execute
+button. The backend executes all statements in order inside one transaction and
+rolls back on first failure.
+Set `LAGUN_BULK_WRITE_THRESHOLD` or `VITE_LAGUN_BULK_WRITE_THRESHOLD` at
+frontend build time to change the UI threshold.
+
+See [docs/bulk-execution.md](docs/bulk-execution.md) for API details, limits,
+admin configuration, and troubleshooting.
 
 ## Screenshots
 

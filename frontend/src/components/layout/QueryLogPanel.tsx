@@ -15,6 +15,12 @@ function formatTime(iso: string): string {
 
 function formatRows(entry: QueryLogEntry): string {
   if (entry.cancelled) return '—'
+  if (entry.bulk) {
+    const parts: string[] = []
+    if (entry.bulk.rolledBack) parts.push('rolled back')
+    if (entry.affectedRows != null) parts.push(`${entry.affectedRows} affected`)
+    return parts.length > 0 ? parts.join(', ') : `${entry.bulk.statementCount} stmts`
+  }
   if (entry.affectedRows != null) return `${entry.affectedRows} affected`
   if (entry.rowCount != null) return `${entry.rowCount} rows`
   return '—'
@@ -74,52 +80,68 @@ export default function QueryLogPanel() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map(entry => (
-                  <tr
-                    key={entry.id}
-                    className={`border-t border-surface-800 ${entry.error ? 'bg-red-950/30' : entry.cancelled ? 'bg-amber-950/20' : ''}`}
-                  >
-                    <td className="px-2 py-0.5 text-slate-500 tabular-nums whitespace-nowrap">{formatTime(entry.timestamp)}</td>
-                    <td className="px-2 py-0.5 font-mono text-slate-300 w-full break-all">
-                      {entry.sql}
-                    </td>
-                    <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{formatRows(entry)}</td>
-                    <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{entry.execTimeMs}</td>
-                    <td className="px-2 py-0.5 whitespace-nowrap">
-                      {entry.error ? (
-                        <span className="text-red-400" title={entry.error}>✗</span>
-                      ) : entry.cancelled ? (
-                        <span title="Cancelled"><Ban size={10} className="text-amber-500" /></span>
-                      ) : (
-                        <span className="text-green-400">✓</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-0.5 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => clipboardWrite(entry.sql).catch(() => {})}
-                          title="Copy SQL"
-                          className="p-0.5 text-slate-600 hover:text-slate-300 transition-colors"
-                        >
-                          <Copy size={10} />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (hasQueryTab) {
-                              injectSqlToTab(activeTabId!, entry.sql, entry.database)
-                            } else {
-                              openQueryTabWithSql(entry.sessionId, entry.sql, entry.database)
-                            }
-                          }}
-                          title={hasQueryTab ? 'Load into editor' : 'Open in new query tab'}
-                          className="p-0.5 text-slate-600 hover:text-brand-400 transition-colors"
-                        >
-                          <CornerDownLeft size={10} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {entries.map(entry => {
+                  const replaySql = entry.bulk ? entry.bulk.fullSql : entry.sql
+                  const canReplay = Boolean(replaySql)
+                  return (
+                    <tr
+                      key={entry.id}
+                      className={`border-t border-surface-800 ${entry.error ? 'bg-red-950/30' : entry.cancelled ? 'bg-amber-950/20' : ''}`}
+                    >
+                      <td className="px-2 py-0.5 text-slate-500 tabular-nums whitespace-nowrap">{formatTime(entry.timestamp)}</td>
+                      <td className="px-2 py-0.5 font-mono text-slate-300 w-full break-all">
+                        {entry.bulk ? (
+                          <span className="text-brand-400">
+                            Bulk write script: {entry.bulk.statementCount.toLocaleString()} statements
+                            {entry.bulk.operationCounts && (
+                              <span className="text-slate-500 ml-1">
+                                ({Object.entries(entry.bulk.operationCounts).map(([op, n]) => `${n} ${op}`).join(', ')})
+                              </span>
+                            )}
+                          </span>
+                        ) : entry.sql}
+                      </td>
+                      <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{formatRows(entry)}</td>
+                      <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{entry.execTimeMs}</td>
+                      <td className="px-2 py-0.5 whitespace-nowrap">
+                        {entry.error ? (
+                          <span className="text-red-400" title={entry.error}>✗</span>
+                        ) : entry.cancelled ? (
+                          <span title="Cancelled"><Ban size={10} className="text-amber-500" /></span>
+                        ) : (
+                          <span className="text-green-400">✓</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-0.5 whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => { if (replaySql) clipboardWrite(replaySql).catch(() => {}) }}
+                            disabled={!canReplay}
+                            title={canReplay ? 'Copy SQL' : 'Full write script unavailable after reload'}
+                            className="p-0.5 text-slate-600 hover:text-slate-300 transition-colors disabled:opacity-40 disabled:hover:text-slate-600"
+                          >
+                            <Copy size={10} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (!replaySql) return
+                              if (hasQueryTab) {
+                                injectSqlToTab(activeTabId!, replaySql, entry.database)
+                              } else {
+                                openQueryTabWithSql(entry.sessionId, replaySql, entry.database)
+                              }
+                            }}
+                            disabled={!canReplay}
+                            title={canReplay ? (hasQueryTab ? 'Load into editor' : 'Open in new query tab') : 'Full write script unavailable after reload'}
+                            className="p-0.5 text-slate-600 hover:text-brand-400 transition-colors disabled:opacity-40 disabled:hover:text-slate-600"
+                          >
+                            <CornerDownLeft size={10} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )}

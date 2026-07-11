@@ -112,6 +112,27 @@ export const api = {
     }),
   killQuery: (sessionId: string) =>
     request<{ ok: boolean; error?: string }>(`/sessions/${sessionId}/query`, { method: 'DELETE' }),
+  validateScriptQuery: (sessionId: string, payload: {
+    execution_id: string; sql: string; database?: string; mode?: 'transaction'
+  }, signal?: AbortSignal) =>
+    request<import('../types').ScriptQueryValidationResult>(`/sessions/${sessionId}/query/script/validate`, {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, mode: payload.mode ?? 'transaction' }),
+      signal,
+    }),
+  executeScriptQuery: (sessionId: string, payload: {
+    execution_id: string; sql: string; database?: string; mode?: 'transaction'
+  }, signal?: AbortSignal) =>
+    request<import('../types').ScriptQueryResult>(`/sessions/${sessionId}/query/script`, {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, mode: payload.mode ?? 'transaction' }),
+      signal,
+    }),
+  killScriptQuery: (sessionId: string, executionId: string) =>
+    request<{ ok: boolean; error?: string }>(
+      `/sessions/${sessionId}/query/script/${encodeURIComponent(executionId)}`,
+      { method: 'DELETE' }
+    ),
   cellUpdate: (sessionId: string, payload: {
     database: string; table: string; primary_key: Record<string, unknown>;
     column: string; new_value: unknown;

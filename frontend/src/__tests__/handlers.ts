@@ -83,4 +83,32 @@ export const handlers = [
   http.get(`${BASE}/sessions/:id/databases/:db/tables/:table/columns`, () =>
     HttpResponse.json(mockColumns)
   ),
+
+  // Script execution
+  http.post(`${BASE}/sessions/:id/query/script/validate`, async ({ request }) => {
+    const body = await request.json() as { sql?: string; execution_id?: string }
+    const sql = body.sql ?? ''
+    const stmtCount = sql.split(';').filter(s => s.trim()).length
+    return HttpResponse.json({
+      ok: true,
+      statement_count: stmtCount,
+      operation_counts: { INSERT: stmtCount },
+    })
+  }),
+  http.post(`${BASE}/sessions/:id/query/script`, async ({ request }) => {
+    const body = await request.json() as { execution_id?: string; sql?: string }
+    const sql = body.sql ?? ''
+    const stmtCount = sql.split(';').filter(s => s.trim()).length
+    return HttpResponse.json({
+      ok: true,
+      execution_id: body.execution_id ?? 'test',
+      statements_executed: stmtCount,
+      affected_rows: stmtCount,
+      exec_time_ms: 10.5,
+      rolled_back: false,
+    })
+  }),
+  http.delete(`${BASE}/sessions/:id/query/script/:execId`, () =>
+    HttpResponse.json({ ok: true })
+  ),
 ]

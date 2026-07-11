@@ -18,6 +18,18 @@ function rowCountLabel(n: number): string {
   return `${n} ${n === 1 ? 'row' : 'rows'}`
 }
 
+async function waitForRefreshToSettle(page) {
+  await expect
+    .poll(async () => page.locator('.animate-spin').evaluateAll(nodes =>
+      nodes.filter(node => {
+        const style = window.getComputedStyle(node)
+        const box = node.getBoundingClientRect()
+        return style.visibility !== 'hidden' && style.display !== 'none' && box.width > 0 && box.height > 0
+      }).length
+    ), { timeout: 15_000 })
+    .toBe(0)
+}
+
 test.describe('Deletion count refresh', () => {
   test.beforeEach(async ({ page, sessionId }) => {
     // Insert additional rows so we have enough to delete and verify
@@ -63,9 +75,9 @@ test.describe('Deletion count refresh', () => {
     await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
 
     // Context menu appears with "Delete N rows" option
-    const deleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: /Delete/ })
+    const deleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: 'Delete 2 rows' })
     await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
-    await deleteBtn.click()
+    await deleteBtn.click({ force: true })
 
     // Context menu closes, optimistic update fires immediately.
     // Assert the ResultToolbar count shows TOTAL_ROWS - 2
@@ -98,7 +110,7 @@ test.describe('Deletion count refresh', () => {
     // --- Second deletion: select and delete 2 more rows ---
     // Wait for the first loadData (fire-and-forget server refresh) to settle
     // so the grid shows consistent server data for the second selection.
-    await expect(page.locator('.animate-spin')).not.toBeVisible({ timeout: 15_000 })
+    await waitForRefreshToSettle(page)
 
     // Verify count is still 8 after server refresh
     await expect(page.getByText(rowCountLabel(afterFirst))).toBeVisible({ timeout: 5_000 })

@@ -4,6 +4,11 @@ import path from 'path'
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    'import.meta.env.VITE_LAGUN_BULK_WRITE_THRESHOLD': JSON.stringify(
+      process.env.VITE_LAGUN_BULK_WRITE_THRESHOLD ?? process.env.LAGUN_BULK_WRITE_THRESHOLD ?? ''
+    ),
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

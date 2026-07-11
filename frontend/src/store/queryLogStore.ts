@@ -18,6 +18,13 @@ export interface QueryLogEntry {
   execTimeMs: number
   error?: string
   cancelled?: boolean
+  bulk?: {
+    statementCount: number
+    operationCounts: Record<string, number>
+    rolledBack: boolean
+    failedStatementIndex?: number | null
+    fullSql?: string
+  }
 }
 
 interface QueryLogState {
@@ -52,8 +59,10 @@ export const useQueryLogStore = create<QueryLogState>()(
         }
         return persistedState as Partial<QueryLogState>
       },
-      partialize: (s) => ({ 
-        entries: s.entries.slice(0, 50),
+      partialize: (s) => ({
+        entries: s.entries.slice(0, 50).map(entry => entry.bulk?.fullSql
+          ? { ...entry, bulk: { ...entry.bulk, fullSql: undefined } }
+          : entry),
       }),
     }
   )

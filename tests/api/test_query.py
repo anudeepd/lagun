@@ -50,6 +50,103 @@ async def test_insert_returns_affected_rows(client, session_id, test_db):
     assert data["insert_id"] is not None
 
 
+async def test_script_query_executes_ordered_writes_in_one_transaction(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/query/script", json={
+        "execution_id": "bulk-ok-1",
+        "database": test_db,
+        "sql": (
+            "INSERT INTO users (name, age) VALUES ('Charlie', 35);"
+            "UPDATE users SET age = 36 WHERE name = 'Charlie';"
+            "DELETE FROM users WHERE name = 'Bob';"
+        ),
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["statements_executed"] == 3
+    assert data["affected_rows"] == 3
+    assert data["rolled_back"] is False
+
+    r2 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "SELECT name, age FROM users ORDER BY name",
+        "database": test_db,
+    })
+    assert r2.json()["rows"] == [["Alice", 30], ["Charlie", 36]]
+
+
+async def test_script_query_rolls_back_on_failure(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/query/script", json={
+        "execution_id": "bulk-fail-1",
+        "database": test_db,
+        "sql": (
+            "INSERT INTO users (name, age) VALUES ('Charlie', 35);"
+            "INSERT INTO users (no_such_column) VALUES (1);"
+        ),
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert data["statements_executed"] == 1
+    assert data["failed_statement_index"] == 1
+    assert data["rolled_back"] is True
+
+    r2 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "SELECT COUNT(*) FROM users WHERE name = 'Charlie'",
+        "database": test_db,
+    })
+    assert r2.json()["rows"][0][0] == 0
+
+
+async def test_script_query_delete_only(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/query/script", json={
+        "execution_id": "bulk-delete-only-1",
+        "database": test_db,
+        "sql": "DELETE FROM users WHERE name = 'Bob';DELETE FROM users WHERE name = 'Alice';",
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["statements_executed"] == 2
+    assert data["affected_rows"] == 2
+
+    r2 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "SELECT COUNT(*) FROM users",
+        "database": test_db,
+    })
+    assert r2.json()["rows"][0][0] == 0
+
+
+async def test_script_query_validate_rejects_update_without_where(client, session_id, test_db):
+    r = await client.post(f"/api/v1/sessions/{session_id}/query/script/validate", json={
+        "execution_id": "bulk-bad-1",
+        "database": test_db,
+        "sql": "UPDATE users SET age = 99;",
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert data["rejected_statement_index"] == 0
+    assert data["error"]["code"] == "MISSING_WHERE"
+
+
+async def test_script_query_rejects_nontransactional_table(client, session_id, test_db):
+    await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "CREATE TABLE myisam_bulk (id INT PRIMARY KEY, name VARCHAR(20)) ENGINE=MyISAM",
+        "database": test_db,
+    })
+
+    r = await client.post(f"/api/v1/sessions/{session_id}/query/script/validate", json={
+        "execution_id": "bulk-myisam-1",
+        "database": test_db,
+        "sql": "INSERT INTO myisam_bulk (id, name) VALUES (1, 'unsafe');",
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert data["rejected_statement_index"] == 0
+    assert data["error"]["code"] == "NONTRANSACTIONAL_TABLE"
+
+
 async def test_invalid_sql_returns_error_field(client, session_id, test_db):
     r = await client.post(f"/api/v1/sessions/{session_id}/query", json={
         "sql": "SELECT * FROM nonexistent_table_xyz",
@@ -371,3 +468,60 @@ async def test_row_update_no_pk_with_null(client, session_id, test_db):
         "database": test_db,
     })
     assert r2.json()["rows"][0][0] == 31
+
+
+async def test_script_query_kill_returns_error_when_no_active_script(client, session_id, test_db):
+    r = await client.delete(f"/api/v1/sessions/{session_id}/query/script/nonexistent-id")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert "No active" in data["error"]
+
+
+async def test_script_query_concurrent_rejected(client, session_id, test_db):
+    import asyncio
+    import lagun.api.query as qmod
+    original = qmod._BULK_MAX_RUNTIME_SECONDS
+    qmod._BULK_MAX_RUNTIME_SECONDS = 9999
+    try:
+        async def run_first():
+            return await client.post(f"/api/v1/sessions/{session_id}/query/script", json={
+                "execution_id": "bulk-concurrent-1",
+                "database": test_db,
+                "sql": ";".join(f"INSERT INTO users (name, age) VALUES ('conc-{i}', {i})" for i in range(2999)),
+            })
+
+        async def run_second():
+            return await client.post(f"/api/v1/sessions/{session_id}/query/script", json={
+                "execution_id": "bulk-concurrent-2",
+                "database": test_db,
+                "sql": "INSERT INTO users (name, age) VALUES ('never', 0);",
+            })
+
+        r1, r2 = await asyncio.gather(run_first(), run_second())
+        results = sorted([r1.json(), r2.json()], key=lambda d: d["execution_id"])
+        ok_results = [d for d in results if d["ok"]]
+        rejected = [d for d in results if not d["ok"]]
+        assert len(ok_results) >= 1
+        if rejected:
+            assert rejected[0]["error"]["code"] == "BULK_ALREADY_RUNNING"
+    finally:
+        qmod._BULK_MAX_RUNTIME_SECONDS = original
+
+
+async def test_script_query_max_runtime_exceeded(client, session_id, test_db):
+    import lagun.api.query as qmod
+    original = qmod._BULK_MAX_RUNTIME_SECONDS
+    qmod._BULK_MAX_RUNTIME_SECONDS = 0
+    try:
+        r = await client.post(f"/api/v1/sessions/{session_id}/query/script", json={
+            "execution_id": "bulk-timeout-1",
+            "database": test_db,
+            "sql": "INSERT INTO users (name, age) VALUES ('will-timeout', 1);",
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is False
+        assert data["error"]["code"] == "MAX_RUNTIME_EXCEEDED"
+    finally:
+        qmod._BULK_MAX_RUNTIME_SECONDS = original

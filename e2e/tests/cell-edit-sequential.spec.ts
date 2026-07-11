@@ -12,9 +12,14 @@ async function editCellAndApply(
   newValue: string
 ) {
   const cell = page.locator('.ag-row').nth(rowIndex).locator('[col-id="price"]')
-  await cell.dblclick()
-
   const editor = page.locator('.ag-text-field-input')
+  await expect(cell).toBeVisible({ timeout: 10_000 })
+  await cell.scrollIntoViewIfNeeded()
+  await cell.click()
+  await cell.dblclick()
+  if (await editor.count() === 0) {
+    await page.keyboard.press('Enter')
+  }
   await editor.waitFor({ state: 'visible', timeout: 5000 })
   await editor.fill(newValue)
   await editor.press('Enter')

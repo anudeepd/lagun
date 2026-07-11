@@ -54,6 +54,35 @@ export interface QueryResult {
   insert_id?: number
 }
 
+export interface ScriptQueryError {
+  code: string
+  problem: string
+  cause: string
+  fix: string
+  docs_url: string
+}
+
+export interface ScriptQueryResult {
+  ok: boolean
+  execution_id: string
+  statements_executed: number
+  affected_rows: number
+  exec_time_ms: number
+  failed_statement_index?: number | null
+  failed_statement_preview?: string | null
+  rolled_back: boolean
+  error?: ScriptQueryError | null
+}
+
+export interface ScriptQueryValidationResult {
+  ok: boolean
+  statement_count: number
+  operation_counts: Record<string, number>
+  rejected_statement_index?: number | null
+  rejected_statement_preview?: string | null
+  error?: ScriptQueryError | null
+}
+
 export interface ColumnInfo {
   name: string
   data_type: string

@@ -1,0 +1,171 @@
+{
+  "allowed": [
+    {
+      "label": "simple insert",
+      "sql": "INSERT INTO users (name, age) VALUES ('Alice', 30)"
+    },
+    {
+      "label": "insert with backtick identifiers",
+      "sql": "INSERT INTO `users` (`name`, `age`) VALUES ('Bob', 25)"
+    },
+    {
+      "label": "insert with leading line comment",
+      "sql": "-- add charlie\nINSERT INTO users (name, age) VALUES ('Charlie', 35)"
+    },
+    {
+      "label": "insert with leading block comment",
+      "sql": "/* setup */ INSERT INTO users (name, age) VALUES ('Dave', 40)"
+    },
+    {
+      "label": "update with where",
+      "sql": "UPDATE users SET age = 31 WHERE name = 'Alice'"
+    },
+    {
+      "label": "update with backtick identifiers and where",
+      "sql": "UPDATE `users` SET `age` = 31 WHERE `name` = 'Alice'"
+    },
+    {
+      "label": "delete with where",
+      "sql": "DELETE FROM users WHERE name = 'Bob'"
+    },
+    {
+      "label": "delete with backtick identifiers and where",
+      "sql": "DELETE FROM `users` WHERE `name` = 'Bob'"
+    },
+    {
+      "label": "insert with string containing semicolon",
+      "sql": "INSERT INTO users (name) VALUES ('a; b')"
+    },
+    {
+      "label": "insert with escaped single quote",
+      "sql": "INSERT INTO users (name) VALUES ('O''Brien')"
+    },
+    {
+      "label": "insert with double-quoted string",
+      "sql": "INSERT INTO users (name) VALUES (\"Alice\")"
+    },
+    {
+      "label": "insert with backslash-escaped quote",
+      "sql": "INSERT INTO users (name) VALUES ('it\\'s a test')"
+    },
+    {
+      "label": "update where with AND",
+      "sql": "UPDATE users SET age = 31 WHERE name = 'Alice' AND age > 25"
+    },
+    {
+      "label": "delete where with OR",
+      "sql": "DELETE FROM users WHERE name = 'Alice' OR name = 'Bob'"
+    },
+    {
+      "label": "insert with hash comment",
+      "sql": "# add charlie\nINSERT INTO users (name, age) VALUES ('Charlie', 35)"
+    }
+  ],
+  "rejected": [
+    {
+      "label": "select statement",
+      "sql": "SELECT * FROM users",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "with clause",
+      "sql": "WITH cte AS (SELECT 1) SELECT * FROM cte",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "call statement",
+      "sql": "CALL sp_test()",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "set statement",
+      "sql": "SET @var = 1",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "use statement",
+      "sql": "USE mydb",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "drop statement",
+      "sql": "DROP TABLE users",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "alter statement",
+      "sql": "ALTER TABLE users ADD COLUMN foo INT",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "create statement",
+      "sql": "CREATE TABLE foo (id INT)",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "truncate statement",
+      "sql": "TRUNCATE TABLE users",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "replace statement",
+      "sql": "REPLACE INTO users (id, name) VALUES (1, 'Alice')",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "load statement",
+      "sql": "LOAD DATA INFILE '/tmp/data.csv' INTO TABLE users",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "insert select",
+      "sql": "INSERT INTO users_backup SELECT * FROM users WHERE age > 30",
+      "expected_code": "UNSUPPORTED_INSERT"
+    },
+    {
+      "label": "insert on duplicate key update",
+      "sql": "INSERT INTO users (id, name) VALUES (1, 'a') ON DUPLICATE KEY UPDATE name = 'b'",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "update without where",
+      "sql": "UPDATE users SET age = 99",
+      "expected_code": "MISSING_WHERE"
+    },
+    {
+      "label": "delete without where",
+      "sql": "DELETE FROM users",
+      "expected_code": "MISSING_WHERE"
+    },
+    {
+      "label": "start transaction",
+      "sql": "START TRANSACTION",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "commit",
+      "sql": "COMMIT",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "rollback",
+      "sql": "ROLLBACK",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "mysql versioned comment",
+      "sql": "/*!32301 SELECT * FROM users*/",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "lock tables",
+      "sql": "LOCK TABLES users READ",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    },
+    {
+      "label": "unlock tables",
+      "sql": "UNLOCK TABLES",
+      "expected_code": "UNSUPPORTED_STATEMENT"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import type { Tab, QueryResult, ColumnInfo, DataTabState } from '../../types'
+import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult } from '../../types'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useQueryLogStore } from '../../store/queryLogStore'
@@ -24,15 +24,22 @@ import { isMac } from '../../utils/platform'
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const ExportDialog = lazy(() => import('../table/ExportDialog'))
 const ImportDialog = lazy(() => import('../table/ImportDialog'))
+const BulkConfirmDialog = lazy(() => import('./BulkConfirmDialog'))
+const BulkResultSummary = lazy(() => import('./BulkResultSummary'))
 
 const KEY_WORD_WRAP = 'lagun-query-word-wrap'
 const KEY_FILTER_WORD_WRAP = 'lagun-data-filter-word-wrap'
 const KEY_EDITOR_HEIGHT = 'lagun-query-editor-height'
+const configuredFastExecuteThreshold = Number(import.meta.env.VITE_LAGUN_BULK_WRITE_THRESHOLD ?? 25)
+const FAST_EXECUTE_THRESHOLD = Number.isFinite(configuredFastExecuteThreshold) && configuredFastExecuteThreshold > 0
+  ? Math.floor(configuredFastExecuteThreshold)
+  : 25
 
 interface ExecutedQueryResult {
   id: string
   result: QueryResult
   sql: string
+  scriptResult?: ScriptQueryResult
 }
 
 interface QueryExportContext {
@@ -64,7 +71,7 @@ export default function TabContent({ tab }: Props) {
   return <TableTab tab={tab} />
 }
 
-function splitStatements(sql: string): string[] {
+export function splitStatements(sql: string): string[] {
   const statements: string[] = []
   let current = ''
   let inSingle = false, inDouble = false, inBacktick = false
@@ -97,6 +104,46 @@ function splitStatements(sql: string): string[] {
   const t = current.trim()
   if (t) statements.push(t)
   return statements
+}
+
+export function formatScriptError(error: ScriptQueryResult['error'] | ScriptQueryValidationResult['error']): string {
+  if (!error) return 'Large write script failed'
+  return `${error.problem}\n${error.cause}\n${error.fix}`
+}
+
+function statementFirstToken(statement: string): string {
+  const stripped = statement
+    .replace(/^\s*(?:--[^\n]*\n\s*)+/g, '')
+    .replace(/^\s*(?:#[^\n]*\n\s*)+/g, '')
+    .replace(/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/g, '')
+  return stripped.trim().match(/^[A-Za-z]+/)?.[0].toUpperCase() ?? ''
+}
+
+export function shouldTryFastExecute(statements: string[]): boolean {
+  const writeCount = statements.filter(stmt => ['INSERT', 'UPDATE', 'DELETE'].includes(statementFirstToken(stmt))).length
+  return writeCount >= FAST_EXECUTE_THRESHOLD
+}
+
+export function scriptResultToQueryResult(result: ScriptQueryResult): QueryResult {
+  const rows: unknown[][] = [
+    ['Statements executed', result.statements_executed],
+    ['Affected rows', result.affected_rows],
+    ['Elapsed', `${result.exec_time_ms} ms`],
+    ['Transaction', result.error?.code === 'CANCELLED_ROLLED_BACK' ? 'Cancelled' : result.rolled_back ? 'Rolled back' : result.ok ? 'Committed' : 'Not committed'],
+  ]
+  if (result.failed_statement_index !== null && result.failed_statement_index !== undefined) {
+    rows.push(['Failed statement', result.failed_statement_index + 1])
+  }
+  if (result.failed_statement_preview) rows.push(['Failed preview', result.failed_statement_preview])
+
+  return {
+    columns: ['Field', 'Value'],
+    rows,
+    row_count: rows.length,
+    affected_rows: result.affected_rows,
+    exec_time_ms: result.exec_time_ms,
+    error: result.error ? formatScriptError(result.error) : undefined,
+  }
 }
 
 export const shouldKeepPreviousResultOnLoad = (nextResult: QueryResult, currentResult: QueryResult | null): boolean => {
@@ -237,11 +284,17 @@ function QueryTab({ tab }: Props) {
   const [results, setResults] = useState<ExecutedQueryResult[]>([])
   const [resultIdx, setResultIdx] = useState(0)
   const [running, setRunning] = useState(false)
+  const [bulkConfirm, setBulkConfirm] = useState<{ validation: ScriptQueryValidationResult; sql: string; toRun: string } | null>(null)
+  const [bulkStatements, setBulkStatements] = useState<string[]>([])
+  const [bulkValidation, setBulkValidation] = useState<ScriptQueryValidationResult | null>(null)
+  const [bulkCancelled, setBulkCancelled] = useState(false)
   const [limit, setLimit] = useState(1000)
   const [functions, setFunctions] = useState<string[]>([])
   const [queryExportContext, setQueryExportContext] = useState<QueryExportContext | null>(null)
   const [resultSortActive, setResultSortActive] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const activeScriptExecutionRef = useRef<string | null>(null)
+  const cancellingRef = useRef(false)
   const [editorHeight, setEditorHeight] = useState(() => {
     const saved = localStorage.getItem(KEY_EDITOR_HEIGHT)
     return saved ? Number(saved) : 192
@@ -388,6 +441,15 @@ function QueryTab({ tab }: Props) {
     document.addEventListener('mouseup', onUp)
   }
 
+  const bulkOperationCounts = useMemo(() => {
+    const counts: Record<string, number> = { INSERT: 0, UPDATE: 0, DELETE: 0 }
+    for (const stmt of bulkStatements) {
+      const token = statementFirstToken(stmt)
+      if (token in counts) counts[token] += 1
+    }
+    return bulkValidation?.operation_counts ?? counts
+  }, [bulkStatements, bulkValidation])
+
   const run = async () => {
     if (!sql.trim()) return
 
@@ -400,9 +462,63 @@ function QueryTab({ tab }: Props) {
     if (statements.length === 0) return
 
     setRunning(true)
+    setBulkCancelled(false)
+    setBulkStatements(statements)
+    setBulkValidation(null)
     const newResults: ExecutedQueryResult[] = []
     const executionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
     try {
+      if (shouldTryFastExecute(statements)) {
+        const controller = new AbortController()
+        abortControllerRef.current = controller
+        activeScriptExecutionRef.current = executionId
+        const start = Date.now()
+        const validation = await api.validateScriptQuery(
+          tab.sessionId,
+          { execution_id: executionId, sql: toRun, database: tab.database },
+          controller.signal,
+        )
+
+        if (!validation.ok) {
+          const result: QueryResult = {
+            columns: ['Field', 'Value'],
+            rows: [
+              ['Status', 'Unsupported large write script'],
+              ['Statement count', validation.statement_count],
+              ['Rejected statement', validation.rejected_statement_index !== null && validation.rejected_statement_index !== undefined ? validation.rejected_statement_index + 1 : ''],
+              ['Preview', validation.rejected_statement_preview ?? ''],
+            ],
+            row_count: 4,
+            exec_time_ms: Date.now() - start,
+            error: formatScriptError(validation.error),
+          }
+          newResults.push({ id: `${executionId}-bulk`, result, sql: toRun })
+          try {
+            addEntry({
+              sql: toRun,
+              sessionId: tab.sessionId,
+              database: tab.database,
+              execTimeMs: result.exec_time_ms,
+              error: result.error,
+            })
+          } catch { /* ignore localStorage errors */ }
+          return
+        }
+
+        setBulkValidation(validation)
+
+        const updates = validation.operation_counts.UPDATE ?? 0
+        const deletes = validation.operation_counts.DELETE ?? 0
+        if (updates > 0 || deletes > 0) {
+          setBulkConfirm({ validation, sql: toRun, toRun })
+          return
+        }
+
+        // INSERT-only: execute without confirmation
+        await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, controller.signal, start, newResults, validation.operation_counts)
+        return
+      }
+
       for (const [statementIdx, stmt] of statements.entries()) {
         const controller = new AbortController()
         abortControllerRef.current = controller
@@ -432,6 +548,114 @@ function QueryTab({ tab }: Props) {
       }
     } finally {
       abortControllerRef.current = null
+      activeScriptExecutionRef.current = null
+      if (!bulkConfirm) {
+        setResults(newResults)
+        setResultIdx(0)
+      }
+      setRunning(false)
+    }
+  }
+
+  const executeBulkScript = async (
+    executionId: string,
+    toRun: string,
+    statements: string[],
+    database: string | undefined,
+    sessionId: string,
+    signal: AbortSignal,
+    start: number,
+    newResults: ExecutedQueryResult[],
+    operationCounts: Record<string, number> = {},
+  ) => {
+    let scriptResult: ScriptQueryResult
+    try {
+      scriptResult = await api.executeScriptQuery(
+        sessionId,
+        { execution_id: executionId, sql: toRun, database },
+        signal,
+      )
+    } catch (e) {
+      if ((e as Error).name === 'AbortError') {
+        setBulkCancelled(true)
+        scriptResult = {
+          ok: false,
+          execution_id: executionId,
+          statements_executed: 0,
+          affected_rows: 0,
+          exec_time_ms: Date.now() - start,
+          rolled_back: true,
+          error: {
+            code: 'CANCELLED_ROLLED_BACK',
+            problem: 'Large write script was cancelled.',
+            cause: 'Lagun sent a cancel request for this execution.',
+            fix: 'Check target rows before rerunning if the connection dropped during cancellation.',
+            docs_url: '/docs/bulk-execution#cancellation',
+          },
+        }
+      } else {
+        scriptResult = {
+          ok: false,
+          execution_id: executionId,
+          statements_executed: 0,
+          affected_rows: 0,
+          exec_time_ms: Date.now() - start,
+          rolled_back: false,
+          error: {
+            code: 'OUTCOME_UNKNOWN',
+            problem: 'Large write script outcome is unknown.',
+            cause: (e as Error).message || 'The request failed before Lagun received a final commit or rollback response.',
+            fix: 'Check the target rows before rerunning the script.',
+            docs_url: '/docs/bulk-execution#outcome-unknown',
+          },
+        }
+      }
+    }
+    const result = scriptResultToQueryResult(scriptResult)
+    newResults.push({ id: `${executionId}-bulk`, result, sql: toRun, scriptResult })
+    try {
+      const previewSql = scriptResult.statements_executed > 0
+        ? toRun.slice(0, 500) + (toRun.length > 500 ? '…' : '')
+        : toRun
+      addEntry({
+        sql: previewSql,
+        sessionId,
+        database,
+        affectedRows: scriptResult.affected_rows,
+        execTimeMs: scriptResult.exec_time_ms,
+        error: result.error,
+        cancelled: scriptResult.error?.code === 'CANCELLED_ROLLED_BACK',
+        bulk: {
+          statementCount: scriptResult.error?.code === 'CANCELLED_ROLLED_BACK' ? statements.length : scriptResult.statements_executed,
+          operationCounts,
+          rolledBack: scriptResult.rolled_back,
+          failedStatementIndex: scriptResult.failed_statement_index,
+          fullSql: toRun,
+        },
+      })
+    } catch { /* ignore localStorage errors */ }
+  }
+
+  const handleBulkConfirm = async () => {
+    if (!bulkConfirm) return
+    const { sql: toRun } = bulkConfirm
+    setBulkConfirm(null)
+
+    setRunning(true)
+    setBulkCancelled(false)
+    setBulkValidation(bulkConfirm.validation)
+    const newResults: ExecutedQueryResult[] = []
+    const executionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    try {
+      const controller = new AbortController()
+      abortControllerRef.current = controller
+      activeScriptExecutionRef.current = executionId
+      const start = Date.now()
+      const statements = splitStatements(toRun)
+      await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, controller.signal, start, newResults, bulkConfirm.validation.operation_counts)
+    } finally {
+      abortControllerRef.current = null
+      activeScriptExecutionRef.current = null
       setResults(newResults)
       setResultIdx(0)
       setRunning(false)
@@ -439,9 +663,18 @@ function QueryTab({ tab }: Props) {
   }
 
   const handleCancel = async () => {
+    if (cancellingRef.current) return
+    cancellingRef.current = true
+    const executionId = activeScriptExecutionRef.current
+    if (executionId) setBulkCancelled(true)
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
-    try { await api.killQuery(tab.sessionId) } catch { /* ignore */ }
+    activeScriptExecutionRef.current = null
+    try {
+      if (executionId) await api.killScriptQuery(tab.sessionId, executionId)
+      else await api.killQuery(tab.sessionId)
+    } catch { /* ignore */ }
+    finally { cancellingRef.current = false }
   }
 
   return (
@@ -493,12 +726,23 @@ function QueryTab({ tab }: Props) {
         )}
         <div className="flex-1 overflow-hidden min-h-0">
           {results.length > 0 ? (
-            <ResultGrid
-              key={results[resultIdx].id}
-              ref={gridRef}
-              result={results[resultIdx].result}
-              onSortActiveChange={setResultSortActive}
-            />
+            results[resultIdx].scriptResult ? (
+              <div className="p-4 overflow-y-auto h-full">
+                <Suspense fallback={null}>
+                  <BulkResultSummary
+                    result={results[resultIdx].scriptResult!}
+                    statements={bulkStatements}
+                  />
+                </Suspense>
+              </div>
+            ) : (
+              <ResultGrid
+                key={results[resultIdx].id}
+                ref={gridRef}
+                result={results[resultIdx].result}
+                onSortActiveChange={setResultSortActive}
+              />
+            )
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
               Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
@@ -550,6 +794,35 @@ function QueryTab({ tab }: Props) {
             rowsOverrideLabel="displayed rows"
           />
         </Suspense>
+      )}
+
+      {bulkConfirm && (
+        <Suspense fallback={null}>
+          <BulkConfirmDialog
+            open={true}
+            validation={bulkConfirm.validation}
+            database={tab.database}
+            statements={bulkStatements}
+            onConfirm={handleBulkConfirm}
+            onClose={() => { setBulkConfirm(null); setBulkStatements([]); setBulkValidation(null) }}
+          />
+        </Suspense>
+      )}
+
+      {(running || bulkConfirm || bulkValidation) && bulkStatements.length >= FAST_EXECUTE_THRESHOLD && results.length === 0 && (
+        <div className="flex-shrink-0 bg-surface-900 border-t border-surface-800 px-3 py-1.5 text-xs text-slate-400">
+          Large write script: {(bulkValidation?.statement_count ?? bulkStatements.length).toLocaleString()} statements
+          <span className="ml-1">
+            ({Object.entries(bulkOperationCounts).filter(([, n]) => n > 0).map(([op, n]) => `${n} ${op}`).join(', ')})
+          </span>
+          <span className="ml-1">Mode: one transaction.</span>
+        </div>
+      )}
+
+      {running && bulkStatements.length >= FAST_EXECUTE_THRESHOLD && (
+        <div className="flex-shrink-0 bg-brand-950 border-t border-brand-800/50 px-3 py-1.5 text-xs text-brand-300">
+          {bulkCancelled ? 'Cancelling and rolling back...' : `Executing ${bulkStatements.length.toLocaleString()} statements in one transaction...`}
+        </div>
       )}
     </div>
   )
