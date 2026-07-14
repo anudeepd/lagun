@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { useTabStore } from '../../store/tabStore'
@@ -19,6 +19,16 @@ export default function TabBar() {
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
   const [closeTargetId, setCloseTargetId] = useState<string | null>(null)
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
+  const tabRefs = useRef<Record<string, HTMLDivElement | null>>({})
+
+  useEffect(() => {
+    if (!activeTabId) return
+    tabRefs.current[activeTabId]?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+    })
+  }, [activeTabId, tabs.length])
+
   // Close context menu on click outside
   useEffect(() => {
     const handleClick = () => setContextMenu(null)
@@ -98,6 +108,9 @@ export default function TabBar() {
           {tabs.map((tab) => (
             <div
               key={tab.id}
+              ref={(element) => {
+                tabRefs.current[tab.id] = element
+              }}
               draggable
               onDragStart={(e) => handleDragStart(e, tab.id)}
               onDragOver={handleDragOver}

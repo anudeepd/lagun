@@ -1,8 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react'
+import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImperativeHandle, type MouseEvent as ReactMouseEvent } from 'react'
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
-import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine } from 'lucide-react'
+import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine, Plus } from 'lucide-react'
 import type { CellClassParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
@@ -116,6 +116,7 @@ interface Props {
   columns?: ColumnInfo[]
   onDeleteRows?: (rows: Record<string, unknown>[]) => void
   onDuplicateRow?: (row: Record<string, unknown>, mode: DuplicateRowMode) => void
+  onCreateEmptyRow?: () => void
   hiddenColumns?: Set<string>
   pendingChanges?: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>
   insertDrafts?: Map<string, Record<string, unknown>>
@@ -205,8 +206,9 @@ export const buildResultGridRowData = ({
   return [...orderedRows, ...unanchoredDrafts]
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId, onSortActiveChange }: Props, ref) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, onCreateEmptyRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId, onSortActiveChange }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const [emptyMenu, setEmptyMenu] = useState<{ x: number; y: number } | null>(null)
   const [cellEditor, setCellEditor] = useState<CellEditorState | null>(null)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
@@ -214,6 +216,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   const activeCellRef = useRef<ActiveCell | null>(null)
   const autoSizedCols = useRef(new Set<string>())
   const lastHeaderClick = useRef<{ colId: string; time: number } | null>(null)
+  const previousDraftIds = useRef<Set<string>>(new Set())
 
   const visibleColumns = useMemo(() =>
     hiddenColumns?.size ? result.columns.filter(col => !hiddenColumns.has(col)) : result.columns,
@@ -254,6 +257,35 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   useEffect(() => {
     agApiRef.current?.refreshCells({ force: true })
   }, [pendingChanges, insertDrafts])
+
+  useEffect(() => {
+    const draftIds = new Set(insertDrafts?.keys() ?? [])
+    const newDraftId = [...draftIds].find(id => !previousDraftIds.current.has(id))
+    previousDraftIds.current = draftIds
+    if (!newDraftId) return
+
+    const frame = requestAnimationFrame(() => {
+      const api = agApiRef.current
+      if (!api) return
+
+      let rowIndex: number | null = null
+      api.forEachNodeAfterFilterAndSort(node => {
+        if (node.data?.__ag_rowId === newDraftId) rowIndex = node.rowIndex
+      })
+      if (rowIndex == null) return
+
+      const firstEditableColumn = visibleColumns.find(col =>
+        col !== '__rowIndex' && !columns?.find(c => c.name === col)?.is_auto_increment
+      ) ?? visibleColumns[0]
+      if (!firstEditableColumn) return
+
+      api.ensureIndexVisible(rowIndex, 'middle')
+      api.setFocusedCell(rowIndex, firstEditableColumn)
+      api.startEditingCell({ rowIndex, colKey: firstEditableColumn })
+    })
+
+    return () => cancelAnimationFrame(frame)
+  }, [insertDrafts, visibleColumns, columns])
 
   const columnDefs = useMemo(() =>
     result.columns.map((col, colIdx) => {
@@ -484,6 +516,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     if (!native) return
     native.preventDefault()
     const selected: Record<string, unknown>[] = e.api.getSelectedRows()
+    setEmptyMenu(null)
     setMenu({
       x: native.clientX,
       y: native.clientY,
@@ -494,7 +527,24 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     })
   }, [])
 
-  const closeMenu = useCallback(() => setMenu(null), [])
+  const handleGridContextMenu = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!editable || !onCreateEmptyRow) return
+    if (!(e.target instanceof HTMLElement)) return
+    if (e.target.closest('.ag-cell, .ag-header-cell, .ag-header-group-cell')) return
+    e.preventDefault()
+    setMenu(null)
+    if (rowData.length === 0) {
+      onCreateEmptyRow()
+      setEmptyMenu(null)
+      return
+    }
+    setEmptyMenu({ x: e.clientX, y: e.clientY })
+  }, [editable, onCreateEmptyRow, rowData.length])
+
+  const closeMenu = useCallback(() => {
+    setMenu(null)
+    setEmptyMenu(null)
+  }, [])
 
   const menuItems = useMemo((): ContextMenuItem[] => {
     if (!menu) return []
@@ -586,6 +636,19 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     return items
   }, [menu, columns, editable, onCellEdit, onDeleteRows, onDuplicateRow, primaryKeyColumns, closeMenu, rowData, openLargeCellEditor])
 
+  const emptyMenuItems = useMemo((): ContextMenuItem[] => {
+    if (!emptyMenu || !editable || !onCreateEmptyRow) return []
+    return [{
+      type: 'item',
+      label: 'Insert empty row',
+      icon: <Plus size={12} />,
+      onClick: () => {
+        onCreateEmptyRow()
+        closeMenu()
+      },
+    }]
+  }, [emptyMenu, editable, onCreateEmptyRow, closeMenu])
+
   const handleApplyCellEditor = useCallback(() => {
     if (!cellEditor) return
     onCellEdit?.({
@@ -606,7 +669,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }
 
   return (
-    <div ref={rootRef} className="h-full lagun-result-grid">
+    <div ref={rootRef} className="h-full lagun-result-grid" onContextMenu={handleGridContextMenu}>
       <AgGridReact
         theme={darkTheme}
         columnDefs={columnDefs}
@@ -638,6 +701,14 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           x={menu.x}
           y={menu.y}
           items={menuItems}
+          onClose={closeMenu}
+        />
+      )}
+      {emptyMenu && (
+        <GridContextMenu
+          x={emptyMenu.x}
+          y={emptyMenu.y}
+          items={emptyMenuItems}
           onClose={closeMenu}
         />
       )}

@@ -811,9 +811,12 @@ async def row_insert(session_id: str, req: RowInsertRequest):
     try:
         db_q = quote_ident(req.database)
         tbl_q = quote_ident(req.table)
-        cols = ", ".join(quote_ident(c) for c in req.values)
-        placeholders = ", ".join("%s" for _ in req.values)
-        sql = f"INSERT INTO {db_q}.{tbl_q} ({cols}) VALUES ({placeholders})"
+        if req.values:
+            cols = ", ".join(quote_ident(c) for c in req.values)
+            placeholders = ", ".join("%s" for _ in req.values)
+            sql = f"INSERT INTO {db_q}.{tbl_q} ({cols}) VALUES ({placeholders})"
+        else:
+            sql = f"INSERT INTO {db_q}.{tbl_q} () VALUES ()"
         params = list(req.values.values())
         display_sql = _display_sql(sql, params)
         async with pool.acquire() as conn:

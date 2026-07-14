@@ -251,6 +251,15 @@ export const buildDuplicateRowDraftValues = (
   return values
 }
 
+export const buildEmptyRowDraftValues = (columns: ColumnInfo[]): Record<string, unknown> => {
+  const values: Record<string, unknown> = {}
+  columns.forEach(col => {
+    if (col.is_auto_increment || col.column_default !== null) return
+    if (col.is_nullable) values[col.name] = null
+  })
+  return values
+}
+
 const MIN_EDITOR_HEIGHT = 100
 const MAX_EDITOR_HEIGHT_FRACTION = 0.7
 
@@ -1091,6 +1100,19 @@ function TableTab({ tab }: Props) {
     setTimeout(() => setStatusMsg(null), 4000)
   }, [columns])
 
+  const handleCreateEmptyRow = useCallback(() => {
+    const draftId = `__insert__${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const values = buildEmptyRowDraftValues(columns)
+    setInsertDrafts(prev => {
+      const next = new Map(prev)
+      next.set(draftId, values)
+      insertDraftsRef.current = next
+      return next
+    })
+    setStatusMsg('Inserted empty row draft. Edit values, then Apply.')
+    setTimeout(() => setStatusMsg(null), 4000)
+  }, [columns])
+
   const handleApplyChanges = async () => {
     // Force-commit any in-progress cell edit before reading pending changes.
     // Without this, a just-edited cell whose blur hasn't fired yet would be
@@ -1160,7 +1182,7 @@ function TableTab({ tab }: Props) {
     setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
     if (currentDrafts.size > 0) {
-      setStatusMsg(`✓ Inserted ${currentDrafts.size} duplicated row${currentDrafts.size !== 1 ? 's' : ''}`)
+      setStatusMsg(`✓ Inserted ${currentDrafts.size} row${currentDrafts.size !== 1 ? 's' : ''}`)
       setTimeout(() => setStatusMsg(null), 4000)
     }
 
@@ -1194,6 +1216,7 @@ function TableTab({ tab }: Props) {
   const handleDiscardChanges = () => {
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
+    setInsertDraftAnchors(new Map())
     loadData()
   }
 
@@ -1565,7 +1588,7 @@ function TableTab({ tab }: Props) {
           </button>
         )}
         {view === 'data' && (
-          <Button variant="ghost" size="sm" onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); loadData() }} title="Refresh" disabled={initialLoading || refreshing}>
+          <Button variant="ghost" size="sm" onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); loadData() }} title="Refresh" disabled={initialLoading || refreshing}>
             <RefreshCw size={12} className={initialLoading || refreshing ? 'animate-spin' : ''} />
           </Button>
         )}
@@ -1655,6 +1678,7 @@ function TableTab({ tab }: Props) {
               onCellEdit={handleCellEdit}
               onDeleteRows={handleDeleteRows}
               onDuplicateRow={handleDuplicateRow}
+              onCreateEmptyRow={handleCreateEmptyRow}
               selectable={true}
               onSelectionChange={setSelectedRows}
               columns={columns}

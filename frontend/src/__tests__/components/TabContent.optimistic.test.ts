@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ColumnInfo, QueryResult } from '../../types'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import { buildDuplicateRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -64,7 +64,7 @@ function makeResult(
   }
 }
 
-function makeColumn(name: string, isPrimaryKey = false, isAutoIncrement = false): ColumnInfo {
+function makeColumn(name: string, isPrimaryKey = false, isAutoIncrement = false, overrides: Partial<ColumnInfo> = {}): ColumnInfo {
   return {
     name,
     data_type: 'varchar',
@@ -75,6 +75,7 @@ function makeColumn(name: string, isPrimaryKey = false, isAutoIncrement = false)
     is_auto_increment: isAutoIncrement,
     extra: isAutoIncrement ? 'auto_increment' : '',
     comment: '',
+    ...overrides,
   }
 }
 
@@ -689,5 +690,30 @@ describe('buildDuplicateRowDraftValues', () => {
     expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '__insert__1'])
     expect(rows[2].id).toBeNull()
     expect(rows[2].name).toBe('Bob')
+  })
+})
+
+describe('buildEmptyRowDraftValues', () => {
+  it('omits auto-increment and default columns', () => {
+    const values = buildEmptyRowDraftValues([
+      makeColumn('id', true, true),
+      makeColumn('created_at', false, false, { column_default: 'CURRENT_TIMESTAMP' }),
+      makeColumn('name'),
+    ])
+
+    expect(values).toEqual({ name: null })
+    expect(values).not.toHaveProperty('id')
+    expect(values).not.toHaveProperty('created_at')
+  })
+
+  it('leaves required no-default columns absent so the user can fill them before applying', () => {
+    const values = buildEmptyRowDraftValues([
+      makeColumn('id', true, true),
+      makeColumn('email', false, false, { is_nullable: false }),
+      makeColumn('nickname'),
+    ])
+
+    expect(values).toEqual({ nickname: null })
+    expect(values).not.toHaveProperty('email')
   })
 })

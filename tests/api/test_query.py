@@ -211,6 +211,26 @@ async def test_row_insert(client, session_id, test_db):
     assert r2.json()["rows"][0][0] == 3
 
 
+async def test_row_insert_empty_values_uses_defaults(client, session_id, test_db):
+    create = await client.post(f"/api/v1/sessions/{session_id}/query", json={
+        "sql": "CREATE TABLE default_only (id INT AUTO_INCREMENT PRIMARY KEY, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)",
+        "database": test_db,
+    })
+    assert create.status_code == 200
+    assert create.json()["error"] is None
+
+    r = await client.post(f"/api/v1/sessions/{session_id}/row-insert", json={
+        "database": test_db,
+        "table": "default_only",
+        "values": {},
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+    assert data["sql_executed"] == f"INSERT INTO `{test_db}`.`default_only` () VALUES ()"
+
+
 async def test_row_insert_error_returns_attempted_sql(client, session_id, test_db):
     r = await client.post(f"/api/v1/sessions/{session_id}/row-insert", json={
         "database": test_db,

@@ -303,7 +303,7 @@ describe('shared SQL classifier fixture alignment', () => {
   const WRITE_KEYWORDS = ['INSERT', 'UPDATE', 'DELETE']
 
   it('allowed statements have write-first-token alignment', () => {
-    for (const { label, sql } of fixture.allowed) {
+    for (const { sql } of fixture.allowed) {
       const stmts = splitStatements(sql)
       const firstTokens = stmts.map(s => {
         const stripped = s.replace(/^\s*(?:--[^\n]*\n\s*)+/g, '').replace(/^\s*(?:#[^\n]*\n\s*)+/g, '').replace(/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/g, '')
