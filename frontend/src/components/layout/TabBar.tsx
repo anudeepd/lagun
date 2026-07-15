@@ -162,7 +162,7 @@ export default function TabBar() {
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
               title={getTabTitle(tab)}
               className={clsx(
-                'group flex h-[40px] items-center gap-1.5 px-3 py-2 text-xs border-r border-surface-800 whitespace-nowrap transition-colors flex-shrink-0 cursor-move',
+                'group flex h-[40px] select-none items-center gap-1.5 px-3 py-2 text-xs border-r border-surface-800 whitespace-nowrap transition-colors flex-shrink-0 cursor-move',
                 activeTabId === tab.id
                   ? 'bg-surface-950 text-slate-100 border-t-2 border-t-brand-500'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800',
@@ -239,16 +239,18 @@ export default function TabBar() {
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {currentTab.type === 'query' && (
-            <button
-              role="menuitem"
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-300 hover:bg-surface-700 transition-colors"
-              onClick={() => openRenameDialog(currentTab)}
-            >
-              <Pencil size={12} />
-              Rename
-            </button>
+            <>
+              <button
+                role="menuitem"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-300 hover:bg-surface-700 transition-colors"
+                onClick={() => openRenameDialog(currentTab)}
+              >
+                <Pencil size={12} />
+                Rename
+              </button>
+              <div role="separator" className="my-1 border-t border-surface-700" />
+            </>
           )}
-          <div className="my-1 border-t border-surface-700" />
           <button
             role="menuitem"
             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-surface-700 transition-colors"

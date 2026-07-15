@@ -23,6 +23,24 @@ describe('TabBar', () => {
 
     render(<TabBar />)
 
-    expect(fireEvent.mouseDown(screen.getByRole('tab', { name: /query/i }), { button: 2 })).toBe(false)
+    const tab = screen.getByRole('tab', { name: /query/i })
+    expect(tab.parentElement).toHaveClass('select-none')
+    expect(fireEvent.mouseDown(tab, { button: 2 })).toBe(false)
+    fireEvent.contextMenu(tab)
+    expect(screen.getByRole('menu', { name: 'Tab actions' }).querySelector('.border-t')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Rename Tab' })).not.toBeInTheDocument()
+  })
+
+  it('does not show a separator when Close is the only table-tab action', () => {
+    useTabStore.setState({
+      tabs: [{ id: 'tab-1', type: 'table', label: 'customers', database: 'lagun_demo', table: 'customers', sessionId: 'session-1' }],
+      activeTabId: 'tab-1',
+    })
+
+    render(<TabBar />)
+
+    fireEvent.contextMenu(screen.getByRole('tab', { name: /customers/i }))
+    expect(screen.getByRole('menuitem', { name: 'Close' })).toBeInTheDocument()
+    expect(screen.getByRole('menu', { name: 'Tab actions' }).querySelector('.border-t')).not.toBeInTheDocument()
   })
 })

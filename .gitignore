@@ -56,3 +56,4 @@ TESTING.md
 TODO.md
 ldapgate.yaml
 /package-lock.json
+.gstack/
