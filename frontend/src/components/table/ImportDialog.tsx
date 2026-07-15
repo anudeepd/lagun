@@ -170,7 +170,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             onClick={handleImport}
             disabled={importing || !file || !targetTable}
           >
-            {importing ? 'Importing…' : 'Import'}
+            {importing ? 'Importing…' : result && !result.ok ? 'Retry Import' : 'Import'}
           </Button>
         </>
       }
@@ -210,7 +210,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           <p className="text-xs text-slate-500">Loading preview…</p>
         )}
         {previewError && (
-          <p className="text-xs text-red-400">{previewError}</p>
+          <p role="alert" className="text-xs text-red-400">{previewError}</p>
         )}
         {preview && (
           <div className="overflow-x-auto max-h-48 border border-surface-700 rounded">
@@ -354,7 +354,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
 
         {/* Result banner */}
         {result && (
-          <div className={`p-3 rounded text-xs ${result.ok ? 'bg-green-900/30 border border-green-800 text-green-300' : 'bg-red-900/30 border border-red-800 text-red-300'}`}>
+          <div role={result.ok ? 'status' : 'alert'} className={`p-3 rounded text-xs ${result.ok ? 'bg-green-900/30 border border-green-800 text-green-300' : 'bg-red-900/30 border border-red-800 text-red-300'}`}>
             {result.ok ? (
               <>
                 Imported {result.rows_imported} rows via {result.method === 'load_data' ? 'LOAD DATA' : 'batch insert'}.

@@ -26,6 +26,16 @@
 }
 
 @layer base {
+  :root {
+    --lagun-surface: #0f172a;
+    --lagun-raised-surface: #1e293b;
+    --lagun-border: #334155;
+    --lagun-text: #e2e8f0;
+    --lagun-muted-text: #94a3b8;
+    --lagun-danger: #f87171;
+    --lagun-success: #4ade80;
+    --lagun-radius: 0.375rem;
+  }
   * {
     box-sizing: border-box;
   }
@@ -33,6 +43,14 @@
     margin: 0;
     font-family: ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
   }
   ::-webkit-scrollbar {
     width: 6px;
@@ -56,6 +74,16 @@
     text-overflow: ellipsis;
     overflow: hidden;
     white-space: nowrap;
+  }
+  .lagun-icon-button {
+    min-height: 2.25rem;
+    min-width: 2.25rem;
+  }
+  @media (pointer: coarse) {
+    .lagun-icon-button {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
   }
 }
 

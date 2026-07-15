@@ -28,6 +28,7 @@ interface TabState {
   consumePendingSql: (tabId: string) => void
   moveTab: (fromId: string, toId: string) => void
   renameTab: (id: string, newLabel: string) => void
+  setTabDirty: (id: string, dirty: boolean) => void
 }
 
 export const useTabStore = create<TabState>()(
@@ -142,6 +143,10 @@ export const useTabStore = create<TabState>()(
             ? { ...t, label: newLabel }
             : t
         ),
+      })),
+
+      setTabDirty: (id, dirty) => set(s => ({
+        tabs: s.tabs.map(tab => tab.id === id ? { ...tab, dirty } : tab),
       })),
     }),
     {

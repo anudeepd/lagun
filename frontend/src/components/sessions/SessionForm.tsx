@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { CheckCircle, XCircle, Loader2, Database, RefreshCw } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
@@ -39,6 +39,10 @@ export default function SessionForm({ open, onClose, session }: Props) {
   const [fetchingDbs, setFetchingDbs] = useState(false)
   const [fetchDbError, setFetchDbError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
+  const usernameRef = useRef<HTMLInputElement>(null)
+  const portRef = useRef<HTMLInputElement>(null)
+  const queryLimitRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (session) {
@@ -74,18 +78,22 @@ export default function SessionForm({ open, onClose, session }: Props) {
     const queryLimit = parseInt(form.query_limit)
     if (!name) {
       setError('Connection name is required.')
+      nameRef.current?.focus()
       return
     }
     if (!username) {
       setError('Username is required.')
+      usernameRef.current?.focus()
       return
     }
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       setError('Port must be a number between 1 and 65535.')
+      portRef.current?.focus()
       return
     }
     if (!Number.isInteger(queryLimit) || queryLimit < 1 || queryLimit > 100000) {
       setError('Query limit must be a number between 1 and 100000.')
+      queryLimitRef.current?.focus()
       return
     }
 
@@ -210,21 +218,21 @@ export default function SessionForm({ open, onClose, session }: Props) {
             {testResult.msg}
           </div>
         )}
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
 
-        <Input label="Connection Name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="My Database" />
+        <Input ref={nameRef} label="Connection Name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="My Database" />
         <div className="grid grid-cols-3 gap-2">
           <div className="col-span-2">
             <Input label="Host" value={form.host} onChange={e => set('host', e.target.value)} placeholder="localhost" />
           </div>
-          <Input label="Port" type="number" value={form.port} onChange={e => set('port', e.target.value)} />
+          <Input ref={portRef} label="Port" type="number" value={form.port} onChange={e => set('port', e.target.value)} />
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Input label="Username" value={form.username} onChange={e => set('username', e.target.value)} placeholder="root" />
+          <Input ref={usernameRef} label="Username" value={form.username} onChange={e => set('username', e.target.value)} placeholder="root" />
           <Input label="Password" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder={session ? '(unchanged)' : ''} />
         </div>
         <Input label="Default Database (optional)" value={form.default_db} onChange={e => set('default_db', e.target.value)} placeholder="my_db" />
-        <Input label="Row Limit" type="number" value={form.query_limit} onChange={e => set('query_limit', e.target.value)} />
+        <Input ref={queryLimitRef} label="Row Limit" type="number" value={form.query_limit} onChange={e => set('query_limit', e.target.value)} />
         <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
           <input type="checkbox" checked={form.ssl_enabled as boolean} onChange={e => set('ssl_enabled', e.target.checked)} className="rounded" />
           Enable SSL
@@ -259,7 +267,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
           </div>
 
           {fetchDbError && (
-            <p className="text-xs text-red-400">{fetchDbError}</p>
+            <p role="alert" className="text-xs text-red-400">{fetchDbError}</p>
           )}
 
           {availableDbs.length === 0 && !fetchingDbs && !fetchDbError && (

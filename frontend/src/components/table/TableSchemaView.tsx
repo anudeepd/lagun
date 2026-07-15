@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, X, Code2, Key } from 'lucide-react'
+import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, Code2, Key } from 'lucide-react'
 import SyntaxHighlighter from 'react-syntax-highlighter'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
 import Button from '../ui/Button'
@@ -10,6 +10,9 @@ import type { ColumnInfo, IndexInfo } from '../../types'
 import EditColumnDialog from './EditColumnDialog'
 import IndexDialog from './IndexDialog'
 import PrimaryKeyDialog from './PrimaryKeyDialog'
+import Modal from '../ui/Modal'
+import ConfirmDialog from '../ui/ConfirmDialog'
+import { showToast } from '../../utils/toast'
 
 interface Props {
   sessionId: string
@@ -75,6 +78,7 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
 
   const flash = (msg: string) => {
     setStatusMsg(msg)
+    showToast(msg, msg.startsWith('Error') ? 'error' : 'success')
     setTimeout(() => setStatusMsg(null), 3000)
   }
 
@@ -150,17 +154,9 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
           <span>Data: <span className="text-slate-200">{fmtBytes(tableInfo.data_length)}</span></span>
           {tableInfo.comment && <span className="text-slate-500 italic">{tableInfo.comment}</span>}
           <div className="flex-1" />
-          {!confirmTruncate ? (
-            <Button variant="ghost" size="sm" onClick={() => setConfirmTruncate(true)}>
-              <AlertTriangle size={11} /> Truncate
-            </Button>
-          ) : (
-            <div className="flex items-center gap-1">
-              <span className="text-yellow-400">Confirm truncate?</span>
-              <Button variant="ghost" size="sm" onClick={handleTruncate}>Yes</Button>
-              <Button variant="ghost" size="sm" onClick={() => setConfirmTruncate(false)}>No</Button>
-            </div>
-          )}
+          <Button variant="ghost" size="sm" onClick={() => setConfirmTruncate(true)}>
+            <AlertTriangle size={11} /> Truncate
+          </Button>
           <Button variant="ghost" size="sm" onClick={openSchemaExport}>
             <Code2 size={11} /> Export Schema
           </Button>
@@ -212,20 +208,14 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
                         <Pencil size={11} />
                       </button>
                       {!col.is_primary_key && (
-                        confirmDropCol === col.name ? (
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => handleDropCol(col.name)} className="text-red-400 hover:text-red-300 text-xs">Drop</button>
-                            <button onClick={() => setConfirmDropCol(null)} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setConfirmDropCol(col.name)}
-                            className="p-0.5 text-slate-500 hover:text-red-400 transition-colors"
-                            title="Drop column"
-                          >
-                            <Trash2 size={11} />
-                          </button>
-                        )
+                        <button
+                          onClick={() => setConfirmDropCol(col.name)}
+                          className="p-1 text-slate-500 hover:text-red-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                          title={`Drop column ${col.name}`}
+                          aria-label={`Drop column ${col.name}`}
+                        >
+                          <Trash2 size={11} />
+                        </button>
                       )}
                     </div>
                   </td>
@@ -262,20 +252,14 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
                   <td className="px-2 py-1.5 text-slate-400">{idx.index_type}</td>
                   <td className="px-2 py-1.5">
                     {idx.name !== 'PRIMARY' && (
-                      confirmDropIdx === idx.name ? (
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => handleDropIndex(idx.name)} className="text-red-400 hover:text-red-300 text-xs">Drop</button>
-                          <button onClick={() => setConfirmDropIdx(null)} className="text-slate-500 hover:text-slate-300 text-xs">×</button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmDropIdx(idx.name)}
-                          className="p-0.5 text-slate-500 hover:text-red-400 transition-colors"
-                          title="Drop index"
-                        >
-                          <Trash2 size={11} />
-                        </button>
-                      )
+                      <button
+                        onClick={() => setConfirmDropIdx(idx.name)}
+                        className="p-1 text-slate-500 hover:text-red-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                        title={`Drop index ${idx.name}`}
+                        aria-label={`Drop index ${idx.name}`}
+                      >
+                        <Trash2 size={11} />
+                      </button>
                     )}
                   </td>
                 </tr>
@@ -339,40 +323,68 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
       />
 
       {schemaSql && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setSchemaSql(null)}>
-          <div className="bg-surface-900 border border-surface-700 rounded-lg shadow-xl w-[600px] max-w-[90vw] max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-surface-700">
-              <span className="text-xs font-semibold text-slate-300">{database}.{table} — CREATE statement</span>
-              <button onClick={() => setSchemaSql(null)} className="text-slate-500 hover:text-slate-200 transition-colors"><X size={14} /></button>
-            </div>
-            <div className="flex-1 overflow-auto bg-surface-950">
-              <SyntaxHighlighter
-                language="sql"
-                style={atomOneDark}
-                customStyle={{
-                  margin: 0,
-                  padding: '1rem',
-                  fontSize: '12px',
-                  fontFamily: 'ui-monospace, monospace',
-                  backgroundColor: '#0f172a',
-                }}
-                wrapLines={true}
-                lineProps={{ style: { wordBreak: 'break-all', whiteSpace: 'pre-wrap' } }}
-              >
-                {schemaSql}
-              </SyntaxHighlighter>
-            </div>
-            <div className="flex items-center gap-2 px-4 py-2.5 border-t border-surface-700">
+        <Modal
+          open={true}
+          onClose={() => setSchemaSql(null)}
+          title={`${database}.${table} - CREATE statement`}
+          width="max-w-3xl"
+          footer={(
+            <>
               <Button variant="ghost" size="sm" onClick={handleCopy}>
                 <Copy size={11} /> {copied ? 'Copied!' : 'Copy'}
               </Button>
               <Button variant="ghost" size="sm" onClick={handleDownload}>
                 <Download size={11} /> Download
               </Button>
-            </div>
+            </>
+          )}
+        >
+          <div className="-m-4 flex-1 overflow-auto bg-surface-950">
+            <SyntaxHighlighter
+              language="sql"
+              style={atomOneDark}
+              customStyle={{
+                margin: 0,
+                padding: '1rem',
+                fontSize: '12px',
+                fontFamily: 'ui-monospace, monospace',
+                backgroundColor: '#0f172a',
+              }}
+              wrapLines={true}
+              lineProps={{ style: { wordBreak: 'break-all', whiteSpace: 'pre-wrap' } }}
+            >
+              {schemaSql}
+            </SyntaxHighlighter>
           </div>
-        </div>
+        </Modal>
       )}
+      <ConfirmDialog
+        open={confirmTruncate}
+        title="Truncate Table"
+        message={`Truncate ${database}.${table}? All rows will be permanently deleted.`}
+        confirmLabel="Truncate Table"
+        danger
+        onConfirm={handleTruncate}
+        onClose={() => setConfirmTruncate(false)}
+      />
+      <ConfirmDialog
+        open={confirmDropCol !== null}
+        title="Drop Column"
+        message={`Drop column ${confirmDropCol ?? ''} from ${database}.${table}? Existing data in this column will be permanently deleted.`}
+        confirmLabel="Drop Column"
+        danger
+        onConfirm={() => confirmDropCol && handleDropCol(confirmDropCol)}
+        onClose={() => setConfirmDropCol(null)}
+      />
+      <ConfirmDialog
+        open={confirmDropIdx !== null}
+        title="Drop Index"
+        message={`Drop index ${confirmDropIdx ?? ''} from ${database}.${table}?`}
+        confirmLabel="Drop Index"
+        danger
+        onConfirm={() => confirmDropIdx && handleDropIndex(confirmDropIdx)}
+        onClose={() => setConfirmDropIdx(null)}
+      />
 
     </div>
   )

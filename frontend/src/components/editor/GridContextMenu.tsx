@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import useMenuKeyboard from '../../hooks/useMenuKeyboard'
 
 export type ContextMenuItem =
   | { type: 'item'; label: string; icon?: ReactNode; danger?: boolean; onClick: () => void }
@@ -15,6 +16,7 @@ interface Props {
 export default function GridContextMenu({ x, y, items, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ left: x, top: y })
+  useMenuKeyboard(ref, onClose)
 
   // Clamp position to viewport after first render
   useLayoutEffect(() => {
@@ -27,14 +29,11 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
   }, [x, y])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
-    window.addEventListener('keydown', onKey)
     window.addEventListener('mousedown', onDown)
     return () => {
-      window.removeEventListener('keydown', onKey)
       window.removeEventListener('mousedown', onDown)
     }
   }, [onClose])
@@ -42,6 +41,8 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
   return createPortal(
     <div
       ref={ref}
+      role="menu"
+      aria-label="Grid actions"
       className="fixed z-[9999] bg-surface-900 border border-surface-700 rounded-md shadow-2xl py-1 min-w-[180px]"
       style={{ left: pos.left, top: pos.top }}
       onContextMenu={e => e.preventDefault()}
@@ -52,6 +53,7 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
         ) : (
           <button
             key={i}
+            role="menuitem"
             className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left ${
               item.danger
                 ? 'text-red-400 hover:bg-red-950/40'

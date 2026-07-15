@@ -155,4 +155,5 @@ export interface Tab {
   table?: string
   sql?: string
   dataState?: DataTabState
+  dirty?: boolean
 }

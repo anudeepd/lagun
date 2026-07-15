@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, ChevronDown, Database, Table2, Terminal, RefreshCw, Trash2, Scissors, Upload, Search, X, Star } from 'lucide-react'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useTabStore } from '../../store/tabStore'
 import { api } from '../../api/client'
 import type { TableInfo } from '../../types'
 import ImportDialog from '../table/ImportDialog'
+import ConfirmDialog from '../ui/ConfirmDialog'
+import { showToast } from '../../utils/toast'
+import useMenuKeyboard from '../../hooks/useMenuKeyboard'
 
 interface Props {
   sessionId: string
@@ -48,6 +51,8 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     x: number; y: number; db: string; table?: string
   } | null>(null)
   const [importTarget, setImportTarget] = useState<{ db: string; table: string } | null>(null)
+  const [destructiveTarget, setDestructiveTarget] = useState<{ action: 'truncate' | 'drop'; db: string; table: string } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const { bookmarks, toggle: toggleBookmark, isBookmarked } = useBookmarks(sessionId)
   const allDbs = databases[sessionId] ?? []
   const dbs = selectedDatabases && selectedDatabases.length > 0
@@ -133,25 +138,41 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   const handleTableContext = (e: React.MouseEvent, db: string, table?: string) => {
     e.preventDefault()
     e.stopPropagation()
+    ;(e.currentTarget as HTMLElement).focus()
     setContextMenu({ x: e.clientX, y: e.clientY, db, table })
   }
 
   const closeMenu = () => setContextMenu(null)
+  useMenuKeyboard(menuRef, closeMenu, Boolean(contextMenu))
 
   const dropTable = async (db: string, table: string) => {
-    if (!confirm(`Drop table ${db}.${table}? This cannot be undone.`)) return
-    await api.dropTable(sessionId, db, table)
-    const key = `${sessionId}/${db}`
-    useSchemaStore.setState(s => ({
-      tables: { ...s.tables, [key]: (s.tables[key] ?? []).filter(t => t.name !== table) }
-    }))
-    closeMenu()
+    try {
+      await api.dropTable(sessionId, db, table)
+      const key = `${sessionId}/${db}`
+      useSchemaStore.setState(s => ({
+        tables: { ...s.tables, [key]: (s.tables[key] ?? []).filter(t => t.name !== table) }
+      }))
+      showToast(`Dropped ${db}.${table}.`)
+    } catch (error) {
+      showToast(`Could not drop ${db}.${table}: ${error}`, 'error')
+    }
   }
 
   const truncateTable = async (db: string, table: string) => {
-    if (!confirm(`Truncate table ${db}.${table}? All rows will be deleted.`)) return
-    await api.truncateTable(sessionId, db, table)
-    closeMenu()
+    try {
+      await api.truncateTable(sessionId, db, table)
+      showToast(`Truncated ${db}.${table}.`)
+    } catch (error) {
+      showToast(`Could not truncate ${db}.${table}: ${error}`, 'error')
+    }
+  }
+
+  const confirmDestructiveAction = async () => {
+    if (!destructiveTarget) return
+    const { action, db, table } = destructiveTarget
+    setDestructiveTarget(null)
+    if (action === 'drop') await dropTable(db, table)
+    else await truncateTable(db, table)
   }
 
   const noBookmarks = showBookmarksOnly && bookmarks.size === 0
@@ -204,46 +225,51 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
 
             return (
               <div key={db}>
-                <button
-                  className="flex items-center gap-1.5 w-full px-2 py-1 hover:bg-surface-800 text-slate-300 group"
-                  onClick={() => toggleDb(db)}
-                  onContextMenu={e => handleTableContext(e, db)}
-                  title={db}
-                >
-                  {isOpen ? <ChevronDown size={12} className="flex-shrink-0" /> : <ChevronRight size={12} className="flex-shrink-0" />}
-                  <Database size={12} className="flex-shrink-0 text-yellow-400" />
-                  <span className="text-xs truncate flex-1 text-left">{db}</span>
-                  <span
-                    role="button"
+                <div className="group flex items-center hover:bg-surface-800">
+                  <button
+                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1 text-slate-300"
+                    onClick={() => toggleDb(db)}
+                    onContextMenu={e => handleTableContext(e, db)}
+                    title={db}
+                  >
+                    {isOpen ? <ChevronDown size={12} className="flex-shrink-0" /> : <ChevronRight size={12} className="flex-shrink-0" />}
+                    <Database size={12} className="flex-shrink-0 text-yellow-400" />
+                    <span className="text-xs truncate flex-1 text-left">{db}</span>
+                  </button>
+                  <button
+                    type="button"
                     title="New query on this database"
-                    onClick={e => { e.stopPropagation(); openQueryTab(sessionId, db) }}
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-brand-400"
+                    aria-label={`New query on ${db}`}
+                    onClick={() => openQueryTab(sessionId, db)}
+                    className="mr-1 rounded p-1 text-slate-500 opacity-0 transition-opacity hover:text-brand-400 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 group-hover:opacity-100"
                   >
                     <Terminal size={10} />
-                  </span>
-                </button>
+                  </button>
+                </div>
 
                 {isOpen && tbls.map(tbl => {
                   const starred = isBookmarked(db, tbl.name)
                   return (
-                    <button
-                      key={tbl.name}
-                      className="flex items-center gap-1.5 w-full pl-7 pr-2 py-0.5 hover:bg-surface-800 text-slate-400 hover:text-slate-200 group"
-                      onClick={() => openTableTab(sessionId, db, tbl.name)}
-                      onContextMenu={e => handleTableContext(e, db, tbl.name)}
-                      title={`${db}.${tbl.name}`}
-                    >
-                      <Table2 size={11} className="flex-shrink-0 text-slate-500" />
-                      <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>
-                      <span
-                        role="button"
+                    <div key={tbl.name} className="group flex items-center hover:bg-surface-800">
+                      <button
+                        className="flex min-w-0 flex-1 items-center gap-1.5 py-0.5 pl-7 pr-2 text-slate-400 hover:text-slate-200"
+                        onClick={() => openTableTab(sessionId, db, tbl.name)}
+                        onContextMenu={e => handleTableContext(e, db, tbl.name)}
+                        title={`${db}.${tbl.name}`}
+                      >
+                        <Table2 size={11} className="flex-shrink-0 text-slate-500" />
+                        <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>
+                      </button>
+                      <button
+                        type="button"
                         title={starred ? 'Remove bookmark' : 'Bookmark table'}
-                        onClick={e => { e.stopPropagation(); toggleBookmark(db, tbl.name) }}
-                        className={`p-0.5 transition-colors ${starred ? 'text-yellow-400' : 'opacity-0 group-hover:opacity-100 text-slate-500 hover:text-yellow-400'}`}
+                        aria-label={`${starred ? 'Remove bookmark from' : 'Bookmark'} ${db}.${tbl.name}`}
+                        onClick={() => toggleBookmark(db, tbl.name)}
+                        className={`mr-1 rounded p-1 transition-colors hover:text-yellow-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${starred ? 'text-yellow-400' : 'text-slate-500 opacity-0 focus:opacity-100 group-hover:opacity-100'}`}
                       >
                         <Star size={10} fill={starred ? 'currentColor' : 'none'} />
-                      </span>
-                    </button>
+                      </button>
+                    </div>
                   )
                 })}
               </div>
@@ -254,6 +280,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
 
       {contextMenu && (
         <div
+          ref={menuRef}
+          role="menu"
+          aria-label="Schema actions"
           className="fixed bg-surface-800 border border-surface-700 rounded shadow-lg z-50 py-1 w-44"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={e => e.stopPropagation()}
@@ -261,18 +290,21 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           {contextMenu.table ? (
             <>
               <button
+                role="menuitem"
                 className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
                 onClick={() => { openTableTab(sessionId, contextMenu.db, contextMenu.table!); closeMenu() }}
               >
                 <Table2 size={12} /> Open Table
               </button>
               <button
+                role="menuitem"
                 className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
                 onClick={() => { openQueryTab(sessionId, contextMenu.db); closeMenu() }}
               >
                 <Terminal size={12} /> New Query
               </button>
               <button
+                role="menuitem"
                 className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
                 onClick={() => { setImportTarget({ db: contextMenu.db, table: contextMenu.table! }); closeMenu() }}
               >
@@ -280,20 +312,23 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
               </button>
               <hr className="border-surface-700 my-1" />
               <button
+                role="menuitem"
                 className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-yellow-400"
-                onClick={() => truncateTable(contextMenu.db, contextMenu.table!)}
+                onClick={() => { setDestructiveTarget({ action: 'truncate', db: contextMenu.db, table: contextMenu.table! }); closeMenu() }}
               >
                 <Scissors size={12} /> Truncate
               </button>
               <button
+                role="menuitem"
                 className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-red-400"
-                onClick={() => dropTable(contextMenu.db, contextMenu.table!)}
+                onClick={() => { setDestructiveTarget({ action: 'drop', db: contextMenu.db, table: contextMenu.table! }); closeMenu() }}
               >
                 <Trash2 size={12} /> Drop Table
               </button>
             </>
           ) : (
             <button
+              role="menuitem"
               className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
               onClick={() => { openQueryTab(sessionId, contextMenu.db); closeMenu() }}
             >
@@ -312,6 +347,17 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           table={importTarget.table}
         />
       )}
+      <ConfirmDialog
+        open={Boolean(destructiveTarget)}
+        title={destructiveTarget?.action === 'drop' ? 'Drop Table' : 'Truncate Table'}
+        message={destructiveTarget?.action === 'drop'
+          ? `Drop ${destructiveTarget.db}.${destructiveTarget.table}? This cannot be undone.`
+          : `Truncate ${destructiveTarget?.db}.${destructiveTarget?.table}? All rows will be deleted.`}
+        confirmLabel={destructiveTarget?.action === 'drop' ? 'Drop Table' : 'Truncate Table'}
+        danger
+        onConfirm={confirmDestructiveAction}
+        onClose={() => setDestructiveTarget(null)}
+      />
     </div>
   )
 }

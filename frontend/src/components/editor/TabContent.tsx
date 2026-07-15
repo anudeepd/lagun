@@ -8,10 +8,11 @@ import { useQueryLogStore } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
-import ResultGrid, { buildResultGridRowId, type DuplicateRowMode, type InsertDraftAnchor, type ResultGridHandle } from './ResultGrid'
+import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
+import Modal from '../ui/Modal'
 import ReactCodeMirror from '@uiw/react-codemirror'
 import { sql, MySQL } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -22,10 +23,21 @@ import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sq
 import { isMac } from '../../utils/platform'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
+const ResultGrid = lazy(() => import('./ResultGrid'))
 const ExportDialog = lazy(() => import('../table/ExportDialog'))
 const ImportDialog = lazy(() => import('../table/ImportDialog'))
 const BulkConfirmDialog = lazy(() => import('./BulkConfirmDialog'))
 const BulkResultSummary = lazy(() => import('./BulkResultSummary'))
+
+function buildResultGridRowId(
+  row: Record<string, unknown>,
+  rowIdx: number,
+  keyColumns: string[],
+  includeRowIndexInId = keyColumns.length === 0,
+): string {
+  const keyValues = keyColumns.map(column => String(row[column] ?? '')).join('\x00')
+  return includeRowIndexInId ? `${keyValues}\x00${rowIdx}` : keyValues || String(rowIdx)
+}
 
 const KEY_WORD_WRAP = 'lagun-query-word-wrap'
 const KEY_FILTER_WORD_WRAP = 'lagun-data-filter-word-wrap'
@@ -271,20 +283,27 @@ interface DataExportContext {
 function QueryTab({ tab }: Props) {
   const storeSql = useTabStore(s => s.tabs.find(t => t.id === tab.id)?.sql ?? '')
   const setSqlStore = useTabStore(s => s.setSql)
+  const setTabDirty = useTabStore(s => s.setTabDirty)
   const [sql, setSql] = useState(storeSql)
   const sqlRef = useRef(sql)
   sqlRef.current = sql
 
   // Debounce sync to store (and thus localStorage) — 500ms
   useEffect(() => {
-    const timer = setTimeout(() => setSqlStore(tab.id, sql), 500)
+    const timer = setTimeout(() => {
+      setSqlStore(tab.id, sql)
+      setTabDirty(tab.id, Boolean(sql.trim()))
+    }, 500)
     return () => clearTimeout(timer)
-  }, [sql, tab.id, setSqlStore])
+  }, [sql, tab.id, setSqlStore, setTabDirty])
 
   // Flush on unmount so switching tabs doesn't lose the latest keystroke
   useEffect(() => {
-    return () => { setSqlStore(tab.id, sqlRef.current) }
-  }, [tab.id, setSqlStore])
+    return () => {
+      setSqlStore(tab.id, sqlRef.current)
+      setTabDirty(tab.id, Boolean(sqlRef.current.trim()))
+    }
+  }, [tab.id, setSqlStore, setTabDirty])
 
   // Re-initialize local state when switching to a different tab's content
   // storeSql intentionally omitted — adding it would overwrite local edits on every debounce sync
@@ -745,12 +764,14 @@ function QueryTab({ tab }: Props) {
                 </Suspense>
               </div>
             ) : (
-              <ResultGrid
-                key={results[resultIdx].id}
-                ref={gridRef}
-                result={results[resultIdx].result}
-                onSortActiveChange={setResultSortActive}
-              />
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-500">Loading results…</div>}>
+                <ResultGrid
+                  key={results[resultIdx].id}
+                  ref={gridRef}
+                  result={results[resultIdx].result}
+                  onSortActiveChange={setResultSortActive}
+                />
+              </Suspense>
             )
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
@@ -852,6 +873,7 @@ function TableTab({ tab }: Props) {
   const [dataSortActive, setDataSortActive] = useState(false)
   const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
+  const [showChangeReview, setShowChangeReview] = useState(false)
   const [globalSearch, setGlobalSearch] = useState(initialDataState.globalSearch)
   const [whereFilter, setWhereFilter] = useState(initialDataState.whereFilter)
   const [appliedWhere, setAppliedWhere] = useState(initialDataState.appliedWhere)
@@ -880,6 +902,7 @@ function TableTab({ tab }: Props) {
   const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
   const setTableDataState = useTabStore(s => s.setTableDataState)
+  const setTabDirty = useTabStore(s => s.setTabDirty)
   const { invalidateTablesForDb, loadTables } = useSchemaStore()
 
   const pkColumns = useMemo(() =>
@@ -984,6 +1007,10 @@ function TableTab({ tab }: Props) {
     // tab.dataState intentionally omitted — adding it would reset table state on every filter/limit change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab.id, tab.sessionId, tab.database, tab.table])
+
+  useEffect(() => {
+    setTabDirty(tab.id, pendingChanges.size > 0 || insertDrafts.size > 0)
+  }, [tab.id, pendingChanges, insertDrafts, setTabDirty])
 
   useEffect(() => {
     setTableDataState(tab.id, { view })
@@ -1211,6 +1238,11 @@ function TableTab({ tab }: Props) {
     invalidateTablesForDb(tab.sessionId!, tab.database!)
     loadTables(tab.sessionId!, tab.database!)
     loadData()
+  }
+
+  const confirmApplyChanges = async () => {
+    setShowChangeReview(false)
+    await handleApplyChanges()
   }
 
   const handleDiscardChanges = () => {
@@ -1517,7 +1549,7 @@ function TableTab({ tab }: Props) {
         {view === 'data' && (pendingChanges.size > 0 || insertDrafts.size > 0) && (
           <>
             <button
-              onClick={handleApplyChanges}
+              onClick={() => setShowChangeReview(true)}
               className="flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-700 hover:bg-amber-600 text-white rounded transition-colors"
             >
               Apply ({pendingChanges.size + insertDrafts.size})
@@ -1669,25 +1701,27 @@ function TableTab({ tab }: Props) {
               Loading {tab.table}…
             </div>
           ) : result ? (
-            <ResultGrid
-              ref={gridRef}
-              result={result}
-              editable={columns.length > 0 && !initialLoading && !refreshing}
-              primaryKeyColumns={rowKeyColumns}
-              includeRowIndexInId={pkColumns.length === 0}
-              onCellEdit={handleCellEdit}
-              onDeleteRows={handleDeleteRows}
-              onDuplicateRow={handleDuplicateRow}
-              onCreateEmptyRow={handleCreateEmptyRow}
-              selectable={true}
-              onSelectionChange={setSelectedRows}
-              columns={columns}
-              hiddenColumns={hiddenColumns}
-              pendingChanges={pendingChanges}
-              insertDrafts={insertDrafts}
-              insertDraftAnchors={insertDraftAnchors}
-              onSortActiveChange={setDataSortActive}
-            />
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-500">Loading data grid…</div>}>
+              <ResultGrid
+                ref={gridRef}
+                result={result}
+                editable={columns.length > 0 && !initialLoading && !refreshing}
+                primaryKeyColumns={rowKeyColumns}
+                includeRowIndexInId={pkColumns.length === 0}
+                onCellEdit={handleCellEdit}
+                onDeleteRows={handleDeleteRows}
+                onDuplicateRow={handleDuplicateRow}
+                onCreateEmptyRow={handleCreateEmptyRow}
+                selectable={true}
+                onSelectionChange={setSelectedRows}
+                columns={columns}
+                hiddenColumns={hiddenColumns}
+                pendingChanges={pendingChanges}
+                insertDrafts={insertDrafts}
+                insertDraftAnchors={insertDraftAnchors}
+                onSortActiveChange={setDataSortActive}
+              />
+            </Suspense>
           ) : (
             <div className="flex items-center justify-center h-full text-slate-600 text-sm">
               No data loaded
@@ -1737,6 +1771,36 @@ function TableTab({ tab }: Props) {
           />
         </Suspense>
       )}
+      <Modal
+        open={showChangeReview}
+        onClose={() => setShowChangeReview(false)}
+        title="Review Staged Changes"
+        footer={(
+          <>
+            <Button variant="ghost" onClick={() => setShowChangeReview(false)}>Cancel</Button>
+            <Button variant="primary" onClick={confirmApplyChanges}>Apply Changes</Button>
+          </>
+        )}
+      >
+        <div className="space-y-4 text-sm text-slate-300">
+          <p>Changes run one row at a time. Lagun stops at first failed row; already applied rows remain changed.</p>
+          <dl className="grid grid-cols-2 gap-2 rounded-md border border-surface-700 bg-surface-800 p-3 text-xs">
+            <div><dt className="text-slate-500">Rows to update</dt><dd className="mt-1 font-mono text-slate-100">{pendingChanges.size}</dd></div>
+            <div><dt className="text-slate-500">Rows to insert</dt><dd className="mt-1 font-mono text-slate-100">{insertDrafts.size}</dd></div>
+          </dl>
+          {pendingChanges.size > 0 && (
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Changed columns</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[...new Set([...pendingChanges.values()].flatMap(change => Object.keys(change.changes)))].map(column => (
+                  <span key={column} className="rounded border border-surface-700 bg-surface-800 px-2 py-1 font-mono text-xs text-slate-200">{column}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="rounded border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">Review complete before applying. This action cannot be automatically undone.</p>
+        </div>
+      </Modal>
     </div>
   )
 }

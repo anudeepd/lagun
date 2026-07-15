@@ -27,8 +27,10 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
             className
           )}
           {...props}
+          aria-invalid={error ? true : props['aria-invalid']}
+          aria-describedby={error ? `${inputId}-error` : props['aria-describedby']}
         />
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p id={`${inputId}-error`} role="alert" className="text-xs text-red-400">{error}</p>}
       </div>
     )
   }

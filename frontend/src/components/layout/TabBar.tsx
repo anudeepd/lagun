@@ -5,6 +5,9 @@ import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
 import type { Tab } from '../../types'
 import ConfirmDialog from '../ui/ConfirmDialog'
+import Modal from '../ui/Modal'
+import Button from '../ui/Button'
+import useMenuKeyboard from '../../hooks/useMenuKeyboard'
 
 interface ContextMenuState {
   tabId: string
@@ -19,7 +22,11 @@ export default function TabBar() {
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
   const [closeTargetId, setCloseTargetId] = useState<string | null>(null)
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
+  const [renameTargetId, setRenameTargetId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const contextMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!activeTabId) return
@@ -38,16 +45,26 @@ export default function TabBar() {
     }
   }, [contextMenu])
 
-  // Close on escape
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setContextMenu(null) }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [setContextMenu])
-
   const handleContextMenu = (e: React.MouseEvent, tabId: string) => {
     e.preventDefault()
+    tabButtonRefs.current[tabId]?.focus()
     setContextMenu({ tabId, x: e.clientX, y: e.clientY })
+  }
+
+  const closeContextMenu = () => setContextMenu(null)
+  useMenuKeyboard(contextMenuRef, closeContextMenu, Boolean(contextMenu))
+
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.length
+    if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.length) % tabs.length
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = tabs.length - 1
+    if (nextIndex === null) return
+    event.preventDefault()
+    const nextTab = tabs[nextIndex]
+    setActiveTab(nextTab.id)
+    window.requestAnimationFrame(() => tabButtonRefs.current[nextTab.id]?.focus())
   }
 
   const handleDragStart = (e: React.DragEvent, tabId: string) => {
@@ -86,8 +103,25 @@ export default function TabBar() {
   const getCloseTitle = (tab: Tab) => `Close ${getTabTitle(tab).toLowerCase()}`
 
   const requestCloseTab = (tabId: string) => {
+    const tab = tabs.find(item => item.id === tabId)
     setContextMenu(null)
+    if (!tab?.dirty) {
+      closeTab(tabId)
+      return
+    }
     setCloseTargetId(tabId)
+  }
+
+  const openRenameDialog = (tab: Tab) => {
+    setContextMenu(null)
+    setRenameTargetId(tab.id)
+    setRenameValue(tab.label)
+  }
+
+  const saveRename = () => {
+    const name = renameValue.trim()
+    if (renameTargetId && name) renameTab(renameTargetId, name)
+    setRenameTargetId(null)
   }
 
   const handleConfirmCloseTab = () => {
@@ -101,11 +135,17 @@ export default function TabBar() {
     setConfirmCloseAll(false)
   }
 
+  const hasDirtyTabs = tabs.some(tab => tab.dirty)
+  const requestCloseAll = () => {
+    if (hasDirtyTabs) setConfirmCloseAll(true)
+    else closeAllTabs()
+  }
+
   return (
     <div className="flex h-[46px] items-center bg-surface-900 border-b border-surface-800">
       <div className="flex-1 h-full overflow-hidden">
-        <div className="flex h-full items-center flex-nowrap overflow-x-scroll overflow-y-hidden space-x-1">
-          {tabs.map((tab) => (
+        <div role="tablist" aria-label="Open tabs" className="flex h-full items-center flex-nowrap overflow-x-scroll overflow-y-hidden space-x-1">
+          {tabs.map((tab, index) => (
             <div
               key={tab.id}
               ref={(element) => {
@@ -127,7 +167,15 @@ export default function TabBar() {
               )}
             >
               <button
+                ref={element => { tabButtonRefs.current[tab.id] = element }}
+                type="button"
+                role="tab"
+                id={`tab-${tab.id}`}
+                aria-selected={activeTabId === tab.id}
+                aria-controls={`tab-panel-${tab.id}`}
+                tabIndex={activeTabId === tab.id ? 0 : -1}
                 onClick={() => setActiveTab(tab.id)}
+                onKeyDown={event => handleTabKeyDown(event, index)}
                 title={getTabTitle(tab)}
                 className="flex items-center gap-1.5"
               >
@@ -135,19 +183,21 @@ export default function TabBar() {
                   ? <Terminal size={12} className="flex-shrink-0" />
                   : <Table size={12} className="flex-shrink-0" />
                 }
+                {tab.dirty && <span aria-label="Unsaved changes" className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />}
                 {tab.type === 'table' && tab.database && (
                   <span className="max-w-[72px] truncate text-[10px] text-slate-500">{tab.database}</span>
                 )}
                 <span className="truncate max-w-[120px]">{tab.type === 'table' ? tab.table ?? tab.label : tab.label}</span>
               </button>
-              <span
-                role="button"
-                onClick={(e) => { e.stopPropagation(); requestCloseTab(tab.id) }}
+              <button
+                type="button"
+                onClick={() => requestCloseTab(tab.id)}
                 title={getCloseTitle(tab)}
-                className="ml-0.5 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
+                aria-label={getCloseTitle(tab)}
+                className="ml-0.5 rounded p-1 opacity-0 transition-opacity hover:text-red-400 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 group-hover:opacity-100"
               >
                 <X size={10} />
-              </span>
+              </button>
             </div>
           ))}
         </div>
@@ -166,7 +216,7 @@ export default function TabBar() {
         )}
         {tabs.length > 0 && (
           <button
-            onClick={() => setConfirmCloseAll(true)}
+            onClick={requestCloseAll}
             title="Close all tabs"
             className="flex h-full items-center gap-1 px-3 text-xs text-slate-500 hover:text-red-400 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
           >
@@ -179,19 +229,17 @@ export default function TabBar() {
       {/* Context menu */}
       {contextMenu && currentTab && (
         <div
+          ref={contextMenuRef}
+          role="menu"
+          aria-label="Tab actions"
           className="fixed z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-36"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {currentTab.type === 'query' && (
             <button
+              role="menuitem"
               className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-300 hover:bg-surface-700 transition-colors"
-              onClick={() => {
-                setContextMenu(null)
-                const newLabel = prompt('Rename tab:', currentTab.label)
-                if (newLabel !== null && newLabel.trim() !== '') {
-                  renameTab(currentTab.id, newLabel.trim())
-                }
-              }}
+              onClick={() => openRenameDialog(currentTab)}
             >
               <Pencil size={12} />
               Rename
@@ -199,6 +247,7 @@ export default function TabBar() {
           )}
           <div className="my-1 border-t border-surface-700" />
           <button
+            role="menuitem"
             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-surface-700 transition-colors"
             onClick={() => requestCloseTab(currentTab.id)}
           >
@@ -216,10 +265,34 @@ export default function TabBar() {
         onConfirm={handleConfirmCloseTab}
         onClose={() => setCloseTargetId(null)}
       />
+      <Modal
+        open={renameTargetId !== null}
+        onClose={() => setRenameTargetId(null)}
+        title="Rename Tab"
+        footer={(
+          <>
+            <Button variant="ghost" onClick={() => setRenameTargetId(null)}>Cancel</Button>
+            <Button variant="primary" onClick={saveRename} disabled={!renameValue.trim()}>Rename</Button>
+          </>
+        )}
+      >
+        <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+          Tab name
+          <input
+            value={renameValue}
+            onChange={event => setRenameValue(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter') saveRename() }}
+            autoFocus
+            className="rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm font-normal normal-case text-slate-100 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+          />
+        </label>
+      </Modal>
       <ConfirmDialog
         open={confirmCloseAll}
         title="Close All Tabs"
-        message={`Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'}? Unsaved editor text or table changes will be discarded.`}
+        message={hasDirtyTabs
+          ? `Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'}? Unsaved editor text or table changes will be discarded.`
+          : `Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'}?`}
         confirmLabel="Close All"
         danger
         onConfirm={handleConfirmCloseAll}

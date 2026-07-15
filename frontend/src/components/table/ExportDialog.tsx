@@ -7,6 +7,7 @@ import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
+import { showToast } from '../../utils/toast'
 
 interface Props {
   open: boolean
@@ -136,6 +137,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const [exporting, setExporting] = useState(false)
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // CSV advanced options
   const [showAdvanced, setShowAdvanced] = useState(false)
@@ -186,6 +188,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
 
   const handleExport = async () => {
     setExporting(true)
+    setError(null)
     try {
       let blob: Blob
       let filename: string
@@ -213,7 +216,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       setTimeout(() => URL.revokeObjectURL(url), 1000)
       onClose()
     } catch (e) {
-      alert(`Export failed: ${e}`)
+      const message = `Export failed: ${e}`
+      setError(message)
+      showToast(message, 'error')
     } finally {
       setExporting(false)
     }
@@ -221,6 +226,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
 
   const handleCopy = async () => {
     setCopying(true)
+    setError(null)
     try {
       let text: string
       if (rowsOverride) {
@@ -239,7 +245,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch (e) {
-      alert(`Copy failed: ${e}`)
+      const message = `Copy failed: ${e}`
+      setError(message)
+      showToast(message, 'error')
     } finally {
       setCopying(false)
     }
@@ -257,12 +265,13 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             {copied ? 'Copied! ✓' : copying ? 'Copying…' : 'Copy'}
           </Button>
           <Button variant="primary" onClick={handleExport} disabled={exporting || copying}>
-            {exporting ? 'Exporting…' : 'Download'}
+            {exporting ? 'Exporting…' : error ? 'Retry Download' : 'Download'}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-4">
+        {error && <p role="alert" className="rounded border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
         <Select
           label="Format"
           value={format}

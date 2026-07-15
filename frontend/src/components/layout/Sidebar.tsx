@@ -37,7 +37,7 @@ export default function Sidebar() {
             size="sm"
             onClick={() => setShowImport(true)}
             title="Import connections"
-            className="p-1"
+            className="lagun-icon-button p-1"
           >
             <Upload size={14} />
           </Button>
@@ -46,7 +46,7 @@ export default function Sidebar() {
             size="sm"
             onClick={() => setShowExport(true)}
             title="Export connections"
-            className="p-1"
+            className="lagun-icon-button p-1"
           >
             <Download size={14} />
           </Button>
@@ -55,7 +55,7 @@ export default function Sidebar() {
             size="sm"
             onClick={() => setShowForm(true)}
             title="New connection"
-            className="p-1"
+            className="lagun-icon-button p-1"
           >
             <Plus size={14} />
           </Button>
@@ -65,7 +65,7 @@ export default function Sidebar() {
               size="sm"
               onClick={submitLogout}
               title="Logout"
-              className="p-1 bg-red-900/30 text-red-300 hover:bg-red-900/50 hover:text-red-200 border border-red-800/60"
+              className="lagun-icon-button p-1 bg-red-900/30 text-red-300 hover:bg-red-900/50 hover:text-red-200 border border-red-800/60"
             >
               <LogOut size={14} />
             </Button>

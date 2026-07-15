@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import Modal from './Modal'
 import Button from './Button'
 
@@ -22,11 +23,14 @@ export default function ConfirmDialog({
   onConfirm,
   onClose,
 }: ConfirmDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null)
+
   return (
     <Modal
       open={open}
       onClose={onClose}
       title={title}
+      initialFocusRef={cancelRef}
       footer={
         <>
           <Button
@@ -36,7 +40,7 @@ export default function ConfirmDialog({
           >
             {confirmLabel}
           </Button>
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button ref={cancelRef} type="button" variant="ghost" onClick={onClose}>
             {cancelLabel}
           </Button>
         </>
