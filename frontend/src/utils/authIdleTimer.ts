@@ -7,6 +7,11 @@ const AUTH_ACTIVITY_EVENTS = [
   'wheel',
 ] as const
 
+const AUTH_RESUME_EVENTS = [
+  'focus',
+  'pageshow',
+] as const
+
 interface AuthIdleTimerOptions {
   enabled: boolean
   idleTimeoutSeconds: number
@@ -24,21 +29,54 @@ export function startAuthIdleTimer({
 
   let timer: ReturnType<typeof target.setTimeout> | undefined
   const timeoutMs = idleTimeoutSeconds * 1000 + AUTH_IDLE_GRACE_MS
+  let deadline = Date.now() + timeoutMs
+  let expired = false
 
-  const schedule = () => {
+  const expire = () => {
+    if (expired) return
+    expired = true
     if (timer !== undefined) target.clearTimeout(timer)
-    timer = target.setTimeout(onIdle, timeoutMs)
+    timer = undefined
+    onIdle()
+  }
+
+  const armTimer = () => {
+    if (timer !== undefined) target.clearTimeout(timer)
+    timer = target.setTimeout(expire, Math.max(0, deadline - Date.now()))
+  }
+
+  const recordActivity = () => {
+    if (expired) return
+    const now = Date.now()
+    if (now >= deadline) {
+      expire()
+      return
+    }
+    deadline = now + timeoutMs
+    armTimer()
+  }
+
+  const checkDeadline = () => {
+    if (!expired && Date.now() >= deadline) expire()
   }
 
   for (const eventName of AUTH_ACTIVITY_EVENTS) {
-    target.addEventListener(eventName, schedule, { passive: true })
+    target.addEventListener(eventName, recordActivity, { passive: true })
   }
-  schedule()
+  for (const eventName of AUTH_RESUME_EVENTS) {
+    target.addEventListener(eventName, checkDeadline, { passive: true })
+  }
+  target.document.addEventListener('visibilitychange', checkDeadline, { passive: true })
+  armTimer()
 
   return () => {
     if (timer !== undefined) target.clearTimeout(timer)
     for (const eventName of AUTH_ACTIVITY_EVENTS) {
-      target.removeEventListener(eventName, schedule)
+      target.removeEventListener(eventName, recordActivity)
     }
+    for (const eventName of AUTH_RESUME_EVENTS) {
+      target.removeEventListener(eventName, checkDeadline)
+    }
+    target.document.removeEventListener('visibilitychange', checkDeadline)
   }
 }

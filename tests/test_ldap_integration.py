@@ -41,4 +41,6 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert '<style nonce="{{ csrf_nonce }}">' in template
     assert '<script nonce="{{ csrf_nonce }}">' in template
     assert '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">' in template
+    assert 'id="password-toggle" aria-label="Show password"' in template
+    assert "password.type = visible ? 'password' : 'text';" in template
     assert 'style="' not in template

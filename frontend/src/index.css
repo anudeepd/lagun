@@ -39,6 +39,13 @@
   * {
     box-sizing: border-box;
   }
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
   body {
     margin: 0;
     font-family: ui-sans-serif, system-ui, sans-serif;

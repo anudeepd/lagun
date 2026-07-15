@@ -156,6 +156,9 @@ export default function TabBar() {
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, tab.id)}
               onDragEnd={handleDragEnd}
+              onMouseDown={(e) => {
+                if (e.button === 2) e.preventDefault()
+              }}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
               title={getTabTitle(tab)}
               className={clsx(

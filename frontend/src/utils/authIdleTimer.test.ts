@@ -47,6 +47,34 @@ describe('startAuthIdleTimer', () => {
     cleanup()
   })
 
+  it('expires instead of resetting when background timer delivery is delayed', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const onIdle = vi.fn()
+
+    startAuthIdleTimer({ enabled: true, idleTimeoutSeconds: 2, onIdle })
+
+    // Model a throttled background tab: wall-clock time advances past the
+    // deadline before the queued timeout callback gets a chance to run.
+    vi.setSystemTime(3_001)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'A' }))
+
+    expect(onIdle).toHaveBeenCalledOnce()
+  })
+
+  it('checks an overdue deadline as soon as the page regains focus', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const onIdle = vi.fn()
+
+    startAuthIdleTimer({ enabled: true, idleTimeoutSeconds: 2, onIdle })
+
+    vi.setSystemTime(3_001)
+    window.dispatchEvent(new Event('focus'))
+
+    expect(onIdle).toHaveBeenCalledOnce()
+  })
+
   it('removes activity listeners and pending timers on cleanup', () => {
     vi.useFakeTimers()
     const onIdle = vi.fn()
