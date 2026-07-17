@@ -67,12 +67,18 @@ export default function AppLayout() {
         />
       )}
       {/* Left sidebar */}
-      <div style={{ width: sidebarWidth }} className={`fixed inset-y-0 left-0 z-40 flex min-h-0 max-w-[85vw] transition-transform duration-200 lg:static lg:max-w-[45vw] lg:translate-x-0 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div style={{ width: sidebarWidth }} className={`fixed inset-y-0 left-0 z-40 flex min-h-0 max-w-[85vw] border-r border-surface-800 transition-transform duration-200 lg:relative lg:inset-auto lg:max-w-[45vw] lg:translate-x-0 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar />
         <div
           onMouseDown={handleResizeMouseDown}
-          className="w-1 flex-shrink-0 bg-surface-800 hover:bg-brand-500 cursor-col-resize transition-colors"
-        />
+          title="Resize sidebar"
+          role="separator"
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          className="group absolute inset-y-0 right-0 z-10 hidden w-2 translate-x-1/2 cursor-col-resize lg:block"
+        >
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-brand-500" />
+        </div>
       </div>
 
       {/* Main area */}

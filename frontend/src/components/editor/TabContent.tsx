@@ -13,6 +13,7 @@ import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
 import Modal from '../ui/Modal'
+import ConfirmDialog from '../ui/ConfirmDialog'
 import ReactCodeMirror from '@uiw/react-codemirror'
 import { sql, MySQL } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -874,6 +875,7 @@ function TableTab({ tab }: Props) {
   const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
   const [showChangeReview, setShowChangeReview] = useState(false)
+  const [deleteRowsTarget, setDeleteRowsTarget] = useState<Record<string, unknown>[] | null>(null)
   const [globalSearch, setGlobalSearch] = useState(initialDataState.globalSearch)
   const [whereFilter, setWhereFilter] = useState(initialDataState.whereFilter)
   const [appliedWhere, setAppliedWhere] = useState(initialDataState.appliedWhere)
@@ -1317,6 +1319,17 @@ function TableTab({ tab }: Props) {
     setTimeout(() => setStatusMsg(null), 4000)
   }
 
+  const requestDeleteRows = (rows: Record<string, unknown>[]) => {
+    setDeleteRowsTarget(rows)
+  }
+
+  const confirmDeleteRows = () => {
+    if (!deleteRowsTarget) return
+    const rows = deleteRowsTarget
+    setDeleteRowsTarget(null)
+    void handleDeleteRows(rows)
+  }
+
   const handleLimitChange = (newLimit: number) => {
     setLimit(newLimit)
     if (result) loadData(newLimit)
@@ -1709,7 +1722,7 @@ function TableTab({ tab }: Props) {
                 primaryKeyColumns={rowKeyColumns}
                 includeRowIndexInId={pkColumns.length === 0}
                 onCellEdit={handleCellEdit}
-                onDeleteRows={handleDeleteRows}
+                onDeleteRows={requestDeleteRows}
                 onDuplicateRow={handleDuplicateRow}
                 onCreateEmptyRow={handleCreateEmptyRow}
                 selectable={true}
@@ -1771,6 +1784,17 @@ function TableTab({ tab }: Props) {
           />
         </Suspense>
       )}
+      <ConfirmDialog
+        open={deleteRowsTarget !== null}
+        title={deleteRowsTarget?.length === 1 ? 'Delete Row' : 'Delete Rows'}
+        message={deleteRowsTarget?.length === 1
+          ? 'Delete this row permanently? This action cannot be undone.'
+          : `Delete ${deleteRowsTarget?.length ?? 0} rows permanently? This action cannot be undone.`}
+        confirmLabel={deleteRowsTarget?.length === 1 ? 'Delete Row' : 'Delete Rows'}
+        danger
+        onConfirm={confirmDeleteRows}
+        onClose={() => setDeleteRowsTarget(null)}
+      />
       <Modal
         open={showChangeReview}
         onClose={() => setShowChangeReview(false)}

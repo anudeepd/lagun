@@ -78,6 +78,7 @@ test.describe('Deletion count refresh', () => {
     const deleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: 'Delete 2 rows' })
     await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
     await deleteBtn.click({ force: true })
+    await page.getByRole('button', { name: 'Delete Rows' }).click()
 
     // Context menu closes, optimistic update fires immediately.
     // Assert the ResultToolbar count shows TOTAL_ROWS - 2
@@ -102,6 +103,7 @@ test.describe('Deletion count refresh', () => {
     const firstDeleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: /Delete/ })
     await expect(firstDeleteBtn).toBeVisible({ timeout: 3_000 })
     await firstDeleteBtn.click()
+    await page.getByRole('button', { name: 'Delete Rows' }).click()
 
     // Verify count dropped by 2 after first deletion
     const afterFirst = TOTAL_ROWS - 2
@@ -128,6 +130,7 @@ test.describe('Deletion count refresh', () => {
     const secondDeleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: 'Delete 2 rows' })
     await expect(secondDeleteBtn).toBeVisible({ timeout: 3_000 })
     await secondDeleteBtn.click()
+    await page.getByRole('button', { name: 'Delete Rows' }).click()
 
     // Assert final count is original - 4 (both deletions applied)
     const expectedFinal = TOTAL_ROWS - 4
