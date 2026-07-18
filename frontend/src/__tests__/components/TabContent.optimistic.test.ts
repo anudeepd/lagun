@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ColumnInfo, QueryResult } from '../../types'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldDebounceDataSearch, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -428,6 +428,17 @@ describe('data tab persisted filter state', () => {
   it('opens the filter bar when old saved state has filter text but no bar flag', () => {
     expect(normalizeDataTabState({ whereFilter: 'id = 1' }).showFilterBar).toBe(true)
     expect(normalizeDataTabState({ appliedWhere: 'id = 1' }).showFilterBar).toBe(true)
+  })
+})
+
+describe('data tab search loading', () => {
+  it('does not schedule a second load when only the view changes to Data', () => {
+    expect(shouldDebounceDataSearch('', '', 'data')).toBe(false)
+  })
+
+  it('debounces a real search edit only while Data is visible', () => {
+    expect(shouldDebounceDataSearch('', 'alice', 'data')).toBe(true)
+    expect(shouldDebounceDataSearch('', 'alice', 'schema')).toBe(false)
   })
 })
 

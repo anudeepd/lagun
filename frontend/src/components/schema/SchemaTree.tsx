@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, ChevronDown, Database, Table2, Terminal, RefreshCw, Trash2, Scissors, Upload, Search, X, Star } from 'lucide-react'
+import { ChevronRight, Database, Table2, Terminal, Trash2, Scissors, Upload, Search, X, Star } from 'lucide-react'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useTabStore } from '../../store/tabStore'
 import { api } from '../../api/client'
@@ -8,6 +8,11 @@ import ImportDialog from '../table/ImportDialog'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { showToast } from '../../utils/toast'
 import useMenuKeyboard from '../../hooks/useMenuKeyboard'
+import Spinner from '../ui/Spinner'
+import RefreshIcon from '../ui/RefreshIcon'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 interface Props {
   sessionId: string
@@ -42,7 +47,7 @@ function useBookmarks(sessionId: string) {
 }
 
 export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
-  const { databases, loadDatabases, loadTables, tables, invalidateSession } = useSchemaStore()
+  const { databases, loadDatabases, loadTables, tables, invalidateSession, loadingDbs, loadingTables } = useSchemaStore()
   const { openTableTab, openQueryTab } = useTabStore()
   const [expandedDbs, setExpandedDbs] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
@@ -79,10 +84,19 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     setQuery('')
   }, [sessionId])
 
-  const refresh = () => {
-    invalidateSession(sessionId)
-    loadDatabases(sessionId)
+  const refresh = async () => {
+    const openDatabases = [...expandedDbs]
+    // Close visible groups while their contents refresh, then restore them so
+    // the existing grid-row transition communicates that fresh tables arrived.
     setExpandedDbs(new Set())
+    invalidateSession(sessionId)
+    const refreshedDatabases = await loadDatabases(sessionId)
+    await Promise.all(
+      openDatabases
+        .filter(db => refreshedDatabases.includes(db))
+        .map(db => loadTables(sessionId, db)),
+    )
+    setExpandedDbs(new Set(openDatabases.filter(db => refreshedDatabases.includes(db))))
     setQuery('')
   }
 
@@ -182,16 +196,26 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       <div className="flex flex-shrink-0 items-center justify-between px-3 py-1">
         <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">Databases</span>
         <div className="flex items-center gap-1">
-          <button
+          <m.button
             onClick={handleToggleBookmarksOnly}
             title={showBookmarksOnly ? 'Show all tables' : 'Show bookmarks only'}
+            whileTap={{ scale: 0.78, rotate: -12 }}
+            animate={{ scale: showBookmarksOnly ? 1.12 : 1, rotate: showBookmarksOnly ? 8 : 0 }}
+            transition={surfaceTransition}
             className={`p-0.5 transition-colors ${showBookmarksOnly ? 'text-yellow-400' : 'text-slate-500 hover:text-slate-300'}`}
           >
             <Star size={10} fill={showBookmarksOnly ? 'currentColor' : 'none'} />
-          </button>
-          <button onClick={refresh} className="p-0.5 text-slate-500 hover:text-slate-300 transition-colors">
-            <RefreshCw size={10} />
-          </button>
+          </m.button>
+          <m.button
+            onClick={refresh}
+            whileTap={{ scale: 0.9 }}
+            transition={surfaceTransition}
+            disabled={loadingDbs.has(sessionId)}
+            className="rounded p-0.5 text-slate-500 hover:text-slate-300 transition-colors disabled:cursor-wait"
+            aria-label="Refresh databases"
+          >
+            <RefreshIcon refreshing={loadingDbs.has(sessionId)} size={10} />
+          </m.button>
         </div>
       </div>
 
@@ -202,6 +226,12 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             type="text"
             value={query}
             onChange={e => handleQueryChange(e.target.value)}
+            onKeyDown={e => {
+              if (e.key !== 'Escape') return
+              e.preventDefault()
+              setQuery('')
+              e.currentTarget.blur()
+            }}
             placeholder={searchPlaceholder}
             className="bg-transparent text-xs text-slate-300 placeholder-slate-600 flex-1 outline-none min-w-0"
           />
@@ -214,6 +244,13 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <AnimatePresence initial={false} mode="wait">
+        <m.div
+          key={showBookmarksOnly ? 'bookmarks' : 'all-tables'}
+          initial={{ opacity: 0, x: showBookmarksOnly ? motionDistance.surface : -motionDistance.surface }}
+          animate={{ opacity: 1, x: 0, transition: surfaceTransition }}
+          exit={{ opacity: 0, x: showBookmarksOnly ? -motionDistance.surface : motionDistance.surface, transition: exitTransition }}
+        >
         {noBookmarks ? (
           <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
             <Star size={18} className="text-slate-700" />
@@ -232,7 +269,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                     onContextMenu={e => handleTableContext(e, db)}
                     title={db}
                   >
-                    {isOpen ? <ChevronDown size={12} className="flex-shrink-0" /> : <ChevronRight size={12} className="flex-shrink-0" />}
+                    {loadingTables.has(`${sessionId}/${db}`)
+                      ? <Spinner size="sm" className="flex-shrink-0" />
+                      : <ChevronRight size={12} className={`flex-shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`} />}
                     <Database size={12} className="flex-shrink-0 text-yellow-400" />
                     <span className="text-xs truncate flex-1 text-left">{db}</span>
                   </button>
@@ -247,7 +286,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                   </button>
                 </div>
 
-                {isOpen && tbls.map(tbl => {
+                <div className={`grid transition-[grid-template-rows,opacity] duration-200 ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+                <div className="overflow-hidden">
+                {tbls.map(tbl => {
                   const starred = isBookmarked(db, tbl.name)
                   return (
                     <div key={tbl.name} className="group flex items-center hover:bg-surface-800">
@@ -260,30 +301,41 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                         <Table2 size={11} className="flex-shrink-0 text-slate-500" />
                         <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>
                       </button>
-                      <button
+                      <m.button
                         type="button"
                         title={starred ? 'Remove bookmark' : 'Bookmark table'}
                         aria-label={`${starred ? 'Remove bookmark from' : 'Bookmark'} ${db}.${tbl.name}`}
                         onClick={() => toggleBookmark(db, tbl.name)}
+                        whileTap={{ scale: 0.7, rotate: -18 }}
+                        animate={{ scale: starred ? [1, 1.45, 1] : 1, rotate: starred ? [0, 14, 0] : 0 }}
+                        transition={{ duration: 0.28, ease: 'easeOut' }}
                         className={`mr-1 rounded p-1 transition-colors hover:text-yellow-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${starred ? 'text-yellow-400' : 'text-slate-500 opacity-0 focus:opacity-100 group-hover:opacity-100'}`}
                       >
                         <Star size={10} fill={starred ? 'currentColor' : 'none'} />
-                      </button>
+                      </m.button>
                     </div>
                   )
                 })}
+                </div>
+                </div>
               </div>
             )
           })
         )}
+        </m.div>
+        </AnimatePresence>
       </div>
 
+      <AnimatePresence>
       {contextMenu && (
-        <div
+        <m.div
           ref={menuRef}
           role="menu"
           aria-label="Schema actions"
-          className="fixed bg-surface-800 border border-surface-700 rounded shadow-lg z-50 py-1 w-44"
+          initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
+          animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
+          exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
+          className="fixed z-popover w-44 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={e => e.stopPropagation()}
         >
@@ -335,8 +387,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
               <Terminal size={12} /> New Query
             </button>
           )}
-        </div>
+        </m.div>
       )}
+      </AnimatePresence>
 
       {importTarget && (
         <ImportDialog

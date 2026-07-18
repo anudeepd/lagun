@@ -3,6 +3,7 @@ import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, Code2, Ke
 import SyntaxHighlighter from 'react-syntax-highlighter'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
 import Button from '../ui/Button'
+import { LoadingState } from '../ui/Spinner'
 import { clipboardWrite } from '../../utils/clipboard'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
@@ -135,9 +136,7 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
 
   if (loading && columns.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-        Loading schema…
-      </div>
+      <LoadingState label={`Loading columns, indexes, and table details for ${table}…`} />
     )
   }
 

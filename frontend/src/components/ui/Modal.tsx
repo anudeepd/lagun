@@ -1,6 +1,10 @@
 import { type ReactNode, type RefObject, useEffect, useId, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import { AnimatePresence, useIsPresent } from 'motion/react'
+import * as m from 'motion/react-m'
 import { X } from 'lucide-react'
 import Button from './Button'
+import { exitTransition, motionDistance, spatialTransition } from '../../motion/tokens'
 
 interface ModalProps {
   open: boolean
@@ -10,11 +14,64 @@ interface ModalProps {
   footer?: ReactNode
   width?: string
   initialFocusRef?: RefObject<HTMLElement>
+  restoreFocus?: boolean
 }
 
 const FOCUSABLE_SELECTORS = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
 
-export default function Modal({ open, onClose, title, children, footer, width = 'max-w-lg', initialFocusRef }: ModalProps) {
+interface ModalShellProps extends Omit<ModalProps, 'open' | 'restoreFocus'> {
+  dialogRef: RefObject<HTMLDivElement>
+  titleId: string
+}
+
+function ModalShell({ onClose, title, children, footer, width = 'max-w-lg', dialogRef, titleId }: ModalShellProps) {
+  const isPresent = useIsPresent()
+
+  useEffect(() => {
+    if (dialogRef.current) dialogRef.current.inert = !isPresent
+  }, [dialogRef, isPresent])
+
+  return (
+    <m.div
+      className={`fixed inset-0 z-modal flex items-center justify-center p-4 ${isPresent ? '' : 'pointer-events-none'}`}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: spatialTransition }}
+      exit={{ opacity: 0, transition: exitTransition }}
+      aria-hidden={!isPresent || undefined}
+    >
+      <m.div
+        initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
+        animate={{ opacity: 1, backdropFilter: 'blur(5px)', transition: { duration: 0.3 } }}
+        exit={{ opacity: 0, backdropFilter: 'blur(0px)', transition: exitTransition }}
+        className="absolute inset-0 bg-black/60"
+        aria-hidden="true"
+        onClick={isPresent ? onClose : undefined}
+      />
+      <m.div
+        ref={dialogRef}
+        role={isPresent ? 'dialog' : undefined}
+        aria-modal={isPresent ? 'true' : undefined}
+        aria-labelledby={isPresent ? titleId : undefined}
+        tabIndex={isPresent ? -1 : undefined}
+        initial={{ opacity: 0, y: motionDistance.spatial, scale: 0.9, rotateX: -3 }}
+        animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0, transition: spatialTransition }}
+        exit={{ opacity: 0, y: motionDistance.surface, scale: 0.94, transition: exitTransition }}
+        className={`relative flex max-h-[90vh] w-full flex-col rounded-lg border border-surface-700 bg-surface-900 shadow-2xl ${width}`}
+      >
+        <div className="flex items-center justify-between border-b border-surface-700 px-4 py-3">
+          <h2 id={titleId} className="text-sm font-semibold text-slate-100">{title}</h2>
+          <Button variant="ghost" size="sm" onClick={onClose} className="p-1" aria-label="Close dialog" disabled={!isPresent}>
+            <X size={14} />
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">{children}</div>
+        {footer && <div className="flex justify-end gap-2 border-t border-surface-700 px-4 py-3">{footer}</div>}
+      </m.div>
+    </m.div>
+  )
+}
+
+export default function Modal({ open, onClose, title, children, footer, width = 'max-w-lg', initialFocusRef, restoreFocus = true }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
   const onCloseRef = useRef(onClose)
@@ -70,38 +127,32 @@ export default function Modal({ open, onClose, title, children, footer, width = 
       window.cancelAnimationFrame(focusInitialTarget)
       window.removeEventListener('keydown', handler)
       const opener = openerRef.current
-      if (opener?.isConnected) {
+      if (restoreFocus && opener?.isConnected) {
         opener.focus()
       }
     }
-  }, [open, initialFocusRef])
+  }, [open, initialFocusRef, restoreFocus])
 
-  if (!open) return null
+  const overlayRoot = document.getElementById('lagun-overlays')
+  if (!overlayRoot) throw new Error('Missing #lagun-overlays portal root')
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" onClick={onClose} />
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className={`relative bg-surface-900 border border-surface-700 rounded-lg shadow-2xl w-full ${width} flex flex-col max-h-[90vh]`}
-      >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
-          <h2 id={titleId} className="text-sm font-semibold text-slate-100">{title}</h2>
-          <Button variant="ghost" size="sm" onClick={onClose} className="p-1" aria-label="Close dialog">
-            <X size={14} />
-          </Button>
-        </div>
-        <div className="p-4 overflow-y-auto flex-1">{children}</div>
-        {footer && (
-          <div className="px-4 py-3 border-t border-surface-700 flex justify-end gap-2">
-            {footer}
-          </div>
-        )}
-      </div>
-    </div>
+  return createPortal(
+    <AnimatePresence initial={false} mode="sync">
+      {open && (
+        <ModalShell
+          key="modal-shell"
+          onClose={onClose}
+          title={title}
+          footer={footer}
+          width={width}
+          initialFocusRef={initialFocusRef}
+          dialogRef={dialogRef}
+          titleId={titleId}
+        >
+          {children}
+        </ModalShell>
+      )}
+    </AnimatePresence>,
+    overlayRoot,
   )
 }

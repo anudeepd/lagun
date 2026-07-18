@@ -10,6 +10,9 @@ import SchemaTree from '../schema/SchemaTree'
 import Button from '../ui/Button'
 import Logo from '../ui/Logo'
 import { submitLdapLogout } from '../../utils/authRedirect'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, spatialTransition } from '../../motion/tokens'
 
 export default function Sidebar() {
   const { sessions, activeSessionId } = useSessionStore()
@@ -79,16 +82,26 @@ export default function Sidebar() {
       </div>
 
       {/* Schema tree for active session */}
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        <AnimatePresence initial={false} mode="sync">
         {activeSessionId && (() => {
           const activeSession = sessions.find(s => s.id === activeSessionId)
           return (
-            <SchemaTree
-              sessionId={activeSessionId}
-              selectedDatabases={activeSession?.selected_databases}
-            />
+            <m.div
+              key={activeSessionId}
+              initial={{ opacity: 0, x: motionDistance.surface }}
+              animate={{ opacity: 1, x: 0, transition: spatialTransition }}
+              exit={{ opacity: 0, x: -motionDistance.surface, transition: exitTransition }}
+              className="absolute inset-0"
+            >
+              <SchemaTree
+                sessionId={activeSessionId}
+                selectedDatabases={activeSession?.selected_databases}
+              />
+            </m.div>
           )
         })()}
+        </AnimatePresence>
       </div>
 
       {/* Modals */}

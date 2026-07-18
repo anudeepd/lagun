@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { CheckCircle, XCircle, Loader2, Database, RefreshCw } from 'lucide-react'
+import { CheckCircle, XCircle, Loader2, Database } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
+import RefreshIcon from '../ui/RefreshIcon'
 import { useSessionStore } from '../../store/sessionStore'
 import { api } from '../../api/client'
 import type { Session } from '../../types'
@@ -258,9 +259,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
                 title="Fetch databases from server"
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-surface-700 hover:bg-surface-600 text-slate-300 disabled:opacity-50"
               >
-                {fetchingDbs
-                  ? <Loader2 size={11} className="animate-spin" />
-                  : <RefreshCw size={11} />}
+                <RefreshIcon refreshing={fetchingDbs} size={11} />
                 Fetch
               </button>
             </div>

@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, AlertTriangle, CheckCircle, XCircle, Ban } from 'lucide-react'
 import type { ScriptQueryResult } from '../../types'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, surfaceTransition } from '../../motion/tokens'
 
 interface BulkResultSummaryProps {
   result: ScriptQueryResult
@@ -69,8 +72,9 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
         </button>
       </div>
 
+      <AnimatePresence initial={false}>
       {expanded && (
-        <div className="border-t border-surface-700 px-4 py-3 space-y-3 text-xs">
+        <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto', transition: surfaceTransition }} exit={{ opacity: 0, height: 0, transition: exitTransition }} className="overflow-hidden border-t border-surface-700 px-4 py-3 space-y-3 text-xs">
           <div className="grid grid-cols-2 gap-2 text-slate-400">
             <div>Mode: <span className="text-slate-200">one transaction</span></div>
             <div>Statements: <span className="text-slate-200">{result.statements_executed.toLocaleString()}</span></div>
@@ -136,8 +140,9 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
               </div>
             )
           })()}
-        </div>
+        </m.div>
       )}
+      </AnimatePresence>
     </div>
   )
 }

@@ -16,3 +16,20 @@ export default function Spinner({ size = 'md', className }: { size?: 'sm' | 'md'
     </svg>
   )
 }
+
+export function LoadingState({ label, compact = false, className }: { label: string; compact?: boolean; className?: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={clsx(
+        'flex items-center justify-center text-slate-500',
+        compact ? 'gap-2 text-xs' : 'h-full flex-col gap-3 text-sm',
+        className,
+      )}
+    >
+      <Spinner size={compact ? 'sm' : 'md'} />
+      <span>{label}</span>
+    </div>
+  )
+}

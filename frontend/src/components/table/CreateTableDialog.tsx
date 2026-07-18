@@ -128,13 +128,16 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
                   onChange={e => updateCol(i, { name: e.target.value })}
                   placeholder="column_name"
                 />
-                <select
-                  className="col-span-4 bg-surface-800 border border-surface-700 rounded px-1 py-1 text-xs text-slate-100 focus:outline-none"
+                <Select
+                  compact
+                  containerClassName="col-span-4"
+                  className="focus:ring-1"
+                  aria-label={`Type for column ${i + 1}`}
                   value={col.type}
                   onChange={e => updateCol(i, { type: e.target.value })}
                 >
                   {COMMON_TYPES.map(t => <option key={t}>{t}</option>)}
-                </select>
+                </Select>
                 <div className="col-span-1 flex justify-center">
                   <input type="checkbox" checked={col.nullable} onChange={e => updateCol(i, { nullable: e.target.checked })} />
                 </div>

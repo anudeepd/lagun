@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import useMenuKeyboard from '../../hooks/useMenuKeyboard'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 export type ContextMenuItem =
   | { type: 'item'; label: string; icon?: ReactNode; danger?: boolean; onClick: () => void }
@@ -39,11 +41,14 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
   }, [onClose])
 
   return createPortal(
-    <div
+    <m.div
       ref={ref}
       role="menu"
       aria-label="Grid actions"
-      className="fixed z-[9999] bg-surface-900 border border-surface-700 rounded-md shadow-2xl py-1 min-w-[180px]"
+      initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
+      animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
+      exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
+      className="fixed z-popover min-w-[180px] rounded-md border border-surface-700 bg-surface-900 py-1 shadow-2xl"
       style={{ left: pos.left, top: pos.top }}
       onContextMenu={e => e.preventDefault()}
     >
@@ -66,7 +71,7 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
           </button>
         )
       )}
-    </div>,
+    </m.div>,
     document.body
   )
 }

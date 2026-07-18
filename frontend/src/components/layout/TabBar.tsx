@@ -3,11 +3,15 @@ import { X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
+import { useServerConfigStore } from '../../store/serverConfigStore'
 import type { Tab } from '../../types'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import useMenuKeyboard from '../../hooks/useMenuKeyboard'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 interface ContextMenuState {
   tabId: string
@@ -18,19 +22,19 @@ interface ContextMenuState {
 export default function TabBar() {
   const { tabs, activeTabId, setActiveTab, closeTab, openQueryTab, closeAllTabs, moveTab, renameTab } = useTabStore()
   const { activeSessionId } = useSessionStore()
+  const ldapEnabled = useServerConfigStore(s => s.ldapEnabled)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
   const [closeTargetId, setCloseTargetId] = useState<string | null>(null)
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
   const [renameTargetId, setRenameTargetId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  const tabRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const contextMenuRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!activeTabId) return
-    tabRefs.current[activeTabId]?.scrollIntoView({
+    tabButtonRefs.current[activeTabId]?.scrollIntoView({
       block: 'nearest',
       inline: 'nearest',
     })
@@ -137,7 +141,7 @@ export default function TabBar() {
 
   const hasDirtyTabs = tabs.some(tab => tab.dirty)
   const requestCloseAll = () => {
-    if (hasDirtyTabs) setConfirmCloseAll(true)
+    if (hasDirtyTabs || ldapEnabled) setConfirmCloseAll(true)
     else closeAllTabs()
   }
 
@@ -145,14 +149,16 @@ export default function TabBar() {
     <div className="flex h-[46px] items-center bg-surface-900 border-b border-surface-800">
       <div className="flex-1 h-full overflow-hidden">
         <div role="tablist" aria-label="Open tabs" className="flex h-full items-center flex-nowrap overflow-x-scroll overflow-y-hidden space-x-1">
+          <AnimatePresence initial={false} mode="sync">
           {tabs.map((tab, index) => (
-            <div
+            <m.div
               key={tab.id}
-              ref={(element) => {
-                tabRefs.current[tab.id] = element
-              }}
+              layout="position"
+              initial={{ opacity: 0, y: motionDistance.surface, x: motionDistance.subtle, scale: 0.9 }}
+              animate={{ opacity: draggedTabId === tab.id ? 0.5 : 1, x: 0, y: 0, scale: 1, transition: surfaceTransition }}
+              exit={{ opacity: 0, y: -motionDistance.surface, scale: 0.9, transition: exitTransition }}
               draggable
-              onDragStart={(e) => handleDragStart(e, tab.id)}
+              onDragStart={(e) => handleDragStart(e as unknown as React.DragEvent, tab.id)}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, tab.id)}
               onDragEnd={handleDragEnd}
@@ -166,7 +172,6 @@ export default function TabBar() {
                 activeTabId === tab.id
                   ? 'bg-surface-950 text-slate-100 border-t-2 border-t-brand-500'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800',
-                draggedTabId === tab.id && 'opacity-50'
               )}
             >
               <button
@@ -186,7 +191,17 @@ export default function TabBar() {
                   ? <Terminal size={12} className="flex-shrink-0" />
                   : <Table size={12} className="flex-shrink-0" />
                 }
-                {tab.dirty && <span aria-label="Unsaved changes" className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />}
+                <AnimatePresence initial={false}>
+                  {tab.dirty && (
+                    <m.span
+                      aria-label="Unsaved changes"
+                      initial={{ opacity: 0, scale: 0.4 }}
+                      animate={{ opacity: 1, scale: 1, transition: surfaceTransition }}
+                      exit={{ opacity: 0, scale: 0.4, transition: exitTransition }}
+                      className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400"
+                    />
+                  )}
+                </AnimatePresence>
                 {tab.type === 'table' && tab.database && (
                   <span className="max-w-[72px] truncate text-[10px] text-slate-500">{tab.database}</span>
                 )}
@@ -201,8 +216,9 @@ export default function TabBar() {
               >
                 <X size={10} />
               </button>
-            </div>
+            </m.div>
           ))}
+          </AnimatePresence>
         </div>
       </div>
 
@@ -230,14 +246,16 @@ export default function TabBar() {
       </div>
 
       {/* Context menu */}
+      <AnimatePresence>
       {contextMenu && currentTab && (
-        <div
-          ref={contextMenuRef}
-          role="menu"
-          aria-label="Tab actions"
-          className="fixed z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-36"
+        <m.div
+          initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface, transformOrigin: 'top left' }}
+          animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
+          exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
+          className="fixed z-popover min-w-36"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
+          <div ref={contextMenuRef} role="menu" aria-label="Tab actions" className="rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-xl">
           {currentTab.type === 'query' && (
             <>
               <button
@@ -259,8 +277,10 @@ export default function TabBar() {
             <X size={12} />
             Close
           </button>
-        </div>
+          </div>
+        </m.div>
       )}
+      </AnimatePresence>
       <ConfirmDialog
         open={!!closeTarget}
         title="Close Tab"
@@ -297,7 +317,9 @@ export default function TabBar() {
         title="Close All Tabs"
         message={hasDirtyTabs
           ? `Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'}? Unsaved editor text or table changes will be discarded.`
-          : `Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'}?`}
+          : ldapEnabled
+            ? `Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'} in this authenticated session?`
+            : `Close all ${tabs.length} open tab${tabs.length === 1 ? '' : 's'}?`}
         confirmLabel="Close All"
         danger
         onConfirm={handleConfirmCloseAll}

@@ -12,6 +12,9 @@ import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './Re
 import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
+import LimitSelect from '../ui/LimitSelect'
+import RefreshIcon from '../ui/RefreshIcon'
+import { LoadingState } from '../ui/Spinner'
 import Modal from '../ui/Modal'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import ReactCodeMirror from '@uiw/react-codemirror'
@@ -22,9 +25,13 @@ import { Prec, type Extension } from '@codemirror/state'
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
 import { isMac } from '../../utils/platform'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
-const ResultGrid = lazy(() => import('./ResultGrid'))
+const loadResultGrid = () => import('./ResultGrid')
+const ResultGrid = lazy(loadResultGrid)
 const ExportDialog = lazy(() => import('../table/ExportDialog'))
 const ImportDialog = lazy(() => import('../table/ImportDialog'))
 const BulkConfirmDialog = lazy(() => import('./BulkConfirmDialog'))
@@ -173,6 +180,12 @@ export const normalizeDataTabState = (state?: DataTabState): Required<DataTabSta
     limit: state?.limit ?? 1000,
   }
 }
+
+export const shouldDebounceDataSearch = (
+  previousSearch: string,
+  nextSearch: string,
+  view: 'schema' | 'data',
+) => view === 'data' && previousSearch !== nextSearch
 
 export const buildQueryResultExportData = (
   result: QueryResult | undefined,
@@ -738,12 +751,13 @@ function QueryTab({ tab }: Props) {
               <button
                 key={i}
                 onClick={() => setResultIdx(i)}
-                className={`px-3 py-1 text-xs whitespace-nowrap border-r border-surface-800 transition-colors ${
+                className={`relative px-3 py-1 text-xs whitespace-nowrap border-r border-surface-800 transition-colors ${
                   resultIdx === i
-                    ? 'bg-surface-950 text-slate-200 border-t-2 border-t-brand-500'
+                    ? 'bg-surface-950 text-slate-200'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800'
                 }`}
               >
+                {resultIdx === i && <m.span layoutId={`active-result-${tab.id}`} className="absolute inset-x-0 top-0 h-0.5 bg-brand-500" transition={surfaceTransition} />}
                 {entry.result.error
                   ? `✗ Result ${i + 1}`
                   : entry.result.columns.length > 0
@@ -753,9 +767,11 @@ function QueryTab({ tab }: Props) {
             ))}
           </div>
         )}
-        <div className="flex-1 overflow-hidden min-h-0">
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <AnimatePresence initial={false} mode="wait">
           {results.length > 0 ? (
-            results[resultIdx].scriptResult ? (
+            <m.div key={results[resultIdx].id} initial={{ opacity: 0, x: motionDistance.surface }} animate={{ opacity: 1, x: 0, transition: surfaceTransition }} exit={{ opacity: 0, x: -motionDistance.surface, transition: exitTransition }} className="h-full">
+            {results[resultIdx].scriptResult ? (
               <div className="p-4 overflow-y-auto h-full">
                 <Suspense fallback={null}>
                   <BulkResultSummary
@@ -765,7 +781,7 @@ function QueryTab({ tab }: Props) {
                 </Suspense>
               </div>
             ) : (
-              <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-500">Loading results…</div>}>
+              <Suspense fallback={<LoadingState label="Preparing results…" />}>
                 <ResultGrid
                   key={results[resultIdx].id}
                   ref={gridRef}
@@ -773,12 +789,14 @@ function QueryTab({ tab }: Props) {
                   onSortActiveChange={setResultSortActive}
                 />
               </Suspense>
-            )
+            )}
+            </m.div>
           ) : (
-            <div className="flex items-center justify-center h-full text-slate-600 text-sm">
+            <m.div key="no-results" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex items-center justify-center h-full text-slate-600 text-sm">
               Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
-            </div>
+            </m.div>
           )}
+          </AnimatePresence>
         </div>
       </div>
       <div className="flex items-center border-t border-surface-800">
@@ -862,6 +880,7 @@ function QueryTab({ tab }: Props) {
 function TableTab({ tab }: Props) {
   const initialDataState = normalizeDataTabState(tab.dataState)
   const [view, setView] = useState<'schema' | 'data'>(initialDataState.view)
+  const [schemaVisited, setSchemaVisited] = useState(initialDataState.view === 'schema')
   const [result, setResult] = useState<QueryResult | null>(null)
   const [columns, setColumns] = useState<ColumnInfo[]>([])
   const [initialLoading, setInitialLoading] = useState(false)
@@ -877,6 +896,7 @@ function TableTab({ tab }: Props) {
   const [showChangeReview, setShowChangeReview] = useState(false)
   const [deleteRowsTarget, setDeleteRowsTarget] = useState<Record<string, unknown>[] | null>(null)
   const [globalSearch, setGlobalSearch] = useState(initialDataState.globalSearch)
+  const [searchFocused, setSearchFocused] = useState(false)
   const [whereFilter, setWhereFilter] = useState(initialDataState.whereFilter)
   const [appliedWhere, setAppliedWhere] = useState(initialDataState.appliedWhere)
   const [showFilterBar, setShowFilterBar] = useState(initialDataState.showFilterBar)
@@ -949,7 +969,7 @@ function TableTab({ tab }: Props) {
       const res = await api.executeQuery(tab.sessionId, selectSql, undefined, effectiveLimit, controller.signal)
       if (!isCurrentRequest()) return
       if (shouldKeepPreviousResultOnLoad(res, result)) {
-        setStatusMsg(`Filter error: ${res.error}`)
+        setStatusMsg(`Refresh failed; showing previous result. ${res.error}`)
         setTimeout(() => setStatusMsg(null), 7000)
       } else {
         setResult(res)
@@ -962,7 +982,10 @@ function TableTab({ tab }: Props) {
       if ((e as Error).name === 'AbortError') {
         return
       }
-      throw e
+      setStatusMsg(result
+        ? `Refresh failed; showing previous result. ${(e as Error).message}`
+        : `Could not load data. ${(e as Error).message}`)
+      setTimeout(() => setStatusMsg(null), 7000)
     } finally {
       if (loadAbortRef.current === controller) {
         setInitialLoading(false)
@@ -975,6 +998,13 @@ function TableTab({ tab }: Props) {
   loadDataRef.current = loadData
 
   useEffect(() => {
+    // Start downloading the heavy grid while the user is still reading Schema.
+    // By the time the first data request completes there should be no second
+    // "Loading data grid" phase.
+    void loadResultGrid()
+  }, [])
+
+  useEffect(() => {
     return () => {
       loadSeqRef.current += 1
       loadAbortRef.current?.abort()
@@ -984,6 +1014,8 @@ function TableTab({ tab }: Props) {
   useEffect(() => {
     if (view === 'data') {
       loadDataRef.current()
+    } else {
+      setSchemaVisited(true)
     }
     // result intentionally omitted — adding it would cause infinite reload on every data fetch
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1045,16 +1077,26 @@ function TableTab({ tab }: Props) {
         setShowColPicker(false)
       }
     }
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowColPicker(false)
+    }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('keydown', keyHandler)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', keyHandler)
+    }
   }, [showColPicker])
 
   const appliedWhereRef = useRef(appliedWhere)
   appliedWhereRef.current = appliedWhere
+  const previousGlobalSearchRef = useRef(globalSearch)
 
   // Debounced global search — re-queries server on every keystroke pause
   useEffect(() => {
-    if (view !== 'data') return
+    const previousSearch = previousGlobalSearchRef.current
+    previousGlobalSearchRef.current = globalSearch
+    if (!shouldDebounceDataSearch(previousSearch, globalSearch, view)) return
     const timer = setTimeout(() => {
       loadDataRef.current(undefined, globalSearch, appliedWhereRef.current)
     }, 400)
@@ -1345,6 +1387,14 @@ function TableTab({ tab }: Props) {
     loadData(undefined, globalSearch, '')
   }
 
+  const dismissWhereFilter = useCallback(() => {
+    setShowFilterBar(false)
+    if (!whereFilter && !appliedWhere) return
+    setWhereFilter('')
+    setAppliedWhere('')
+    loadDataRef.current(undefined, globalSearch, '')
+  }, [whereFilter, appliedWhere, globalSearch])
+
   const handleClearSearch = () => {
     setGlobalSearch('')
     // The debounce useEffect will trigger loadData with empty search
@@ -1361,6 +1411,8 @@ function TableTab({ tab }: Props) {
   // Stable ref so the CodeMirror keymap extension never needs to be recreated
   const applyFilterRef = useRef(handleApplyFilter)
   applyFilterRef.current = handleApplyFilter
+  const dismissFilterRef = useRef(dismissWhereFilter)
+  dismissFilterRef.current = dismissWhereFilter
 
   // SQL keywords/operators for the filter bar (no schema — we handle columns separately below)
   const filterSqlExtension = useMemo(() => sql({ dialect: MySQL }), [])
@@ -1400,6 +1452,13 @@ function TableTab({ tab }: Props) {
   }, [functions])
 
   const filterWrapExtension = useMemo(() => EditorView.lineWrapping, [])
+  const filterVerticalCenterExtension = useMemo(() => EditorView.theme({
+    '&': { minHeight: '32px' },
+    '.cm-scroller': { lineHeight: '20px' },
+    '.cm-content': { padding: '6px 0', minHeight: '32px' },
+    '.cm-line': { padding: '0 8px', lineHeight: '20px' },
+    '.cm-placeholder': { lineHeight: '20px' },
+  }), [])
   const filterTooltipExtensions = useMemo((): Extension[] =>
     typeof document === 'undefined' ? [] : [tooltips({ parent: document.body })],
   [])
@@ -1408,17 +1467,25 @@ function TableTab({ tab }: Props) {
       { key: 'Mod-Enter', run: () => { applyFilterRef.current(); return true } },
     ])),
   [])
+  // Lowest precedence lets autocomplete consume Escape first when its menu is open.
+  const filterEscapeExtension = useMemo(() =>
+    Prec.lowest(keymap.of([
+      { key: 'Escape', run: () => { dismissFilterRef.current(); return true } },
+    ])),
+  [])
   const filterExtensions = useMemo(
     () => filterWordWrap
-      ? [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterWrapExtension, filterKeymapExtension, filterTooltipExtensions]
-      : [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterKeymapExtension, filterTooltipExtensions],
+      ? [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterWrapExtension, filterVerticalCenterExtension, filterKeymapExtension, filterEscapeExtension, filterTooltipExtensions]
+      : [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterVerticalCenterExtension, filterKeymapExtension, filterEscapeExtension, filterTooltipExtensions],
     [
       filterWordWrap,
       filterSqlExtension,
       filterColumnCompletionExtension,
       filterFunctionCompletionExtension,
       filterWrapExtension,
+      filterVerticalCenterExtension,
       filterKeymapExtension,
+      filterEscapeExtension,
       filterTooltipExtensions,
     ]
   )
@@ -1431,21 +1498,50 @@ function TableTab({ tab }: Props) {
         <div className="flex-1 min-w-4" />
         {/* Global search input — shown in data view */}
         {view === 'data' && (
-          <div className="relative flex items-center min-w-40">
-            <Search size={11} className="absolute left-2 text-slate-500 pointer-events-none" />
+          <m.div
+            animate={searchFocused
+              ? { y: -1, scale: 1.018, boxShadow: '0 7px 18px rgba(2, 6, 23, 0.28)' }
+              : { y: 0, scale: 1, boxShadow: '0 0 0 rgba(2, 6, 23, 0)' }}
+            transition={surfaceTransition}
+            className="relative flex items-center min-w-40 rounded origin-center"
+          >
+            <m.span
+              className="absolute left-2 z-10 text-slate-500 pointer-events-none"
+              animate={{ scale: searchFocused ? 1.12 : 1, color: searchFocused ? '#60a5fa' : '#64748b' }}
+              transition={surfaceTransition}
+            >
+              <Search size={11} />
+            </m.span>
             <input
               type="text"
               value={globalSearch}
               onChange={e => setGlobalSearch(e.target.value)}
+              onKeyDown={e => {
+                if (e.key !== 'Escape') return
+                e.preventDefault()
+                if (globalSearch) handleClearSearch()
+                e.currentTarget.blur()
+              }}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
               placeholder="Search all columns…"
               className="bg-surface-800 border border-surface-700 rounded pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500 w-44 max-w-full"
             />
+            <AnimatePresence>
             {globalSearch && (
-              <button onClick={handleClearSearch} className="absolute right-1.5 text-slate-500 hover:text-slate-300">
+              <m.button
+                initial={{ opacity: 0, scale: 0.65, rotate: -35 }}
+                animate={{ opacity: 1, scale: 1, rotate: 0, transition: surfaceTransition }}
+                exit={{ opacity: 0, scale: 0.65, rotate: 25, transition: exitTransition }}
+                onClick={handleClearSearch}
+                className="absolute right-1.5 text-slate-500 hover:text-slate-300"
+                aria-label="Clear column search"
+              >
                 <X size={10} />
-              </button>
+              </m.button>
             )}
-          </div>
+            </AnimatePresence>
+          </m.div>
         )}
         {/* Filter toggle button */}
         {view === 'data' && (
@@ -1473,8 +1569,9 @@ function TableTab({ tab }: Props) {
               <Eye size={11} />
               Columns{hiddenColumns.size > 0 ? ` (${result.columns.length - hiddenColumns.size}/${result.columns.length})` : ''}
             </button>
+            <AnimatePresence>
             {showColPicker && (
-              <div className="absolute right-0 top-full mt-1 z-50 bg-surface-900 border border-surface-700 rounded shadow-xl w-52 flex flex-col">
+              <m.div initial={{ opacity: 0, y: -motionDistance.surface, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1, transition: surfaceTransition }} exit={{ opacity: 0, y: -motionDistance.subtle, scale: 0.94, transition: exitTransition }} className="absolute right-0 top-full z-popover mt-1 flex w-52 flex-col rounded border border-surface-700 bg-surface-900 shadow-xl">
                 <div className="px-2 pt-2 pb-1">
                   <input
                     type="text"
@@ -1525,8 +1622,9 @@ function TableTab({ tab }: Props) {
                   />
                   <span className="text-xs text-slate-400">Sort alphabetically</span>
                 </label>
-              </div>
+              </m.div>
             )}
+            </AnimatePresence>
           </div>
         )}
         {view === 'data' && result && !result.error && result.columns.length > 0 && (
@@ -1545,18 +1643,18 @@ function TableTab({ tab }: Props) {
         )}
         {/* Limit selector — only shown in data view */}
         {view === 'data' && (
-          <div className="flex items-center gap-1 text-xs text-slate-500">
+          <m.div
+            key={`data-limit-${limit}`}
+            initial={{ scale: 0.94, y: 2 }}
+            animate={{ scale: 1, y: 0 }}
+            whileHover={{ scale: 1.025 }}
+            whileTap={{ scale: 0.96 }}
+            transition={surfaceTransition}
+            className="flex items-center gap-1 text-xs text-slate-500 rounded"
+          >
             <span>Limit</span>
-            <select
-              value={limit}
-              onChange={e => handleLimitChange(Number(e.target.value))}
-              className="bg-surface-800 border border-surface-700 rounded px-1.5 py-0.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            >
-              {LIMIT_OPTIONS.map(n => (
-                <option key={n} value={n}>{n.toLocaleString()}</option>
-              ))}
-            </select>
-          </div>
+            <LimitSelect value={limit} options={LIMIT_OPTIONS} onChange={handleLimitChange} />
+          </m.div>
         )}
         {/* Pending changes: Apply / Discard */}
         {view === 'data' && (pendingChanges.size > 0 || insertDrafts.size > 0) && (
@@ -1575,10 +1673,17 @@ function TableTab({ tab }: Props) {
             </button>
           </>
         )}
-        {/* Refreshing / loading badge + cancel */}
-        {view === 'data' && (initialLoading || refreshing) && (
-          <>
+        {/* Initial load status. Refresh feedback stays over the grid to avoid toolbar layout shifts. */}
+        <AnimatePresence initial={false}>
+        {view === 'data' && initialLoading && (
+          <m.div
+            initial={{ opacity: 0, width: 0, x: motionDistance.subtle }}
+            animate={{ opacity: 1, width: 'auto', x: 0, transition: surfaceTransition }}
+            exit={{ opacity: 0, width: 0, x: motionDistance.subtle, transition: exitTransition }}
+            className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap"
+          >
             <RefreshCw size={12} className="animate-spin text-slate-400" />
+            <span className="text-xs text-slate-500">Loading {tab.table}…</span>
             <button
               onClick={() => loadAbortRef.current?.abort()}
               className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
@@ -1586,20 +1691,23 @@ function TableTab({ tab }: Props) {
             >
               <X size={10} /> Cancel
             </button>
-          </>
+          </m.div>
         )}
+        </AnimatePresence>
         {/* View toggle */}
-        <div className="flex rounded overflow-hidden border border-surface-700">
+        <div className="relative flex rounded overflow-hidden border border-surface-700 bg-surface-800">
           <button
-            className={`px-2.5 py-0.5 text-xs transition-colors ${view === 'schema' ? 'bg-brand-600 text-white' : 'bg-surface-800 text-slate-400 hover:text-slate-200'}`}
+            className={`relative z-10 px-2.5 py-0.5 text-xs transition-colors ${view === 'schema' ? 'text-white' : 'text-slate-400 hover:text-slate-200'}`}
             onClick={() => setView('schema')}
           >
+            {view === 'schema' && <m.span layoutId={`table-view-${tab.id}`} className="absolute inset-0 -z-10 bg-brand-600" transition={surfaceTransition} />}
             Schema
           </button>
           <button
-            className={`px-2.5 py-0.5 text-xs transition-colors ${view === 'data' ? 'bg-brand-600 text-white' : 'bg-surface-800 text-slate-400 hover:text-slate-200'}`}
+            className={`relative z-10 px-2.5 py-0.5 text-xs transition-colors ${view === 'data' ? 'text-white' : 'text-slate-400 hover:text-slate-200'}`}
             onClick={() => setView('data')}
           >
+            {view === 'data' && <m.span layoutId={`table-view-${tab.id}`} className="absolute inset-0 -z-10 bg-brand-600" transition={surfaceTransition} />}
             Data
           </button>
         </div>
@@ -1633,16 +1741,27 @@ function TableTab({ tab }: Props) {
           </button>
         )}
         {view === 'data' && (
-          <Button variant="ghost" size="sm" onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); loadData() }} title="Refresh" disabled={initialLoading || refreshing}>
-            <RefreshCw size={12} className={initialLoading || refreshing ? 'animate-spin' : ''} />
-          </Button>
+          <m.button
+            type="button"
+            onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); loadData() }}
+            title={refreshing ? 'Refreshing data' : 'Refresh data'}
+            aria-label={refreshing ? 'Refreshing data' : 'Refresh data'}
+            disabled={initialLoading || refreshing}
+            whileTap={initialLoading || refreshing ? undefined : { scale: 0.9 }}
+            transition={surfaceTransition}
+            className={`lagun-icon-button rounded p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-wait ${refreshing ? 'text-slate-400' : 'text-slate-400 hover:text-slate-200'}`}
+          >
+            <RefreshIcon refreshing={refreshing} size={12} />
+          </m.button>
         )}
       </div>
 
       {/* WHERE filter bar */}
+      <AnimatePresence initial={false}>
       {view === 'data' && showFilterBar && (
-        <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-700">
-          <span className="inline-flex h-7 items-center text-xs text-slate-500 font-mono shrink-0">WHERE</span>
+        <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto', transition: surfaceTransition }} exit={{ opacity: 0, height: 0, transition: exitTransition }} className="overflow-hidden border-b border-surface-700 bg-surface-900">
+        <div className="flex items-center flex-wrap gap-2 px-3 py-1.5">
+          <span className="inline-flex h-[34px] self-start items-center text-xs leading-none text-slate-500 font-mono shrink-0">WHERE</span>
           <div className="flex-1 min-w-[220px] rounded overflow-visible border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
             <ReactCodeMirror
               value={whereFilter}
@@ -1655,7 +1774,7 @@ function TableTab({ tab }: Props) {
               }}
               extensions={filterExtensions}
               theme={oneDark}
-              minHeight="28px"
+              minHeight="32px"
               maxHeight="96px"
               placeholder="e.g. id = 5 AND name LIKE 'John%'"
               basicSetup={{
@@ -1696,26 +1815,36 @@ function TableTab({ tab }: Props) {
             </button>
           )}
         </div>
+        </m.div>
       )}
+      </AnimatePresence>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden min-h-0">
-        {view === 'schema' && tab.database && tab.table ? (
-          <Suspense fallback={<div className="flex items-center justify-center h-full text-slate-500 text-sm">Loading schema…</div>}>
-            <TableSchemaView
-              sessionId={tab.sessionId}
-              database={tab.database}
-              table={tab.table}
-            />
-          </Suspense>
-        ) : view === 'data' ? (
+      <div className="relative flex-1 overflow-hidden min-h-0">
+        {schemaVisited && tab.database && tab.table && (
+          <div className={`absolute inset-0 ${view === 'schema' ? 'motion-safe:animate-[lagun-tab-content-in_var(--motion-duration-surface)_var(--motion-ease-move)]' : 'invisible pointer-events-none'}`} aria-hidden={view !== 'schema' || undefined}>
+            <Suspense fallback={<LoadingState label={`Preparing schema for ${tab.table}…`} />}>
+              <TableSchemaView
+                sessionId={tab.sessionId}
+                database={tab.database}
+                table={tab.table}
+              />
+            </Suspense>
+          </div>
+        )}
+        {view === 'data' && (
+          <div className="absolute inset-0 motion-safe:animate-[lagun-tab-content-in_var(--motion-duration-surface)_var(--motion-ease-move)]">
+          {
           initialLoading ? (
-            <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-              Loading {tab.table}…
-            </div>
+            <LoadingState label={`Loading rows from ${tab.table}…`} />
           ) : result ? (
-            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-500">Loading data grid…</div>}>
-              <ResultGrid
+          <Suspense fallback={<LoadingState label="Preparing data grid…" />}>
+            <m.div
+              className="relative h-full motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]"
+              animate={{ opacity: refreshing ? 0.72 : 1, scale: refreshing ? 0.998 : 1 }}
+              transition={surfaceTransition}
+            >
+            <ResultGrid
                 ref={gridRef}
                 result={result}
                 editable={columns.length > 0 && !initialLoading && !refreshing}
@@ -1732,19 +1861,37 @@ function TableTab({ tab }: Props) {
                 pendingChanges={pendingChanges}
                 insertDrafts={insertDrafts}
                 insertDraftAnchors={insertDraftAnchors}
-                onSortActiveChange={setDataSortActive}
-              />
-            </Suspense>
+              onSortActiveChange={setDataSortActive}
+            />
+              <AnimatePresence>
+                {refreshing && (
+                  <m.div
+                    initial={{ opacity: 0, y: -motionDistance.subtle }}
+                    animate={{ opacity: 1, y: 0, transition: surfaceTransition }}
+                    exit={{ opacity: 0, y: -motionDistance.subtle, transition: exitTransition }}
+                    className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-md border border-surface-700 bg-surface-900/95 px-2.5 py-1.5 text-xs text-slate-300 shadow-lg backdrop-blur-sm"
+                  >
+                    <m.span animate={{ rotate: 360 }} transition={{ duration: 0.8, ease: 'linear', repeat: Infinity }}>
+                      <RefreshCw size={12} className="text-brand-400" />
+                    </m.span>
+                    Refreshing rows…
+                  </m.div>
+                )}
+              </AnimatePresence>
+            </m.div>
+          </Suspense>
           ) : (
-            <div className="flex items-center justify-center h-full text-slate-600 text-sm">
+            <div className="flex h-full items-center justify-center text-sm text-slate-600 motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]">
               No data loaded
             </div>
           )
-        ) : null}
+          }
+          </div>
+        )}
       </div>
 
       {statusMsg && (
-        <div className="px-3 py-1.5 bg-surface-900 border-t border-surface-800">
+        <div className="border-t border-surface-800 bg-surface-900 px-3 py-1.5 motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]">
           <p className="text-xs font-mono text-slate-400 break-all">{statusMsg}</p>
         </div>
       )}

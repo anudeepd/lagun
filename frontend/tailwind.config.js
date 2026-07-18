@@ -22,6 +22,16 @@ export default {
       },
       fontFamily: {
         mono: ['JetBrains Mono', 'Fira Code', 'ui-monospace', 'monospace'],
+        data: ['var(--lagun-data-font)'],
+      },
+      zIndex: {
+        base: '0',
+        raised: '10',
+        navigation: '30',
+        popover: '40',
+        modal: '50',
+        toast: '60',
+        critical: '70',
       },
     },
   },

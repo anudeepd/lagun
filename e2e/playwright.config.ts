@@ -16,6 +16,11 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'firefox-motion',
+      testMatch: /motion\.spec\.ts/,
+      use: { ...devices['Desktop Firefox'] },
+    },
   ],
   webServer: {
     command: 'uv run lagun serve --port 8080 --no-open',

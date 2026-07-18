@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useMemo, useRef, useCallback, type Ref } from 'react'
+import { useMemo, useRef, useCallback, useEffect, type Ref } from 'react'
 import ReactCodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { sql, MySQL, schemaCompletionSource } from '@codemirror/lang-sql'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -9,8 +9,13 @@ import type { CompletionContext, CompletionResult, Completion } from '@codemirro
 import { Play, Loader2, X, WrapText } from 'lucide-react'
 import clsx from 'clsx'
 import Button from '../ui/Button'
+import LimitSelect from '../ui/LimitSelect'
+import Select from '../ui/Select'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
 import { isMac, modKey } from '../../utils/platform'
+import { AnimatePresence, useAnimationControls } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, surfaceTransition } from '../../motion/tokens'
 
 // Extract the current SQL statement from the document at the given position
 export const extractStatementAt = (doc: string, pos: number): string => {
@@ -80,6 +85,12 @@ interface Props {
 }
 
 export default function QueryEditor({ value, onChange, onRun, running, database, databases, onDatabaseChange, schema, functions, limit, onLimitChange, onCancel, editorRef, wordWrap = true, onWordWrapChange }: Props) {
+  const databaseMotion = useAnimationControls()
+
+  useEffect(() => {
+    if (!database) return
+    void databaseMotion.start({ scale: [1, 1.06, 1], y: [0, -2, 0] }, { duration: 0.28, ease: 'easeOut' })
+  }, [database, databaseMotion])
   const handleWordWrapChange = useCallback(() => onWordWrapChange?.(!wordWrap), [onWordWrapChange, wordWrap])
   // Keep schema in a ref so the extension never needs to be recreated when columns load
   const schemaRef = useRef(schema ?? {})
@@ -196,11 +207,20 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
       <div className="flex items-center justify-between flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
         <div className="flex items-center gap-2 min-w-0">
           {databases && databases.length > 0 ? (
-            <select
+            <m.div
+              animate={databaseMotion}
+              whileHover={{ scale: 1.025 }}
+              whileTap={{ scale: 0.96 }}
+              transition={{ duration: 0.28, ease: 'easeOut' }}
+              className="rounded"
+            >
+            <Select
+              compact
               value={database ?? ''}
               onChange={e => onDatabaseChange?.(e.target.value)}
+              aria-label="Database"
               className={clsx(
-                'bg-surface-800 border rounded px-2 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 max-w-[220px]',
+                'focus:ring-1 max-w-[220px]',
                 database
                   ? 'border-surface-700 text-slate-300'
                   : 'border-amber-600 text-amber-400'
@@ -208,7 +228,8 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
             >
               {!database && <option value="" disabled>Select database…</option>}
               {databases.map(db => <option key={db} value={db}>{db}</option>)}
-            </select>
+            </Select>
+            </m.div>
           ) : database ? (
             <span className="text-xs text-slate-500 bg-surface-800 px-2 py-0.5 rounded truncate max-w-[220px]">
               {database}
@@ -217,18 +238,18 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
         </div>
         <div className="flex items-center flex-wrap justify-end gap-2">
           {onLimitChange && (
-            <div className="flex items-center gap-1 text-xs text-slate-500">
+            <m.div
+              key={`query-limit-${limit}`}
+              initial={{ scale: 0.94, y: 2 }}
+              animate={{ scale: 1, y: 0 }}
+              whileHover={{ scale: 1.025 }}
+              whileTap={{ scale: 0.96 }}
+              transition={surfaceTransition}
+              className="flex items-center gap-1 text-xs text-slate-500 rounded"
+            >
               <span>Limit</span>
-              <select
-                value={limit}
-                onChange={e => onLimitChange(Number(e.target.value))}
-                className="bg-surface-800 border border-surface-700 rounded px-1.5 py-0.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              >
-                {LIMIT_OPTIONS.map(n => (
-                  <option key={n} value={n}>{n.toLocaleString()}</option>
-                ))}
-              </select>
-            </div>
+              <LimitSelect value={limit} options={LIMIT_OPTIONS} onChange={onLimitChange} />
+            </m.div>
 )}
           {onWordWrapChange && ( // Only shown when parent provides the callback (TabContent always does)
             <Button
@@ -258,7 +279,13 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
             disabled={running || !value.trim()}
             title={`Run (${modKey}Enter)`}
           >
-            {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+            <span className="relative inline-flex h-3 w-3 items-center justify-center">
+              <AnimatePresence initial={false} mode="sync">
+                {running
+                  ? <m.span key="running" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="absolute"><Loader2 size={12} className="animate-spin" /></m.span>
+                  : <m.span key="ready" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="absolute"><Play size={12} /></m.span>}
+              </AnimatePresence>
+            </span>
             Run
           </Button>
         </div>

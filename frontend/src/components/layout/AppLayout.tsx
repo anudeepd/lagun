@@ -8,6 +8,9 @@ import { useTabStore } from '../../store/tabStore'
 import Logo from '../ui/Logo'
 import CommandPalette from '../ui/CommandPalette'
 import ShortcutHelpDialog from '../ui/ShortcutHelpDialog'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, surfaceTransition } from '../../motion/tokens'
 
 const MIN_SIDEBAR = 160
 const MAX_SIDEBAR = 520
@@ -58,16 +61,21 @@ export default function AppLayout() {
 
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden bg-surface-950 text-slate-100">
+      <AnimatePresence>
       {mobileSidebarOpen && (
-        <button
+        <m.button
           type="button"
           aria-label="Close navigation"
-          className="fixed inset-0 z-30 bg-black/60 lg:hidden"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: surfaceTransition }}
+          exit={{ opacity: 0, transition: exitTransition }}
+          className="fixed inset-0 z-navigation bg-black/60 lg:hidden"
           onClick={() => setMobileSidebarOpen(false)}
         />
       )}
+      </AnimatePresence>
       {/* Left sidebar */}
-      <div style={{ width: sidebarWidth }} className={`fixed inset-y-0 left-0 z-40 flex min-h-0 max-w-[85vw] border-r border-surface-800 transition-transform duration-200 lg:relative lg:inset-auto lg:max-w-[45vw] lg:translate-x-0 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div style={{ width: sidebarWidth }} className={`fixed inset-y-0 left-0 z-navigation flex min-h-0 max-w-[85vw] border-r border-surface-800 transition-transform [transition-duration:var(--motion-duration-spatial)] lg:relative lg:inset-auto lg:max-w-[45vw] lg:translate-x-0 ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar />
         <div
           onMouseDown={handleResizeMouseDown}
@@ -95,10 +103,10 @@ export default function AppLayout() {
         <TabBar />
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-hidden min-h-0 focus:outline-none">
           {tabs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-4">
+            <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex h-full flex-col items-center justify-center gap-4 text-slate-500">
               <Logo size="lg" showText={false} className="opacity-40" />
               <p className="text-sm">Select a table from the sidebar or open a query tab</p>
-            </div>
+            </m.div>
           ) : (
             tabs.map(tab => (
               <div
@@ -106,7 +114,7 @@ export default function AppLayout() {
                 id={`tab-panel-${tab.id}`}
                 role="tabpanel"
                 aria-labelledby={`tab-${tab.id}`}
-                className={`h-full min-h-0 ${activeTabId === tab.id ? '' : 'hidden'}`}
+                className={`h-full min-h-0 ${activeTabId === tab.id ? 'motion-safe:animate-[lagun-tab-content-in_var(--motion-duration-surface)_var(--motion-ease-move)]' : 'hidden'}`}
               >
                 <TabContent tab={tab} />
               </div>

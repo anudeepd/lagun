@@ -4,6 +4,9 @@ import {
   AUTH_REDIRECT_EVENT,
   redirectToLdapLoginNow,
 } from '../../utils/authRedirect'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, surfaceTransition } from '../../motion/tokens'
 
 type AuthOverlayMode = 'expired' | 'logout'
 
@@ -33,17 +36,17 @@ export default function AuthRedirectOverlay() {
     }
   }, [])
 
-  if (!mode) return null
-
-  const copy = COPY[mode]
-  const hasAction = Boolean(copy.action)
+  const copy = mode ? COPY[mode] : null
+  const hasAction = Boolean(copy?.action)
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-xl border border-surface-700 bg-surface-900/95 p-5 shadow-2xl">
+    <AnimatePresence>
+    {mode && copy && (
+    <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="fixed inset-0 z-critical flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+      <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="w-full max-w-sm rounded-xl border border-surface-700 bg-surface-900/95 p-5 shadow-2xl">
         <div className={hasAction ? 'mb-4 flex items-center gap-3' : 'flex items-center gap-3'}>
           <div className="h-9 w-9 rounded-full border border-brand-500/40 bg-brand-500/10 p-2">
-            <div className="h-full w-full animate-pulse rounded-full bg-brand-400" />
+            <div className="h-full w-full rounded-full bg-brand-400" />
           </div>
           <div>
             <h2 className="text-sm font-semibold text-slate-100">{copy.title}</h2>
@@ -59,7 +62,9 @@ export default function AuthRedirectOverlay() {
             {copy.action}
           </button>
         )}
-      </div>
-    </div>
+      </m.div>
+    </m.div>
+    )}
+    </AnimatePresence>
   )
 }

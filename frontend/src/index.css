@@ -2,6 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes lagun-surface-in {
+  0% { opacity: 0; transform: translateY(-12px) scale(.94); filter: blur(2px); }
+  70% { opacity: 1; transform: translateY(1px) scale(1.01); filter: blur(0); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes lagun-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes lagun-tab-content-in {
+  from { opacity: 0; transform: translateX(10px) scale(.995); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+/* Inter — bundled locally for consistent, readable tabular data across browsers */
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* JetBrains Mono — inlined as base64 data URIs to survive corporate proxy filters */
 @font-face {
   font-family: 'JetBrains Mono';
@@ -35,6 +60,12 @@
     --lagun-danger: #f87171;
     --lagun-success: #4ade80;
     --lagun-radius: 0.375rem;
+    --lagun-data-font: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
+    --motion-duration-micro: 180ms;
+    --motion-duration-surface: 280ms;
+    --motion-duration-spatial: 380ms;
+    --motion-ease-move: cubic-bezier(0.16, 1, 0.3, 1);
+    --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   }
   * {
     box-sizing: border-box;
@@ -86,6 +117,19 @@
     min-height: 2.25rem;
     min-width: 2.25rem;
   }
+  .lagun-interactive {
+    transition-duration: var(--motion-duration-micro);
+    transition-property: color, background-color, border-color, opacity, box-shadow, transform;
+    transition-timing-function: var(--motion-ease-move);
+  }
+  .lagun-interactive:active:not(:disabled) {
+    transform: translateY(1px) scale(.96);
+  }
+  @media (hover: hover) {
+    .lagun-interactive:hover:not(:disabled) {
+      transform: translateY(-1px);
+    }
+  }
   @media (pointer: coarse) {
     .lagun-icon-button {
       min-height: 2.75rem;
@@ -95,6 +139,12 @@
 }
 
 @layer components {
+  .lagun-result-grid,
+  .lagun-data-text {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "ss02" 1, "zero" 1;
+  }
+
   .lagun-result-grid .ag-header-cell {
     padding-left: 10px;
     padding-right: 8px;
@@ -148,8 +198,23 @@
   }
 
   .lagun-result-grid .ag-cell {
-    padding-left: 10px;
-    padding-right: 10px;
+    /* AG Grid's unlayered theme otherwise overrides this in read mode only. */
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .lagun-result-grid .ag-cell-inline-editing .ag-input-wrapper,
+  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input {
+    padding: 0;
+    /* Keep the cell's focus ring; Waterfox otherwise adds a second inner ring. */
+    outline: none;
   }
 
   .cm-tooltip,

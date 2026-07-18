@@ -6,9 +6,13 @@ import { useTabStore } from '../../store/tabStore'
 import SessionForm from './SessionForm'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import type { Session } from '../../types'
+import { LoadingState } from '../ui/Spinner'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, spatialTransition, surfaceTransition } from '../../motion/tokens'
+import { AnimatePresence } from 'motion/react'
 
 export default function SessionList() {
-  const { sessions, activeSessionId, setActiveSession, deleteSession } = useSessionStore()
+  const { sessions, activeSessionId, setActiveSession, deleteSession, loading } = useSessionStore()
   const { openQueryTab } = useTabStore()
   const [editSession, setEditSession] = useState<Session | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
@@ -18,6 +22,10 @@ export default function SessionList() {
     if (!deleteTarget) return
     await deleteSession(deleteTarget.id)
     setDeleteTarget(null)
+  }
+
+  if (loading && sessions.length === 0) {
+    return <LoadingState label="Loading connections…" compact className="px-3 py-4" />
   }
 
   if (sessions.length === 0) {
@@ -31,19 +39,27 @@ export default function SessionList() {
   return (
     <div className="py-1">
       {sessions.map(s => (
-        <div
+        <m.div
           key={s.id}
+          layout="position"
           className={clsx(
-            'flex items-center px-3 py-1.5 cursor-pointer group transition-colors',
+            'relative flex items-center px-3 py-1.5 cursor-pointer group transition-colors',
             activeSessionId === s.id
-              ? 'bg-brand-600/20 text-brand-300'
+              ? 'text-brand-300'
               : 'hover:bg-surface-800 text-slate-300'
           )}
           onClick={() => setActiveSession(s.id)}
         >
-          <Wifi size={12} className="flex-shrink-0 mr-2 text-green-400" />
-          <span className="flex-1 truncate text-xs">{s.name}</span>
-          <span className="text-slate-500 text-xs mr-1">{s.host}</span>
+          {activeSessionId === s.id && (
+            <m.div
+              layoutId="active-connection"
+              transition={spatialTransition}
+              className="absolute inset-0 border-l-2 border-brand-500 bg-brand-600/20"
+            />
+          )}
+          <Wifi size={12} className="relative flex-shrink-0 mr-2 text-green-400" />
+          <span className="relative flex-1 truncate text-xs">{s.name}</span>
+          <span className="relative text-slate-500 text-xs mr-1">{s.host}</span>
 
           {/* Context menu trigger */}
           <div className="relative">
@@ -53,9 +69,13 @@ export default function SessionList() {
             >
               <MoreVertical size={12} />
             </button>
+            <AnimatePresence>
             {menuId === s.id && (
-              <div
-                className="absolute right-0 top-6 bg-surface-800 border border-surface-700 rounded shadow-lg z-50 py-1 w-40"
+              <m.div
+                initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
+                animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
+                exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
+                className="absolute right-0 top-6 z-popover w-40 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg motion-safe:animate-[lagun-surface-in_var(--motion-duration-surface)_var(--motion-ease-move)]"
                 onMouseLeave={() => setMenuId(null)}
               >
                 {!s.managed && <button
@@ -76,10 +96,11 @@ export default function SessionList() {
                 >
                   <Trash2 size={12} /> {s.managed ? 'Remove' : 'Delete'}
                 </button>
-              </div>
+              </m.div>
             )}
+            </AnimatePresence>
           </div>
-        </div>
+        </m.div>
       ))}
       {editSession && (
         <SessionForm

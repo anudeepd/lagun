@@ -1,4 +1,4 @@
-import { beforeAll, afterEach, afterAll } from 'vitest'
+import { beforeAll, beforeEach, afterEach, afterAll } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { server } from './server'
 
@@ -16,5 +16,13 @@ const localStorageMock: Storage = {
 Object.defineProperty(window, 'localStorage', { value: localStorageMock, writable: true })
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
+beforeEach(() => {
+  const overlayRoot = document.createElement('div')
+  overlayRoot.id = 'lagun-overlays'
+  document.body.appendChild(overlayRoot)
+})
+afterEach(() => {
+  server.resetHandlers()
+  document.getElementById('lagun-overlays')?.remove()
+})
 afterAll(() => server.close())

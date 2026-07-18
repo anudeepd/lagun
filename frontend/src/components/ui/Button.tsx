@@ -12,7 +12,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <button
         ref={ref}
         className={clsx(
-          'inline-flex items-center justify-center gap-1.5 font-medium rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed',
+          'lagun-interactive inline-flex items-center justify-center gap-1.5 font-medium rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed',
           {
             'bg-brand-600 hover:bg-brand-500 text-white': variant === 'primary',
             'bg-surface-700 hover:bg-surface-600 text-slate-200 border border-surface-600': variant === 'secondary',

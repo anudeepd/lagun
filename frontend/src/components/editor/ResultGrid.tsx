@@ -6,6 +6,7 @@ import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine, Plus } from '
 import type { CellClassParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
+import { AnimatePresence } from 'motion/react'
 
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
@@ -33,7 +34,7 @@ const darkTheme = themeQuartz.withParams({
   rowHoverColor: '#1e293b',
   selectedRowBackgroundColor: '#1e3a5f',
   oddRowBackgroundColor: '#0f172a',
-  fontFamily: 'ui-monospace, monospace',
+  fontFamily: 'var(--lagun-data-font)',
   fontSize: 12,
   cellTextColor: '#cbd5e1',
   headerFontSize: 12,
@@ -75,6 +76,16 @@ function valueNeedsLargeEditor(value: unknown, eventTarget: EventTarget | null):
   }
 
   return value != null && String(value).length > 80
+}
+
+export function startInlineCellEditing(
+  api: Pick<GridApi, 'startEditingCell'>,
+  rowIndex: number,
+  colKey: string
+): void {
+  // F2 tells AG Grid to place the caret at the end instead of selecting all.
+  // Using the editor's native path avoids browser-dependent focus timing.
+  api.startEditingCell({ rowIndex, colKey, key: 'F2' })
 }
 
 interface MenuState {
@@ -306,7 +317,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         // Reserve fixed room for filter/sort/multi-sort indicators so labels do not disappear behind controls.
         minWidth: Math.ceil(Math.max(120, col.length * 7.5 + 104, Math.min(sampledCellWidth, 36) * 7.2 + 32)),
         cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
-          const base = { fontFamily: 'ui-monospace, monospace', fontSize: '12px' }
+          const base = { fontFamily: 'var(--lagun-data-font)', fontSize: '12px' }
           const rowId = params.data?.__ag_rowId as string | undefined
           if (params.data?.__lagun_insertDraft) {
             return { ...base, backgroundColor: '#064e3b', color: '#bbf7d0' }
@@ -489,7 +500,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       return
     }
 
-    e.api.startEditingCell({ rowIndex: e.rowIndex, colKey: e.colDef.field })
+    startInlineCellEditing(e.api, e.rowIndex, e.colDef.field)
   }, [canEditColumn, openLargeCellEditor, rememberActiveCell])
 
   const handleColumnHeaderClicked = useCallback((e: ColumnHeaderClickedEvent) => {
@@ -696,6 +707,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         alwaysMultiSort
         sortingOrder={['asc', 'desc', null]}
       />
+      <AnimatePresence>
       {menu && (
         <GridContextMenu
           x={menu.x}
@@ -712,6 +724,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           onClose={closeMenu}
         />
       )}
+      </AnimatePresence>
       {cellEditor && (
         <Modal
           open={!!cellEditor}
@@ -727,7 +740,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         >
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-mono text-slate-300">{cellEditor.columnName}</span>
+              <span className="lagun-data-text font-data text-slate-300">{cellEditor.columnName}</span>
               {cellEditor.wasNull && (
                 <span className="px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700 text-slate-400">
                   NULL
@@ -735,7 +748,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
               )}
             </div>
             <textarea
-              className="w-full min-h-[320px] resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-xs leading-5 text-slate-100 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              className="lagun-data-text min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-data text-xs leading-5 text-slate-100 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               value={cellEditor.value}
               onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
               spellCheck={false}

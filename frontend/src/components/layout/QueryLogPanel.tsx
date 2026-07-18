@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { Terminal, ChevronUp, ChevronDown, Copy, CornerDownLeft, Ban } from 'lucide-react'
+import { Terminal, ChevronUp, Copy, CornerDownLeft, Ban } from 'lucide-react'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import type { QueryLogEntry } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
 import { clipboardWrite } from '../../utils/clipboard'
+import * as m from 'motion/react-m'
+import { AnimatePresence } from 'motion/react'
+import { exitTransition, motionDistance, motionDuration, motionEase, surfaceTransition } from '../../motion/tokens'
 
 function formatTime(iso: string): string {
   const d = new Date(iso)
@@ -34,7 +37,12 @@ export default function QueryLogPanel() {
   const hasQueryTab = activeTab?.type === 'query'
 
   return (
-    <div className="flex-shrink-0 border-t border-surface-800 bg-surface-950">
+    <m.div
+      initial={false}
+      animate={{ height: expanded ? 208 : 28 }}
+      transition={{ duration: motionDuration.spatial, ease: motionEase.move }}
+      className="flex-shrink-0 overflow-hidden border-t border-surface-800 bg-surface-950"
+    >
       {/* Header bar — always visible */}
       <div className="flex items-center gap-2 px-3 h-7 cursor-pointer select-none" onClick={() => setExpanded(e => !e)}>
         <Terminal size={12} className="text-slate-500" />
@@ -45,29 +53,44 @@ export default function QueryLogPanel() {
           </span>
         )}
         <div className="flex-1" />
+        <AnimatePresence initial={false}>
         {expanded && entries.length > 0 && (
-          <button
+          <m.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1, transition: surfaceTransition }}
+            exit={{ opacity: 0, scale: 0.8, transition: exitTransition }}
             onClick={e => { e.stopPropagation(); clearLog() }}
             className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1"
           >
             Clear
-          </button>
+          </m.button>
         )}
-        {expanded ? (
-          <ChevronDown size={12} className="text-slate-500" />
-        ) : (
-          <ChevronUp size={12} className="text-slate-500" />
-        )}
+        </AnimatePresence>
+        <m.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: motionDuration.micro }} className="text-slate-500">
+          <ChevronUp size={12} />
+        </m.span>
       </div>
 
       {/* Log table — visible when expanded */}
-      {expanded && (
-        <div className="h-[180px] overflow-y-auto">
+      <div className={`h-[180px] overflow-y-auto ${expanded ? '' : 'pointer-events-none'}`} aria-hidden={!expanded || undefined}>
+        <AnimatePresence initial={false} mode="wait">
           {entries.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-slate-600 text-xs">
+            <m.div
+              key="empty-log"
+              initial={{ opacity: 0, y: motionDistance.subtle }}
+              animate={{ opacity: 1, y: 0, transition: surfaceTransition }}
+              exit={{ opacity: 0, transition: exitTransition }}
+              className="flex items-center justify-center h-full text-slate-600 text-xs"
+            >
               No queries logged yet
-            </div>
+            </m.div>
           ) : (
+            <m.div
+              key="query-entries"
+              initial={{ opacity: 0, y: -motionDistance.subtle }}
+              animate={{ opacity: 1, y: 0, transition: surfaceTransition }}
+              exit={{ opacity: 0, y: motionDistance.surface, scale: 0.98, transition: exitTransition }}
+            >
             <table className="w-full text-xs border-collapse">
               <thead className="sticky top-0 bg-surface-900">
                 <tr className="text-slate-500">
@@ -144,9 +167,10 @@ export default function QueryLogPanel() {
                 })}
               </tbody>
             </table>
+            </m.div>
           )}
-        </div>
-      )}
-    </div>
+        </AnimatePresence>
+      </div>
+    </m.div>
   )
 }

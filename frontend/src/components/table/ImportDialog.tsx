@@ -2,10 +2,14 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { Upload, ChevronRight, ChevronDown } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
+import { LoadingState } from '../ui/Spinner'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
 import { useSchemaStore } from '../../store/schemaStore'
 import { apiFetch } from '../../api/client'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 interface Props {
   open: boolean
@@ -207,7 +211,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
 
         {/* Preview */}
         {previewLoading && (
-          <p className="text-xs text-slate-500">Loading preview…</p>
+          <LoadingState label="Reading file preview…" compact className="justify-start py-2" />
         )}
         {previewError && (
           <p role="alert" className="text-xs text-red-400">{previewError}</p>
@@ -285,8 +289,9 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             CSV Format Options
           </button>
+          <AnimatePresence initial={false}>
           {showAdvanced && (
-            <div className="mt-3 flex flex-col gap-3 pl-4 border-l border-surface-700">
+            <m.div initial={{ opacity: 0, height: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, height: 'auto', y: 0, transition: surfaceTransition }} exit={{ opacity: 0, height: 0, y: -motionDistance.subtle, transition: exitTransition }} className="mt-3 flex flex-col gap-3 overflow-hidden pl-4 border-l border-surface-700">
               <div className="flex gap-3">
                 <Select
                   label="Delimiter"
@@ -348,8 +353,9 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
                   <option value="ascii">ASCII</option>
                 </Select>
               </div>
-            </div>
+            </m.div>
           )}
+          </AnimatePresence>
         </div>
 
         {/* Result banner */}

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import TabBar from '../../components/layout/TabBar'
 import { useSessionStore } from '../../store/sessionStore'
 import { useTabStore } from '../../store/tabStore'
+import { useServerConfigStore } from '../../store/serverConfigStore'
 
 describe('TabBar', () => {
   beforeAll(() => {
@@ -13,6 +14,7 @@ describe('TabBar', () => {
     cleanup()
     useTabStore.setState({ tabs: [], activeTabId: null })
     useSessionStore.setState({ activeSessionId: null })
+    useServerConfigStore.setState({ ldapEnabled: false })
   })
 
   it('prevents the right-button press from selecting tab text', () => {
@@ -42,5 +44,20 @@ describe('TabBar', () => {
     fireEvent.contextMenu(screen.getByRole('tab', { name: /customers/i }))
     expect(screen.getByRole('menuitem', { name: 'Close' })).toBeInTheDocument()
     expect(screen.getByRole('menu', { name: 'Tab actions' }).querySelector('.border-t')).not.toBeInTheDocument()
+  })
+
+  it('confirms Close All for clean tabs when LDAPGate is enabled', () => {
+    useServerConfigStore.setState({ ldapEnabled: true })
+    useTabStore.setState({
+      tabs: [{ id: 'tab-1', type: 'query', label: 'Query', sessionId: 'session-1' }],
+      activeTabId: 'tab-1',
+    })
+
+    render(<TabBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Close All' }))
+
+    expect(screen.getByRole('dialog', { name: 'Close All Tabs' })).toBeInTheDocument()
+    expect(screen.getByText(/authenticated session/i)).toBeInTheDocument()
+    expect(useTabStore.getState().tabs).toHaveLength(1)
   })
 })

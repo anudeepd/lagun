@@ -8,6 +8,9 @@ import Button from '../ui/Button'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
 import { showToast } from '../../utils/toast'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 interface Props {
   open: boolean
@@ -319,8 +322,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
               {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
               Advanced CSV Options
             </button>
+            <AnimatePresence initial={false}>
             {showAdvanced && (
-              <div className="mt-3 flex flex-col gap-3 pl-4 border-l border-surface-700">
+              <m.div initial={{ opacity: 0, height: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, height: 'auto', y: 0, transition: surfaceTransition }} exit={{ opacity: 0, height: 0, y: -motionDistance.subtle, transition: exitTransition }} className="mt-3 flex flex-col gap-3 overflow-hidden pl-4 border-l border-surface-700">
                 <div className="flex gap-3">
                   <Select
                     label="Delimiter"
@@ -382,8 +386,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
                     <option value="ascii">ASCII</option>
                   </Select>
                 </div>
-              </div>
+              </m.div>
             )}
+            </AnimatePresence>
           </div>
         )}
         <p className="text-xs text-slate-500">
