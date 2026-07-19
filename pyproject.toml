@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lagun"
-version = "0.1.47"
+version = "0.1.48"
 description = "A web-based MySQL/MariaDB GUI editor"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,7 +51,7 @@ dev = [
     "testcontainers[mysql]>=4.0",
 ]
 ldap = [
-    "ldapgate>=0.1.15",
+    "ldapgate>=0.1.16",
 ]
 
 [tool.pytest.ini_options]

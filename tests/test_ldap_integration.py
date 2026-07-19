@@ -41,6 +41,31 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert '<style nonce="{{ csrf_nonce }}">' in template
     assert '<script nonce="{{ csrf_nonce }}">' in template
     assert '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">' in template
-    assert 'id="password-toggle" aria-label="Show password"' in template
-    assert "password.type = visible ? 'password' : 'text';" in template
+    assert 'class="password-toggle"' not in template
+    assert "password.type = visible ? 'password' : 'text';" not in template
+    assert 'class="feedback-slot" aria-live="polite"' in template
+    assert "sessionStorage.setItem(usernameStorageKey, username.value);" in template
+    assert "document.getElementById('login-error') && savedUsername" in template
+    assert "@media (prefers-reduced-motion: reduce)" in template
+    assert "animation: lagun-surface-in 280ms" in template
+    assert "transform: translateY(10px) scale(.985)" in template
+    assert "bottom: calc(100% + 0.75rem)" in template
+    assert "Secured by" in template
+    assert "security-lock" in template
+    assert "max-width: 380px;" in template
+    assert "min-height: 40px;" in template
+    assert "line-height: 1.25rem;" in template
+    assert ".submit-label { min-width: 4.75rem; }" in template
+    assert "appearance: none;" in template
+    assert "-webkit-appearance: none;" in template
+    assert 'tabindex="-1"' not in template
+    assert '<span class="submit-label" aria-live="polite">Sign in</span>' in template
+    assert "submitLabel.textContent = 'Signing in';" in template
+    assert "btn.setAttribute('aria-busy', 'true');" in template
+    assert "event.preventDefault();" in template
+    assert "requestAnimationFrame(function() {" in template
+    assert "HTMLFormElement.prototype.submit.call(loginForm);" in template
+    assert "::-ms-reveal" not in template
+    assert "::-webkit" not in template
+    assert "@-moz-document" not in template
     assert 'style="' not in template
