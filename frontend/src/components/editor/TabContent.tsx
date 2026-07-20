@@ -1844,9 +1844,7 @@ function TableTab({ tab }: Props) {
                     exit={{ opacity: 0, y: -motionDistance.subtle, transition: exitTransition }}
                     className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-md border border-surface-700 bg-surface-900/95 px-2.5 py-1.5 text-xs text-slate-300 shadow-lg backdrop-blur-sm"
                   >
-                    <m.span animate={{ rotate: 360 }} transition={{ duration: 0.8, ease: 'linear', repeat: Infinity }}>
-                      <RefreshCw size={12} className="text-brand-400" />
-                    </m.span>
+                    <RefreshCw size={12} className="text-brand-400 animate-spin" />
                     Refreshing rows…
                   </m.div>
                 )}
