@@ -18,6 +18,11 @@
   to { opacity: 1; transform: translateX(0) scale(1); }
 }
 
+@keyframes lagun-refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Inter — bundled locally for consistent, readable tabular data across browsers */
 @font-face {
   font-family: 'Inter Variable';

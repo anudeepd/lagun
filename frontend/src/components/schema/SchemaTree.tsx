@@ -288,10 +288,11 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
 
                 <div className={`grid transition-[grid-template-rows,opacity] duration-200 ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
                 <div className="overflow-hidden">
+                <AnimatePresence initial={false}>
                 {tbls.map(tbl => {
                   const starred = isBookmarked(db, tbl.name)
                   return (
-                    <div key={tbl.name} className="group flex items-center hover:bg-surface-800">
+                    <m.div key={tbl.name} layout="position" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0, transition: surfaceTransition }} exit={{ opacity: 0, x: -8, transition: exitTransition }} className="group flex items-center hover:bg-surface-800">
                       <button
                         className="flex min-w-0 flex-1 items-center gap-1.5 py-0.5 pl-7 pr-2 text-slate-400 hover:text-slate-200"
                         onClick={() => openTableTab(sessionId, db, tbl.name)}
@@ -313,9 +314,10 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                       >
                         <Star size={10} fill={starred ? 'currentColor' : 'none'} />
                       </m.button>
-                    </div>
+                    </m.div>
                   )
                 })}
+                </AnimatePresence>
                 </div>
                 </div>
               </div>

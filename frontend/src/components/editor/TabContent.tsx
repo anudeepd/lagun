@@ -11,6 +11,7 @@ import QueryEditor from './QueryEditor'
 import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
+import Spinner from '../ui/Spinner'
 import Button from '../ui/Button'
 import LimitSelect from '../ui/LimitSelect'
 import RefreshIcon from '../ui/RefreshIcon'
@@ -1505,13 +1506,23 @@ function TableTab({ tab }: Props) {
             transition={surfaceTransition}
             className="relative flex items-center min-w-40 rounded origin-center"
           >
-            <m.span
-              className="absolute left-2 z-10 text-slate-500 pointer-events-none"
-              animate={{ scale: searchFocused ? 1.12 : 1, color: searchFocused ? '#60a5fa' : '#64748b' }}
-              transition={surfaceTransition}
-            >
-              <Search size={11} />
-            </m.span>
+            <span className="absolute left-2 z-10 pointer-events-none">
+              <span className="relative block">
+                <Search size={11} className={`${searchFocused ? 'text-brand-400 scale-112' : 'text-slate-500'} transition-colors duration-200`} />
+                <AnimatePresence>
+                  {refreshing && globalSearch && (
+                    <m.span
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1, transition: surfaceTransition }}
+                      exit={{ opacity: 0, scale: 0.5, transition: exitTransition }}
+                      className="absolute -right-0.5 -bottom-0.5"
+                    >
+                      <Spinner size="sm" className="text-brand-400" />
+                    </m.span>
+                  )}
+                </AnimatePresence>
+              </span>
+            </span>
             <input
               type="text"
               value={globalSearch}
@@ -1673,27 +1684,6 @@ function TableTab({ tab }: Props) {
             </button>
           </>
         )}
-        {/* Initial load status. Refresh feedback stays over the grid to avoid toolbar layout shifts. */}
-        <AnimatePresence initial={false}>
-        {view === 'data' && initialLoading && (
-          <m.div
-            initial={{ opacity: 0, width: 0, x: motionDistance.subtle }}
-            animate={{ opacity: 1, width: 'auto', x: 0, transition: surfaceTransition }}
-            exit={{ opacity: 0, width: 0, x: motionDistance.subtle, transition: exitTransition }}
-            className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap"
-          >
-            <RefreshCw size={12} className="animate-spin text-slate-400" />
-            <span className="text-xs text-slate-500">Loading {tab.table}…</span>
-            <button
-              onClick={() => loadAbortRef.current?.abort()}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
-              title="Cancel loading"
-            >
-              <X size={10} /> Cancel
-            </button>
-          </m.div>
-        )}
-        </AnimatePresence>
         {/* View toggle */}
         <div className="relative flex rounded overflow-hidden border border-surface-700 bg-surface-800">
           <button
@@ -1741,18 +1731,16 @@ function TableTab({ tab }: Props) {
           </button>
         )}
         {view === 'data' && (
-          <m.button
+          <button
             type="button"
             onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); loadData() }}
             title={refreshing ? 'Refreshing data' : 'Refresh data'}
             aria-label={refreshing ? 'Refreshing data' : 'Refresh data'}
             disabled={initialLoading || refreshing}
-            whileTap={initialLoading || refreshing ? undefined : { scale: 0.9 }}
-            transition={surfaceTransition}
-            className={`lagun-icon-button rounded p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-wait ${refreshing ? 'text-slate-400' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`rounded p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-wait ${refreshing ? 'text-slate-400' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <RefreshIcon refreshing={refreshing} size={12} />
-          </m.button>
+          </button>
         )}
       </div>
 
