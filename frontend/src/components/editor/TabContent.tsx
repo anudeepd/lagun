@@ -1836,19 +1836,12 @@ function TableTab({ tab }: Props) {
                 insertDraftAnchors={insertDraftAnchors}
               onSortActiveChange={setDataSortActive}
             />
-              <AnimatePresence>
                 {refreshing && (
-                  <m.div
-                    initial={{ opacity: 0, y: -motionDistance.subtle }}
-                    animate={{ opacity: 1, y: 0, transition: surfaceTransition }}
-                    exit={{ opacity: 0, y: -motionDistance.subtle, transition: exitTransition }}
-                    className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-md border border-surface-700 bg-surface-900/95 px-2.5 py-1.5 text-xs text-slate-300 shadow-lg backdrop-blur-sm"
-                  >
+                  <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-md border border-surface-700 bg-surface-900 px-2.5 py-1.5 text-xs text-slate-300 shadow-lg">
                     <RefreshCw size={12} className="text-brand-400 animate-spin" />
                     Refreshing rows…
-                  </m.div>
+                  </div>
                 )}
-              </AnimatePresence>
             </m.div>
           </Suspense>
           ) : (
