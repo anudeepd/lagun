@@ -11,7 +11,6 @@ import QueryEditor from './QueryEditor'
 import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
 import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
-import Spinner from '../ui/Spinner'
 import Button from '../ui/Button'
 import LimitSelect from '../ui/LimitSelect'
 import RefreshIcon from '../ui/RefreshIcon'
@@ -1507,21 +1506,7 @@ function TableTab({ tab }: Props) {
             className="relative flex items-center min-w-40 rounded origin-center"
           >
             <span className="absolute left-2 z-10 pointer-events-none">
-              <span className="relative block">
                 <Search size={11} className={`${searchFocused ? 'text-brand-400 scale-112' : 'text-slate-500'} transition-colors duration-200`} />
-                <AnimatePresence>
-                  {refreshing && globalSearch && (
-                    <m.span
-                      initial={{ opacity: 0, scale: 0.5 }}
-                      animate={{ opacity: 1, scale: 1, transition: surfaceTransition }}
-                      exit={{ opacity: 0, scale: 0.5, transition: exitTransition }}
-                      className="absolute -right-0.5 -bottom-0.5"
-                    >
-                      <Spinner size="sm" className="text-brand-400" />
-                    </m.span>
-                  )}
-                </AnimatePresence>
-              </span>
             </span>
             <input
               type="text"
