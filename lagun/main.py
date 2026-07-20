@@ -53,7 +53,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.52", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.53", lifespan=lifespan)
 
 
 def _audit_details(body: bytes) -> str | None:

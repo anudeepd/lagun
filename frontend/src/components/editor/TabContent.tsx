@@ -10,7 +10,7 @@ import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
 import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './ResultGrid'
 import ResultToolbar from './ResultToolbar'
-import { RefreshCw, Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
+import { Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
 import LimitSelect from '../ui/LimitSelect'
 import RefreshIcon from '../ui/RefreshIcon'
@@ -1836,12 +1836,6 @@ function TableTab({ tab }: Props) {
                 insertDraftAnchors={insertDraftAnchors}
               onSortActiveChange={setDataSortActive}
             />
-                {refreshing && (
-                  <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-md border border-surface-700 bg-surface-900 px-2.5 py-1.5 text-xs text-slate-300 shadow-lg">
-                    <RefreshCw size={12} className="text-brand-400 animate-spin" />
-                    Refreshing rows…
-                  </div>
-                )}
             </m.div>
           </Suspense>
           ) : (
