@@ -1808,15 +1808,11 @@ function TableTab({ tab }: Props) {
         {view === 'data' && (
           <div className="absolute inset-0 motion-safe:animate-[lagun-tab-content-in_var(--motion-duration-surface)_var(--motion-ease-move)]">
           {
-          initialLoading ? (
-            <LoadingState label={`Loading rows from ${tab.table}…`} />
+          initialLoading || refreshing ? (
+            <LoadingState label={initialLoading ? `Loading rows from ${tab.table}…` : 'Searching…'} />
           ) : result ? (
           <Suspense fallback={<LoadingState label="Preparing data grid…" />}>
-            <m.div
-              className="relative h-full motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]"
-              animate={{ opacity: refreshing ? 0.72 : 1, scale: refreshing ? 0.998 : 1 }}
-              transition={surfaceTransition}
-            >
+            <div className="relative h-full">
             <ResultGrid
                 ref={gridRef}
                 result={result}
@@ -1836,7 +1832,7 @@ function TableTab({ tab }: Props) {
                 insertDraftAnchors={insertDraftAnchors}
               onSortActiveChange={setDataSortActive}
             />
-            </m.div>
+            </div>
           </Suspense>
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-slate-600 motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]">
