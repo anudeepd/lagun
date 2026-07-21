@@ -27,6 +27,7 @@ export default defineConfig({
     outDir: '../lagun/static',
     emptyOutDir: true,
     assetsInlineLimit: 200_000,
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
         manualChunks: {

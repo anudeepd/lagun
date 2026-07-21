@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { ChevronRight, Database, Table2, Terminal, Trash2, Scissors, Upload, Search, X, Star } from 'lucide-react'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useTabStore } from '../../store/tabStore'
 import { api } from '../../api/client'
 import type { TableInfo } from '../../types'
-import ImportDialog from '../table/ImportDialog'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { showToast } from '../../utils/toast'
 import useMenuKeyboard from '../../hooks/useMenuKeyboard'
@@ -13,6 +12,8 @@ import RefreshIcon from '../ui/RefreshIcon'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+
+const ImportDialog = lazy(() => import('../table/ImportDialog'))
 
 interface Props {
   sessionId: string
@@ -394,6 +395,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       </AnimatePresence>
 
       {importTarget && (
+        <Suspense fallback={null}>
         <ImportDialog
           open={!!importTarget}
           onClose={() => setImportTarget(null)}
@@ -401,6 +403,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           database={importTarget.db}
           table={importTarget.table}
         />
+        </Suspense>
       )}
       <ConfirmDialog
         open={Boolean(destructiveTarget)}
