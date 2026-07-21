@@ -1797,7 +1797,16 @@ function TableTab({ tab }: Props) {
       {/* Content */}
       <div className="relative flex-1 overflow-hidden min-h-0">
         {schemaVisited && tab.database && tab.table && (
-          <div className={`lagun-view-panel absolute inset-0 ${view === 'schema' ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`} aria-hidden={view !== 'schema' || undefined}>
+          <m.div
+            initial={false}
+            animate={{
+              opacity: view === 'schema' ? 1 : 0,
+              x: view === 'schema' ? 0 : motionDistance.subtle,
+              transition: view === 'schema' ? surfaceTransition : exitTransition,
+            }}
+            className={`lagun-view-panel absolute inset-0 ${view === 'schema' ? 'visible' : 'invisible pointer-events-none'}`}
+            aria-hidden={view !== 'schema' || undefined}
+          >
             <Suspense fallback={<LoadingState label={`Preparing schema for ${tab.table}…`} />}>
               <TableSchemaView
                 sessionId={tab.sessionId}
@@ -1805,10 +1814,19 @@ function TableTab({ tab }: Props) {
                 table={tab.table}
               />
             </Suspense>
-          </div>
+          </m.div>
         )}
         {dataVisited && (
-          <div className={`lagun-view-panel absolute inset-0 ${view === 'data' ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`} aria-hidden={view !== 'data' || undefined}>
+          <m.div
+            initial={false}
+            animate={{
+              opacity: view === 'data' ? 1 : 0,
+              x: view === 'data' ? 0 : -motionDistance.subtle,
+              transition: view === 'data' ? surfaceTransition : exitTransition,
+            }}
+            className={`lagun-view-panel absolute inset-0 ${view === 'data' ? 'visible' : 'invisible pointer-events-none'}`}
+            aria-hidden={view !== 'data' || undefined}
+          >
           {
           initialLoading ? (
             <LoadingState label={initialLoading ? `Loading rows from ${tab.table}…` : 'Searching…'} />
@@ -1847,7 +1865,7 @@ function TableTab({ tab }: Props) {
             </div>
           )
           }
-          </div>
+          </m.div>
         )}
       </div>
 
