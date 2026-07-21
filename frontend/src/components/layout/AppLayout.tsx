@@ -108,17 +108,21 @@ export default function AppLayout() {
               <p className="text-sm">Select a table from the sidebar or open a query tab</p>
             </m.div>
           ) : (
-            tabs.map(tab => (
+            tabs.map(tab => {
+              const active = activeTabId === tab.id
+              return (
               <div
                 key={tab.id}
                 id={`tab-panel-${tab.id}`}
                 role="tabpanel"
                 aria-labelledby={`tab-${tab.id}`}
-                className={`h-full min-h-0 ${activeTabId === tab.id ? 'motion-safe:animate-[lagun-tab-content-in_var(--motion-duration-surface)_var(--motion-ease-move)]' : 'hidden'}`}
+                aria-hidden={!active || undefined}
+                className={`h-full min-h-0 transition-[opacity,transform,visibility] duration-[var(--motion-duration-surface)] ease-[var(--motion-ease-move)] ${active ? 'relative visible translate-x-0 opacity-100' : 'pointer-events-none absolute inset-0 invisible translate-x-2 opacity-0'}`}
               >
                 <TabContent tab={tab} />
               </div>
-            ))
+              )
+            })
           )}
         </main>
         <QueryLogPanel />

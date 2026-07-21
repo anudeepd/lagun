@@ -75,7 +75,7 @@ export default function SessionList() {
                 initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
                 animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
                 exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
-                className="absolute right-0 top-6 z-popover w-40 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg motion-safe:animate-[lagun-surface-in_var(--motion-duration-surface)_var(--motion-ease-move)]"
+                className="absolute right-0 top-6 z-popover w-40 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"
                 onMouseLeave={() => setMenuId(null)}
               >
                 {!s.managed && <button

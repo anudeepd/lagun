@@ -770,7 +770,7 @@ function QueryTab({ tab }: Props) {
         <div className="flex-1 min-h-0 overflow-hidden">
           <AnimatePresence initial={false} mode="wait">
           {results.length > 0 ? (
-            <m.div key={results[resultIdx].id} initial={{ opacity: 0, x: motionDistance.surface }} animate={{ opacity: 1, x: 0, transition: surfaceTransition }} exit={{ opacity: 0, x: -motionDistance.surface, transition: exitTransition }} className="h-full">
+            <div key={results[resultIdx].id} className="h-full">
             {results[resultIdx].scriptResult ? (
               <div className="p-4 overflow-y-auto h-full">
                 <Suspense fallback={null}>
@@ -790,7 +790,7 @@ function QueryTab({ tab }: Props) {
                 />
               </Suspense>
             )}
-            </m.div>
+            </div>
           ) : (
             <m.div key="no-results" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex items-center justify-center h-full text-slate-600 text-sm">
               Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
@@ -881,6 +881,7 @@ function TableTab({ tab }: Props) {
   const initialDataState = normalizeDataTabState(tab.dataState)
   const [view, setView] = useState<'schema' | 'data'>(initialDataState.view)
   const [schemaVisited, setSchemaVisited] = useState(initialDataState.view === 'schema')
+  const [dataVisited, setDataVisited] = useState(initialDataState.view === 'data')
   const [result, setResult] = useState<QueryResult | null>(null)
   const [columns, setColumns] = useState<ColumnInfo[]>([])
   const [initialLoading, setInitialLoading] = useState(false)
@@ -1013,6 +1014,7 @@ function TableTab({ tab }: Props) {
 
   useEffect(() => {
     if (view === 'data') {
+      setDataVisited(true)
       loadDataRef.current()
     } else {
       setSchemaVisited(true)
@@ -1795,7 +1797,7 @@ function TableTab({ tab }: Props) {
       {/* Content */}
       <div className="relative flex-1 overflow-hidden min-h-0">
         {schemaVisited && tab.database && tab.table && (
-          <div className={`absolute inset-0 ${view === 'schema' ? 'motion-safe:animate-[lagun-tab-content-in_var(--motion-duration-surface)_var(--motion-ease-move)]' : 'invisible pointer-events-none'}`} aria-hidden={view !== 'schema' || undefined}>
+          <div className={`lagun-view-panel absolute inset-0 ${view === 'schema' ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`} aria-hidden={view !== 'schema' || undefined}>
             <Suspense fallback={<LoadingState label={`Preparing schema for ${tab.table}…`} />}>
               <TableSchemaView
                 sessionId={tab.sessionId}
@@ -1805,14 +1807,14 @@ function TableTab({ tab }: Props) {
             </Suspense>
           </div>
         )}
-        {view === 'data' && (
-          <div className="absolute inset-0 motion-safe:animate-[lagun-tab-content-in_var(--motion-duration-surface)_var(--motion-ease-move)]">
+        {dataVisited && (
+          <div className={`lagun-view-panel absolute inset-0 ${view === 'data' ? 'visible opacity-100' : 'invisible pointer-events-none opacity-0'}`} aria-hidden={view !== 'data' || undefined}>
           {
-          initialLoading || refreshing ? (
+          initialLoading ? (
             <LoadingState label={initialLoading ? `Loading rows from ${tab.table}…` : 'Searching…'} />
           ) : result ? (
           <Suspense fallback={<LoadingState label="Preparing data grid…" />}>
-            <div className="relative h-full">
+            <div className="relative h-full lagun-grid-surface">
             <ResultGrid
                 ref={gridRef}
                 result={result}
@@ -1832,10 +1834,15 @@ function TableTab({ tab }: Props) {
                 insertDraftAnchors={insertDraftAnchors}
               onSortActiveChange={setDataSortActive}
             />
+            {refreshing && (
+              <div className="absolute inset-0 z-10 flex items-start justify-center bg-surface-950/35 pt-3" aria-live="polite" aria-label="Refreshing data">
+                <LoadingState label="Searching…" />
+              </div>
+            )}
             </div>
           </Suspense>
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-600 motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]">
+            <div className="flex h-full items-center justify-center text-sm text-slate-600">
               No data loaded
             </div>
           )
