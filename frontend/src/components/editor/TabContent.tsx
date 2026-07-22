@@ -28,6 +28,8 @@ import { isMac } from '../../utils/platform'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+import { useHandoff } from '../../motion/useHandoff'
+import TransitionVeil from '../ui/TransitionVeil'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const loadResultGrid = () => import('./ResultGrid')
@@ -82,13 +84,14 @@ try {
 
 interface Props {
   tab: Tab
+  active?: boolean
 }
 
-export default function TabContent({ tab }: Props) {
+export default function TabContent({ tab, active = true }: Props) {
   if (tab.type === 'query') {
     return <QueryTab tab={tab} />
   }
-  return <TableTab tab={tab} />
+  return <TableTab tab={tab} active={active} />
 }
 
 export function splitStatements(sql: string): string[] {
@@ -877,7 +880,7 @@ function QueryTab({ tab }: Props) {
   )
 }
 
-function TableTab({ tab }: Props) {
+function TableTab({ tab, active = true }: Props) {
   const initialDataState = normalizeDataTabState(tab.dataState)
   const [view, setView] = useState<'schema' | 'data'>(initialDataState.view)
   const [schemaVisited, setSchemaVisited] = useState(initialDataState.view === 'schema')
@@ -885,6 +888,7 @@ function TableTab({ tab }: Props) {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [columns, setColumns] = useState<ColumnInfo[]>([])
   const [initialLoading, setInitialLoading] = useState(false)
+  const viewHandoff = useHandoff(view, view === 'data' ? initialLoading : false)
   const [refreshing, setRefreshing] = useState(false)
   const [limit, setLimit] = useState(initialDataState.limit)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
@@ -1795,17 +1799,24 @@ function TableTab({ tab }: Props) {
       </AnimatePresence>
 
       {/* Content */}
-      <div className="relative flex-1 overflow-hidden min-h-0">
+      <m.div
+        initial={false}
+        animate={{ opacity: active ? 1 : 0 }}
+        transition={active ? surfaceTransition : exitTransition}
+        className="relative flex-1 overflow-hidden min-h-0"
+      >
         {schemaVisited && tab.database && tab.table && (
-          <m.div
+            <m.div
             initial={false}
             animate={{
               opacity: view === 'schema' ? 1 : 0,
-              x: view === 'schema' ? 0 : motionDistance.subtle,
               transition: view === 'schema' ? surfaceTransition : exitTransition,
             }}
-            className={`lagun-view-panel absolute inset-0 ${view === 'schema' ? 'visible' : 'invisible pointer-events-none'}`}
+            className={`lagun-view-panel absolute inset-0 ${view === 'schema' ? 'pointer-events-auto' : 'pointer-events-none'}`}
             aria-hidden={view !== 'schema' || undefined}
+            ref={node => {
+              if (node) (node as HTMLDivElement & { inert: boolean }).inert = view !== 'schema'
+            }}
           >
             <Suspense fallback={<LoadingState label={`Preparing schema for ${tab.table}…`} />}>
               <TableSchemaView
@@ -1817,15 +1828,17 @@ function TableTab({ tab }: Props) {
           </m.div>
         )}
         {dataVisited && (
-          <m.div
+            <m.div
             initial={false}
             animate={{
               opacity: view === 'data' ? 1 : 0,
-              x: view === 'data' ? 0 : -motionDistance.subtle,
               transition: view === 'data' ? surfaceTransition : exitTransition,
             }}
-            className={`lagun-view-panel absolute inset-0 ${view === 'data' ? 'visible' : 'invisible pointer-events-none'}`}
+            className={`lagun-view-panel absolute inset-0 ${view === 'data' ? 'pointer-events-auto' : 'pointer-events-none'}`}
             aria-hidden={view !== 'data' || undefined}
+            ref={node => {
+              if (node) (node as HTMLDivElement & { inert: boolean }).inert = view !== 'data'
+            }}
           >
           {
           initialLoading ? (
@@ -1867,7 +1880,8 @@ function TableTab({ tab }: Props) {
           }
           </m.div>
         )}
-      </div>
+        <TransitionVeil active={viewHandoff} label="Switching view" />
+      </m.div>
 
       {statusMsg && (
         <div className="border-t border-surface-800 bg-surface-900 px-3 py-1.5 motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]">

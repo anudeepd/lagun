@@ -22,10 +22,11 @@
    is switched from display:none, while opacity/transform transitions remain
    composited and interruptible. */
 .lagun-view-panel {
-  will-change: opacity, transform;
+  will-change: opacity;
 }
-.lagun-view-panel.visible {
-  visibility: visible;
+.lagun-tab-panel {
+  backface-visibility: hidden;
+  will-change: opacity;
 }
 .lagun-grid-surface {
   contain: layout paint;

@@ -101,7 +101,7 @@ export default function AppLayout() {
           </button>
         </div>
         <TabBar />
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-hidden min-h-0 focus:outline-none">
+        <main id="main-content" tabIndex={-1} className="relative flex-1 overflow-hidden min-h-0 focus:outline-none">
           {tabs.length === 0 ? (
             <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex h-full flex-col items-center justify-center gap-4 text-slate-500">
               <Logo size="lg" showText={false} className="opacity-40" />
@@ -111,22 +111,19 @@ export default function AppLayout() {
             tabs.map(tab => {
               const active = activeTabId === tab.id
               return (
-              <m.div
+              <div
                 key={tab.id}
                 id={`tab-panel-${tab.id}`}
                 role="tabpanel"
                 aria-labelledby={`tab-${tab.id}`}
                 aria-hidden={!active || undefined}
-                initial={false}
-                animate={{
-                  opacity: active ? 1 : 0,
-                  x: active ? 0 : 10,
-                  transition: active ? surfaceTransition : exitTransition,
+                className={`h-full min-h-0 ${active ? 'relative' : 'pointer-events-none absolute inset-0 invisible'}`}
+                ref={node => {
+                  if (node) (node as HTMLDivElement & { inert: boolean }).inert = !active
                 }}
-                className={`h-full min-h-0 ${active ? 'relative visible' : 'pointer-events-none absolute inset-0 invisible'}`}
               >
-                <TabContent tab={tab} />
-              </m.div>
+                <TabContent tab={tab} active={active} />
+              </div>
               )
             })
           )}
