@@ -1,4 +1,5 @@
 """Sessions API: CRUD + connection test."""
+
 import asyncio
 import ssl as ssl_mod
 import time
@@ -10,7 +11,13 @@ from lagun.db import session_store, pool as pool_mod
 from lagun.db.session_store import get_session_password
 from lagun.db.utils import SYSTEM_DBS
 from lagun.auth import request_username
-from lagun.models.session import SessionCreate, SessionRead, SessionUpdate, TestResult, ProbeRequest
+from lagun.models.session import (
+    SessionCreate,
+    SessionRead,
+    SessionUpdate,
+    TestResult,
+    ProbeRequest,
+)
 
 router = APIRouter(tags=["sessions"])
 
@@ -18,12 +25,18 @@ router = APIRouter(tags=["sessions"])
 @router.get("/sessions", response_model=list[SessionRead])
 async def list_sessions(request: Request):
     username = request_username(request)
-    return await session_store.list_sessions_for_user(username) if username else await session_store.list_sessions()
+    return (
+        await session_store.list_sessions_for_user(username)
+        if username
+        else await session_store.list_sessions()
+    )
 
 
 @router.post("/sessions", response_model=SessionRead, status_code=201)
 async def create_session(data: SessionCreate, request: Request):
-    return await session_store.create_session(data, owner_username=request_username(request))
+    return await session_store.create_session(
+        data, owner_username=request_username(request)
+    )
 
 
 @router.get("/sessions/{session_id}", response_model=SessionRead)
@@ -58,7 +71,6 @@ async def delete_session(session_id: str, request: Request):
     await pool_mod.close_pool(session_id)
 
 
-
 # Simple rate limiter for probe endpoint
 _probe_semaphore = asyncio.Semaphore(3)  # max 3 concurrent probes
 _probe_timestamps: list[float] = []
@@ -66,13 +78,20 @@ _PROBE_RATE_LIMIT = 60  # max probes per minute
 _PROBE_WINDOW = 60.0  # seconds
 
 
-async def _probe_connection(host: str, port: int, user: str, password: str, ssl_enabled: bool = False) -> TestResult:
+async def _probe_connection(
+    host: str, port: int, user: str, password: str, ssl_enabled: bool = False
+) -> TestResult:
     t0 = time.monotonic()
     conn = None
     try:
         ssl_ctx = ssl_mod.create_default_context() if ssl_enabled else None
         conn = await aiomysql.connect(
-            host=host, port=port, user=user, password=password, connect_timeout=5, ssl=ssl_ctx,
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            connect_timeout=5,
+            ssl=ssl_ctx,
         )
         latency = (time.monotonic() - t0) * 1000
         async with conn.cursor() as cur:
@@ -82,11 +101,18 @@ async def _probe_connection(host: str, port: int, user: str, password: str, ssl_
             await cur.execute("SHOW DATABASES")
             db_rows = await cur.fetchall()
         databases = [r[0] for r in db_rows if r[0].lower() not in SYSTEM_DBS]
-        return TestResult(ok=True, server_version=server_version,
-                          latency_ms=round(latency, 2), databases=databases)
+        return TestResult(
+            ok=True,
+            server_version=server_version,
+            latency_ms=round(latency, 2),
+            databases=databases,
+        )
     except Exception as exc:
-        return TestResult(ok=False, error=str(exc),
-                          latency_ms=round((time.monotonic() - t0) * 1000, 2))
+        return TestResult(
+            ok=False,
+            error=str(exc),
+            latency_ms=round((time.monotonic() - t0) * 1000, 2),
+        )
     finally:
         if conn:
             conn.close()
@@ -99,9 +125,13 @@ async def probe_connection(data: ProbeRequest):
         now = time.monotonic()
         _probe_timestamps[:] = [t for t in _probe_timestamps if now - t < _PROBE_WINDOW]
         if len(_probe_timestamps) >= _PROBE_RATE_LIMIT:
-            raise HTTPException(429, "Too many probe requests. Please wait before trying again.")
+            raise HTTPException(
+                429, "Too many probe requests. Please wait before trying again."
+            )
         _probe_timestamps.append(now)
-        return await _probe_connection(data.host, data.port, data.username, data.password, data.ssl_enabled)
+        return await _probe_connection(
+            data.host, data.port, data.username, data.password, data.ssl_enabled
+        )
 
 
 @router.post("/sessions/{session_id}/test", response_model=TestResult)
@@ -110,4 +140,10 @@ async def test_session(session_id: str):
     if not session:
         raise HTTPException(404, "Session not found")
     password = await get_session_password(session_id)
-    return await _probe_connection(session.host, session.port, session.username, password or "", session.ssl_enabled)
+    return await _probe_connection(
+        session.host,
+        session.port,
+        session.username,
+        password or "",
+        session.ssl_enabled,
+    )

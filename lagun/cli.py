@@ -1,4 +1,5 @@
 """CLI entry point for Lagun."""
+
 import os
 import asyncio
 import logging
@@ -30,17 +31,44 @@ def _configure_logging(log_file: Path | None) -> None:
 @main.command()
 @click.option("--host", default="127.0.0.1", show_default=True, help="Bind host.")
 @click.option("--port", default=8080, show_default=True, help="Bind port.")
-@click.option("--open/--no-open", "open_browser", default=True, show_default=True,
-              help="Open browser on startup.")
-@click.option("--reload", is_flag=True, default=False, help="Auto-reload on code changes (dev).")
-@click.option("--ldap-config", "ldap_config", default=None,
-              type=click.Path(exists=True, dir_okay=False, resolve_path=True),
-              help="Path to ldapgate YAML config to enable LDAP authentication.")
-@click.option("--connections-config", default=None, type=click.Path(exists=True, dir_okay=False, resolve_path=True),
-              help="Server-managed LDAP connection profiles YAML file.")
-@click.option("--log-file", type=click.Path(dir_okay=False, path_type=Path), default=None,
-              help="Append application logs to this file.")
-def serve(host: str, port: int, open_browser: bool, reload: bool, ldap_config: str | None, connections_config: str | None, log_file: Path | None):
+@click.option(
+    "--open/--no-open",
+    "open_browser",
+    default=True,
+    show_default=True,
+    help="Open browser on startup.",
+)
+@click.option(
+    "--reload", is_flag=True, default=False, help="Auto-reload on code changes (dev)."
+)
+@click.option(
+    "--ldap-config",
+    "ldap_config",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, resolve_path=True),
+    help="Path to ldapgate YAML config to enable LDAP authentication.",
+)
+@click.option(
+    "--connections-config",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, resolve_path=True),
+    help="Server-managed LDAP connection profiles YAML file.",
+)
+@click.option(
+    "--log-file",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Append application logs to this file.",
+)
+def serve(
+    host: str,
+    port: int,
+    open_browser: bool,
+    reload: bool,
+    ldap_config: str | None,
+    connections_config: str | None,
+    log_file: Path | None,
+):
     """Start the Lagun web server."""
     url = f"http://{host}:{port}"
 
@@ -80,8 +108,10 @@ def serve(host: str, port: int, open_browser: bool, reload: bool, ldap_config: s
 
 def _print_audit_events(events):
     for event in events:
-        click.echo(f"{event['occurred_at']} {event['username']} {event['method']} {event['path']} status={event['status_code']} {event['duration_ms']}ms")
-        if event['details']:
+        click.echo(
+            f"{event['occurred_at']} {event['username']} {event['method']} {event['path']} status={event['status_code']} {event['duration_ms']}ms"
+        )
+        if event["details"]:
             click.echo(f"  {event['details']}")
 
 
@@ -94,17 +124,27 @@ def audit(ctx: click.Context, username: str | None, since: str | None, limit: in
     """Read or purge the private LDAP activity log."""
     if ctx.invoked_subcommand is None:
         from lagun.db.session_store import init_db, list_audit_events
+
         async def run():
             await init_db()
             return await list_audit_events(username, since, limit)
+
         _print_audit_events(asyncio.run(run()))
 
 
 @audit.command("purge")
-@click.option("--older-than", default=90, show_default=True, type=click.IntRange(1), help="Age in days.")
+@click.option(
+    "--older-than",
+    default=90,
+    show_default=True,
+    type=click.IntRange(1),
+    help="Age in days.",
+)
 def audit_purge(older_than: int):
     from lagun.db.session_store import init_db, purge_audit_events
+
     async def run():
         await init_db()
         return await purge_audit_events(older_than)
+
     click.echo(f"Purged {asyncio.run(run())} audit events")

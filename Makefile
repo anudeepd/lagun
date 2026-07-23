@@ -26,8 +26,8 @@ clean:
 	find . -name "*.pyc" -delete
 
 lint:
-	ruff check lagun/
-	ruff format --check lagun/
+	uv run ruff check lagun/
+	uv run ruff format --check lagun/
 
 test:
 	uv run pytest tests/ -v

@@ -1,4 +1,5 @@
 """aiosqlite CRUD for saved sessions."""
+
 import json
 import os
 import sqlite3
@@ -73,11 +74,18 @@ async def init_db():
         await db.executescript(_SCHEMA)
         # Migrate existing DBs that lack the selected_databases column
         try:
-            await db.execute("ALTER TABLE sessions ADD COLUMN selected_databases TEXT NOT NULL DEFAULT '[]'")
+            await db.execute(
+                "ALTER TABLE sessions ADD COLUMN selected_databases TEXT NOT NULL DEFAULT '[]'"
+            )
             await db.commit()
         except sqlite3.OperationalError:
             pass  # Column already exists
-        for column in ("owner_username TEXT", "managed INTEGER NOT NULL DEFAULT 0", "config_key TEXT", "is_default INTEGER NOT NULL DEFAULT 0"):
+        for column in (
+            "owner_username TEXT",
+            "managed INTEGER NOT NULL DEFAULT 0",
+            "config_key TEXT",
+            "is_default INTEGER NOT NULL DEFAULT 0",
+        ):
             try:
                 await db.execute(f"ALTER TABLE sessions ADD COLUMN {column}")
                 await db.commit()
@@ -102,7 +110,9 @@ def _row_to_model(row: aiosqlite.Row) -> SessionRead:
         ssl_enabled=bool(row["ssl_enabled"]),
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
-        selected_databases=json.loads(row["selected_databases"]) if row["selected_databases"] else [],
+        selected_databases=json.loads(row["selected_databases"])
+        if row["selected_databases"]
+        else [],
         managed=bool(row["managed"]),
         is_default=bool(row["is_default"]),
     )
@@ -129,7 +139,8 @@ async def list_sessions_for_user(username: str) -> list[SessionRead]:
             "LEFT JOIN shared_session_access a ON a.session_id = s.id AND a.username = ? "
             "LEFT JOIN hidden_shared_sessions h ON h.session_id = s.id AND h.username = ? "
             "WHERE s.owner_username = ? OR (s.managed = 1 AND a.username IS NOT NULL AND h.username IS NULL) "
-            "ORDER BY s.is_default DESC, s.name", (username, username, username)
+            "ORDER BY s.is_default DESC, s.name",
+            (username, username, username),
         ) as cur:
             rows = await cur.fetchall()
     return [_row_to_model(r) for r in rows]
@@ -157,16 +168,30 @@ async def get_session_password(session_id: str) -> Optional[str]:
     return decrypt_password(row[0])
 
 
-async def create_session(data: SessionCreate, owner_username: str | None = None) -> SessionRead:
+async def create_session(
+    data: SessionCreate, owner_username: str | None = None
+) -> SessionRead:
     sid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     enc = encrypt_password(data.password)
     async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(
             "INSERT INTO sessions (id, name, host, port, username, password_enc, default_db, query_limit, ssl_enabled, created_at, updated_at, selected_databases, owner_username, managed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
-            (sid, data.name, data.host, data.port, data.username, enc,
-             data.default_db, data.query_limit, int(data.ssl_enabled), now, now,
-             json.dumps(data.selected_databases), owner_username),
+            (
+                sid,
+                data.name,
+                data.host,
+                data.port,
+                data.username,
+                enc,
+                data.default_db,
+                data.query_limit,
+                int(data.ssl_enabled),
+                now,
+                now,
+                json.dumps(data.selected_databases),
+                owner_username,
+            ),
         )
         await db.commit()
     return await get_session(sid)
@@ -227,28 +252,52 @@ async def can_access_session(session_id: str, username: str) -> bool:
 
 async def is_managed_session(session_id: str) -> bool:
     async with aiosqlite.connect(_DB_PATH) as db:
-        async with db.execute("SELECT managed FROM sessions WHERE id=?", (session_id,)) as cur:
+        async with db.execute(
+            "SELECT managed FROM sessions WHERE id=?", (session_id,)
+        ) as cur:
             row = await cur.fetchone()
     return bool(row and row[0])
 
 
 async def hide_shared_session(session_id: str, username: str) -> None:
     async with aiosqlite.connect(_DB_PATH) as db:
-        await db.execute("INSERT OR IGNORE INTO hidden_shared_sessions (session_id, username) VALUES (?, ?)", (session_id, username))
-        await db.commit()
-
-
-async def record_audit_event(*, username: str, method: str, path: str, session_id: str | None,
-                             details: str | None, status_code: int, duration_ms: float) -> None:
-    async with aiosqlite.connect(_DB_PATH) as db:
         await db.execute(
-            "INSERT INTO audit_events (occurred_at, username, method, path, session_id, details, status_code, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (datetime.now(timezone.utc).isoformat(), username, method, path, session_id, details, status_code, duration_ms),
+            "INSERT OR IGNORE INTO hidden_shared_sessions (session_id, username) VALUES (?, ?)",
+            (session_id, username),
         )
         await db.commit()
 
 
-async def list_audit_events(username: str | None = None, since: str | None = None, limit: int = 100) -> list[dict]:
+async def record_audit_event(
+    *,
+    username: str,
+    method: str,
+    path: str,
+    session_id: str | None,
+    details: str | None,
+    status_code: int,
+    duration_ms: float,
+) -> None:
+    async with aiosqlite.connect(_DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO audit_events (occurred_at, username, method, path, session_id, details, status_code, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                datetime.now(timezone.utc).isoformat(),
+                username,
+                method,
+                path,
+                session_id,
+                details,
+                status_code,
+                duration_ms,
+            ),
+        )
+        await db.commit()
+
+
+async def list_audit_events(
+    username: str | None = None, since: str | None = None, limit: int = 100
+) -> list[dict]:
     clauses: list[str] = []
     values: list[object] = []
     if username:
@@ -269,9 +318,12 @@ async def list_audit_events(username: str | None = None, since: str | None = Non
 
 async def purge_audit_events(older_than_days: int) -> int:
     from datetime import timedelta
+
     cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
     async with aiosqlite.connect(_DB_PATH) as db:
-        cur = await db.execute("DELETE FROM audit_events WHERE occurred_at < ?", (cutoff,))
+        cur = await db.execute(
+            "DELETE FROM audit_events WHERE occurred_at < ?", (cutoff,)
+        )
         await db.commit()
         return cur.rowcount
 

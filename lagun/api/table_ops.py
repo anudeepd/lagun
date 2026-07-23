@@ -1,13 +1,25 @@
 """Table and index management endpoints."""
+
 from fastapi import APIRouter, HTTPException
 
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import (
-    quote_ident, validate_engine, validate_charset, validate_collation,
-    validate_index_type, validate_col_type, escape_string_literal,
+    quote_ident,
+    validate_engine,
+    validate_charset,
+    validate_collation,
+    validate_index_type,
+    validate_col_type,
+    escape_string_literal,
 )
-from lagun.models.schema import CreateTableRequest, CreateIndexRequest, SetPrimaryKeyRequest, AddColumnRequest, ModifyColumnRequest
+from lagun.models.schema import (
+    CreateTableRequest,
+    CreateIndexRequest,
+    SetPrimaryKeyRequest,
+    AddColumnRequest,
+    ModifyColumnRequest,
+)
 
 router = APIRouter(tags=["table_ops"])
 
@@ -33,8 +45,14 @@ async def create_table(session_id: str, db: str, req: CreateTableRequest):
         col_type = validate_col_type(col.type)
         nullable = "" if col.nullable else " NOT NULL"
         auto_inc = " AUTO_INCREMENT" if col.auto_increment else ""
-        default = f" DEFAULT '{escape_string_literal(col.default)}'" if col.default is not None else ""
-        comment = f" COMMENT '{escape_string_literal(col.comment)}'" if col.comment else ""
+        default = (
+            f" DEFAULT '{escape_string_literal(col.default)}'"
+            if col.default is not None
+            else ""
+        )
+        comment = (
+            f" COMMENT '{escape_string_literal(col.comment)}'" if col.comment else ""
+        )
         col_defs.append(f"  {name_q} {col_type}{nullable}{auto_inc}{default}{comment}")
         if col.primary_key:
             pk_cols.append(name_q)
@@ -79,7 +97,9 @@ async def truncate_table(session_id: str, db: str, table: str):
     return {"ok": True}
 
 
-@router.post("/sessions/{session_id}/databases/{db}/tables/{table}/indexes", status_code=201)
+@router.post(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/indexes", status_code=201
+)
 async def create_index(session_id: str, db: str, table: str, req: CreateIndexRequest):
     pool = await _pool(session_id)
     unique = "UNIQUE " if req.unique else ""
@@ -94,7 +114,9 @@ async def create_index(session_id: str, db: str, table: str, req: CreateIndexReq
     return {"ok": True, "sql": sql}
 
 
-@router.delete("/sessions/{session_id}/databases/{db}/tables/{table}/indexes/{index_name}")
+@router.delete(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/indexes/{index_name}"
+)
 async def drop_index(session_id: str, db: str, table: str, index_name: str):
     pool = await _pool(session_id)
     sql = f"DROP INDEX {quote_ident(index_name)} ON {quote_ident(db)}.{quote_ident(table)}"
@@ -104,8 +126,12 @@ async def drop_index(session_id: str, db: str, table: str, index_name: str):
     return {"ok": True}
 
 
-@router.post("/sessions/{session_id}/databases/{db}/tables/{table}/primary-key", status_code=201)
-async def set_primary_key(session_id: str, db: str, table: str, req: SetPrimaryKeyRequest):
+@router.post(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/primary-key", status_code=201
+)
+async def set_primary_key(
+    session_id: str, db: str, table: str, req: SetPrimaryKeyRequest
+):
     if not req.columns:
         raise HTTPException(400, "At least one column is required for primary key")
     pool = await _pool(session_id)
@@ -115,7 +141,9 @@ async def set_primary_key(session_id: str, db: str, table: str, req: SetPrimaryK
 
     # Try combined DROP + ADD first (when table already has a PK),
     # fall back to just ADD if no existing PK.
-    sql_combined = f"ALTER TABLE {db_q}.{tbl_q} DROP PRIMARY KEY, ADD PRIMARY KEY ({cols})"
+    sql_combined = (
+        f"ALTER TABLE {db_q}.{tbl_q} DROP PRIMARY KEY, ADD PRIMARY KEY ({cols})"
+    )
     sql_add_only = f"ALTER TABLE {db_q}.{tbl_q} ADD PRIMARY KEY ({cols})"
 
     async with pool.acquire() as conn:
@@ -144,14 +172,19 @@ async def drop_primary_key(session_id: str, db: str, table: str):
     return {"ok": True, "sql": sql}
 
 
-
-@router.post("/sessions/{session_id}/databases/{db}/tables/{table}/columns", status_code=201)
+@router.post(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/columns", status_code=201
+)
 async def add_column(session_id: str, db: str, table: str, req: AddColumnRequest):
     pool = await _pool(session_id)
     col_q = quote_ident(req.name)
     col_type = validate_col_type(req.type)
     nullable = "" if req.nullable else " NOT NULL"
-    default = f" DEFAULT '{escape_string_literal(req.default)}'" if req.default is not None else ""
+    default = (
+        f" DEFAULT '{escape_string_literal(req.default)}'"
+        if req.default is not None
+        else ""
+    )
     comment = f" COMMENT '{escape_string_literal(req.comment)}'" if req.comment else ""
     sql = (
         f"ALTER TABLE {quote_ident(db)}.{quote_ident(table)} "
@@ -164,7 +197,9 @@ async def add_column(session_id: str, db: str, table: str, req: AddColumnRequest
 
 
 @router.put("/sessions/{session_id}/databases/{db}/tables/{table}/columns/{column}")
-async def modify_column(session_id: str, db: str, table: str, column: str, req: ModifyColumnRequest):
+async def modify_column(
+    session_id: str, db: str, table: str, column: str, req: ModifyColumnRequest
+):
     pool = await _pool(session_id)
     new_name = req.name or column
     col_type = validate_col_type(req.type)
@@ -174,7 +209,11 @@ async def modify_column(session_id: str, db: str, table: str, column: str, req: 
         nullable = " NOT NULL"
     else:
         nullable = ""
-    default = f" DEFAULT '{escape_string_literal(req.default)}'" if req.default is not None else ""
+    default = (
+        f" DEFAULT '{escape_string_literal(req.default)}'"
+        if req.default is not None
+        else ""
+    )
     comment = f" COMMENT '{escape_string_literal(req.comment)}'" if req.comment else ""
 
     if req.name and req.name != column:

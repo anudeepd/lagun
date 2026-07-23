@@ -1,4 +1,5 @@
 """Config export/import: backup and restore saved connection sessions."""
+
 import base64
 import json
 import os
@@ -13,7 +14,11 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from lagun.db import session_store
-from lagun.db.crypto import decrypt_password, decrypt_with_passphrase, encrypt_with_passphrase
+from lagun.db.crypto import (
+    decrypt_password,
+    decrypt_with_passphrase,
+    encrypt_with_passphrase,
+)
 from lagun.models.session import SessionCreate
 
 router = APIRouter(tags=["config"])
@@ -32,6 +37,8 @@ async def get_server_config():
         "ldap_enabled": ldap_enabled,
         "ldap_idle_timeout": max(0, idle_timeout) if ldap_enabled else 0,
     }
+
+
 _KDF_ITERATIONS = 600_000
 
 
@@ -47,7 +54,9 @@ class ImportResult(BaseModel):
 @router.post("/config/export")
 async def export_config(req: ExportRequest):
     if not req.passphrase:
-        raise HTTPException(400, "A passphrase is required to protect the exported passwords")
+        raise HTTPException(
+            400, "A passphrase is required to protect the exported passwords"
+        )
 
     raw_rows = await session_store.list_sessions_raw()
     salt_bytes = secrets.token_bytes(16)
@@ -56,28 +65,34 @@ async def export_config(req: ExportRequest):
     sessions_out = []
     for s in raw_rows:
         plaintext = decrypt_password(s["password_enc"])
-        sessions_out.append({
-            "name":               s["name"],
-            "host":               s["host"],
-            "port":               s["port"],
-            "username":           s["username"],
-            "password_enc":       encrypt_with_passphrase(plaintext, req.passphrase, salt_bytes),
-            "default_db":         s["default_db"],
-            "query_limit":        s["query_limit"],
-            "ssl_enabled":        bool(s["ssl_enabled"]),
-            "selected_databases": json.loads(s["selected_databases"] or "[]"),
-        })
+        sessions_out.append(
+            {
+                "name": s["name"],
+                "host": s["host"],
+                "port": s["port"],
+                "username": s["username"],
+                "password_enc": encrypt_with_passphrase(
+                    plaintext, req.passphrase, salt_bytes
+                ),
+                "default_db": s["default_db"],
+                "query_limit": s["query_limit"],
+                "ssl_enabled": bool(s["ssl_enabled"]),
+                "selected_databases": json.loads(s["selected_databases"] or "[]"),
+            }
+        )
 
     payload = {
-        "version":        _EXPORT_VERSION,
-        "exported_at":    datetime.now(timezone.utc).isoformat(),
-        "kdf":            "pbkdf2-hmac-sha256",
-        "kdf_salt":       salt_b64,
+        "version": _EXPORT_VERSION,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "kdf": "pbkdf2-hmac-sha256",
+        "kdf_salt": salt_b64,
         "kdf_iterations": _KDF_ITERATIONS,
-        "sessions":       sessions_out,
+        "sessions": sessions_out,
     }
 
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8")
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    )
     try:
         json.dump(payload, tmp, indent=2, ensure_ascii=False)
         tmp.flush()
@@ -110,7 +125,9 @@ async def import_config(
     passphrase: str = Form(...),
 ):
     if not passphrase:
-        raise HTTPException(400, "A passphrase is required to decrypt the imported passwords")
+        raise HTTPException(
+            400, "A passphrase is required to decrypt the imported passwords"
+        )
 
     raw = await file.read()
     if len(raw) > 5 * 1024 * 1024:
@@ -122,7 +139,9 @@ async def import_config(
         raise HTTPException(400, f"Invalid JSON: {exc}")
 
     if payload.get("version") != _EXPORT_VERSION:
-        raise HTTPException(400, f"Unsupported export version: {payload.get('version')}")
+        raise HTTPException(
+            400, f"Unsupported export version: {payload.get('version')}"
+        )
 
     try:
         salt_bytes = base64.b64decode(payload["kdf_salt"])
@@ -135,21 +154,27 @@ async def import_config(
     for entry in payload.get("sessions", []):
         try:
             try:
-                plaintext_password = decrypt_with_passphrase(entry["password_enc"], passphrase, salt_bytes)
+                plaintext_password = decrypt_with_passphrase(
+                    entry["password_enc"], passphrase, salt_bytes
+                )
             except InvalidToken:
-                raise HTTPException(400, "Wrong passphrase — could not decrypt passwords")
+                raise HTTPException(
+                    400, "Wrong passphrase — could not decrypt passwords"
+                )
 
-            await session_store.create_session(SessionCreate(
-                name=              entry["name"],
-                host=              entry.get("host", "localhost"),
-                port=              entry.get("port", 3306),
-                username=          entry.get("username", ""),
-                password=          plaintext_password,
-                default_db=        entry.get("default_db"),
-                query_limit=       entry.get("query_limit", 100),
-                ssl_enabled=       bool(entry.get("ssl_enabled", False)),
-                selected_databases=entry.get("selected_databases", []),
-            ))
+            await session_store.create_session(
+                SessionCreate(
+                    name=entry["name"],
+                    host=entry.get("host", "localhost"),
+                    port=entry.get("port", 3306),
+                    username=entry.get("username", ""),
+                    password=plaintext_password,
+                    default_db=entry.get("default_db"),
+                    query_limit=entry.get("query_limit", 100),
+                    ssl_enabled=bool(entry.get("ssl_enabled", False)),
+                    selected_databases=entry.get("selected_databases", []),
+                )
+            )
             imported += 1
         except HTTPException:
             raise

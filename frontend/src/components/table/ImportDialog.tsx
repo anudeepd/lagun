@@ -27,15 +27,43 @@ interface ImportResult {
   method: string
   error?: string | null
   warnings?: string[]
+  statements_processed?: number
+  statements_succeeded?: number
+  error_statement?: string | null
+  error_line?: number | null
+  partial?: boolean
 }
 
+
+function importResponseError(body: string, statusText: string): string {
+  try {
+    const payload = JSON.parse(body) as { detail?: unknown }
+    if (typeof payload.detail === 'string') return payload.detail
+    if (Array.isArray(payload.detail)) {
+      return payload.detail
+        .map(item => {
+          if (!item || typeof item !== 'object') return String(item)
+          const issue = item as { loc?: unknown[]; msg?: unknown }
+          const location = Array.isArray(issue.loc) ? issue.loc.join('.') : ''
+          return location ? `${location}: ${String(issue.msg ?? item)}` : String(issue.msg ?? item)
+        })
+        .join('\n')
+    }
+  } catch {
+    // Keep plain response text below.
+  }
+  return body || statusText || 'Import request failed'
+}
 interface Preview {
+  format?: 'csv' | 'mysql_dump'
   columns: string[]
   rows: string[][]
   total_lines_sampled: number
+  statements?: { line: number; sql: string }[]
 }
 
 export default function ImportDialog({ open, onClose, sessionId, database, table: preselectedTable, onImportComplete }: Props) {
+  const [format, setFormat] = useState<'csv' | 'mysql_dump'>('csv')
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
@@ -79,23 +107,32 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
 
   const buildConfigJson = useCallback(() => JSON.stringify({
     database,
-    table: targetTable,
-    delimiter: effectiveDelimiter,
-    quotechar,
-    escapechar,
-    lineterminator: effectiveLineterminator,
-    encoding,
-    first_row_header: firstRowHeader,
-    strategy,
-  }), [database, targetTable, effectiveDelimiter, quotechar, escapechar, effectiveLineterminator, encoding, firstRowHeader, strategy])
+    format,
+    ...(format === 'csv' ? {
+      table: targetTable,
+      delimiter: effectiveDelimiter,
+      quotechar,
+      escapechar,
+      lineterminator: effectiveLineterminator,
+      encoding,
+      first_row_header: firstRowHeader,
+      strategy,
+    } : {}),
+  }), [database, format, targetTable, effectiveDelimiter, quotechar, escapechar, effectiveLineterminator, encoding, firstRowHeader, strategy])
 
-  // Fetch preview when file or CSV config changes
-  const fetchPreviewTimer = useRef<ReturnType<typeof setTimeout>>()
+  // Fetch preview when file format or CSV configuration changes
+  const fetchPreviewTimer = useRef<number | undefined>(undefined)
+  const previewRequestId = useRef(0)
   useEffect(() => {
-    if (!file) { setPreview(null); setPreviewError(null); return }
+    const requestId = ++previewRequestId.current
+    if (!file) {
+      setPreview(null)
+      setPreviewError(null)
+      return
+    }
 
-    clearTimeout(fetchPreviewTimer.current)
-    fetchPreviewTimer.current = setTimeout(async () => {
+    window.clearTimeout(fetchPreviewTimer.current)
+    fetchPreviewTimer.current = window.setTimeout(async () => {
       setPreviewLoading(true)
       setPreviewError(null)
       try {
@@ -106,23 +143,25 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           method: 'POST',
           body: formData,
         })
+        if (requestId !== previewRequestId.current) return
         if (!res.ok) {
-          setPreviewError(await res.text())
+          setPreviewError(importResponseError(await res.text(), res.statusText))
           setPreview(null)
         } else {
           setPreview(await res.json())
           setPreviewError(null)
         }
       } catch (e) {
+        if (requestId !== previewRequestId.current) return
         setPreviewError(String(e))
         setPreview(null)
       } finally {
-        setPreviewLoading(false)
+        if (requestId === previewRequestId.current) setPreviewLoading(false)
       }
     }, 300)
 
-    return () => clearTimeout(fetchPreviewTimer.current)
-  }, [file, effectiveDelimiter, quotechar, escapechar, lineterminator, encoding, firstRowHeader, sessionId, buildConfigJson])
+    return () => window.clearTimeout(fetchPreviewTimer.current)
+  }, [file, format, effectiveDelimiter, quotechar, escapechar, lineterminator, encoding, firstRowHeader, sessionId, buildConfigJson])
 
   const handleFileSelect = (files: FileList | null) => {
     if (files && files.length > 0) {
@@ -137,7 +176,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   }
 
   const handleImport = async () => {
-    if (!file || !targetTable) return
+    if (!file || (format === 'csv' && !targetTable)) return
     setImporting(true)
     setResult(null)
     try {
@@ -148,7 +187,9 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         method: 'POST',
         body: formData,
       })
-      const data: ImportResult = await res.json()
+      const body = await res.text()
+      if (!res.ok) throw new Error(importResponseError(body, res.statusText))
+      const data: ImportResult = JSON.parse(body)
       setResult(data)
       if (data.ok) {
         onImportComplete?.()
@@ -164,7 +205,9 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
     <Modal
       open={open}
       onClose={onClose}
-      title={`Import into ${database}${targetTable ? '.' + targetTable : ''}`}
+      title={format === 'mysql_dump'
+        ? `Import MySQL dump into ${database}`
+        : `Import into ${database}${targetTable ? '.' + targetTable : ''}`}
       width="max-w-2xl"
       footer={
         <>
@@ -172,7 +215,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           <Button
             variant="primary"
             onClick={handleImport}
-            disabled={importing || !file || !targetTable}
+            disabled={importing || !file || (format === 'csv' && !targetTable)}
           >
             {importing ? 'Importing…' : result && !result.ok ? 'Retry Import' : 'Import'}
           </Button>
@@ -190,7 +233,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.tsv,.txt"
+            accept=".csv,.tsv,.txt,.sql,.dump"
             className="hidden"
             onChange={e => handleFileSelect(e.target.files)}
           />
@@ -203,8 +246,8 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           ) : (
             <div className="text-sm text-slate-500">
               <Upload size={20} className="mx-auto mb-2" />
-              <p>Drop a CSV file here or click to select</p>
-              <p className="text-xs mt-1">.csv, .tsv, .txt</p>
+              <p>Drop a CSV or MySQL dump file here or click to select</p>
+              <p className="text-xs mt-1">.csv, .tsv, .txt, .sql, .dump</p>
             </div>
           )}
         </div>
@@ -216,7 +259,16 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         {previewError && (
           <p role="alert" className="text-xs text-red-400">{previewError}</p>
         )}
-        {preview && (
+        {preview && preview.format === 'mysql_dump' ? (
+          <div className="overflow-x-auto max-h-48 border border-surface-700 rounded p-2">
+            <p className="text-xs text-slate-400 mb-2">Previewing up to 10 SQL statements</p>
+            <ol className="text-xs font-mono text-slate-300 space-y-1">
+              {(preview.statements ?? []).map((statement, i) => (
+                <li key={i}><span className="text-slate-500">line {statement.line}:</span> {statement.sql}</li>
+              ))}
+            </ol>
+          </div>
+        ) : preview ? (
           <div className="overflow-x-auto max-h-48 border border-surface-700 rounded">
             <table className="text-xs w-full">
               <thead>
@@ -244,9 +296,24 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
               <p className="text-xs text-slate-500 px-2 py-1">Showing {preview.rows.length} of {preview.total_lines_sampled}+ rows</p>
             )}
           </div>
-        )}
+        ) : null}
 
         {/* Config section */}
+        <Select
+          label="File Format"
+          value={format}
+          onChange={e => {
+            const next = e.target.value as 'csv' | 'mysql_dump'
+            setFormat(next)
+            setPreview(null)
+            setResult(null)
+          }}
+        >
+          <option value="csv">CSV / delimited text</option>
+          <option value="mysql_dump">MySQL dump (.sql / .dump)</option>
+        </Select>
+        {format === 'csv' && (
+          <>
         <div className="grid grid-cols-2 gap-3">
           <Select
             label="Target Table"
@@ -357,13 +424,22 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           )}
           </AnimatePresence>
         </div>
+          </>
+        )}
+        {format === 'mysql_dump' && (
+          <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-800 rounded p-3">
+            MySQL dump imports execute SQL from the file, including DDL and transaction/session statements. Review source before importing.
+          </p>
+        )}
 
         {/* Result banner */}
         {result && (
           <div role={result.ok ? 'status' : 'alert'} className={`p-3 rounded text-xs ${result.ok ? 'bg-green-900/30 border border-green-800 text-green-300' : 'bg-red-900/30 border border-red-800 text-red-300'}`}>
             {result.ok ? (
               <>
-                Imported {result.rows_imported} rows via {result.method === 'load_data' ? 'LOAD DATA' : 'batch insert'}.
+                {result.method === 'mysql_dump'
+                  ? <>Executed {result.statements_succeeded ?? 0} of {result.statements_processed ?? 0} dump statements; {result.rows_imported} affected rows.</>
+                  : <>Imported {result.rows_imported} rows via batch insert.</>}
                 {result.warnings && result.warnings.length > 0 && (
                   <ul className="mt-1 list-disc list-inside text-yellow-400">
                     {result.warnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
@@ -372,7 +448,11 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
                 )}
               </>
             ) : (
-              <>Import failed: {result.error}</>
+              <>
+                Import failed{result.partial ? ' after partial execution' : ''}: {result.error}
+                {result.error_line != null && <div>Source line: {result.error_line}</div>}
+                {result.error_statement && <pre className="mt-1 whitespace-pre-wrap break-all">{result.error_statement}</pre>}
+              </>
             )}
           </div>
         )}

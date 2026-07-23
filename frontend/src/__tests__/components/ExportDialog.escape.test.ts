@@ -242,6 +242,17 @@ describe('delete format', () => {
     )
   })
 
+  it('uses IS NULL for null primary-key values', () => {
+    const out = buildFrontendContent('delete', DB, TBL, { columns: ['id', 'name'], rows: [[null, 'missing']] }, ['id'], {
+      delimiter: ',',
+      quoteChar: '"',
+      escapeChar: '"',
+      lineTerminator: '\r\n',
+      encoding: 'utf-8',
+    })
+    expect(out).toBe('DELETE FROM `tbl` WHERE `id` IS NULL;\n')
+  })
+
   it('includes schema when requested', () => {
     const out = buildFrontendContent('delete', DB, TBL, { columns: ['id', 'name'], rows: [[1, 'Alice']] }, ['id'], {
       delimiter: ',',

@@ -1,9 +1,10 @@
 """Shared SQL identifier quoting and validation utilities."""
+
 import re
 
 SYSTEM_DBS = frozenset({"information_schema", "performance_schema", "sys", "mysql"})
 
-_IDENT_RE = re.compile(r'^[\w$]+$', re.ASCII)
+_IDENT_RE = re.compile(r"^[\w$]+$", re.ASCII)
 
 
 def quote_ident(name: str) -> str:
@@ -14,14 +15,23 @@ def quote_ident(name: str) -> str:
 
 
 # Allowlists for DDL values that get interpolated into SQL without parameterization.
-_VALID_ENGINES = frozenset({
-    "InnoDB", "MyISAM", "MEMORY", "CSV", "ARCHIVE",
-    "BLACKHOLE", "MERGE", "FEDERATED", "NDB",
-})
+_VALID_ENGINES = frozenset(
+    {
+        "InnoDB",
+        "MyISAM",
+        "MEMORY",
+        "CSV",
+        "ARCHIVE",
+        "BLACKHOLE",
+        "MERGE",
+        "FEDERATED",
+        "NDB",
+    }
+)
 _VALID_INDEX_TYPES = frozenset({"BTREE", "HASH", "FULLTEXT", "SPATIAL"})
 
 # Charset/collation: ASCII alphanumeric plus underscore only.
-_CHARSET_RE = re.compile(r'^[a-zA-Z0-9_]+$')
+_CHARSET_RE = re.compile(r"^[a-zA-Z0-9_]+$")
 
 
 def validate_engine(engine: str) -> str:
@@ -58,12 +68,12 @@ def validate_col_type(col_type: str) -> str:
     Allows things like VARCHAR(255), DECIMAL(10,2), INT UNSIGNED, etc.
     Rejects semicolons, comments, subqueries, and other SQL metacharacters.
     """
-    forbidden = re.compile(r'[;\'\"\\]|--')
+    forbidden = re.compile(r"[;\'\"\\]|--")
     if forbidden.search(col_type):
         raise ValueError(f"Invalid column type: {col_type!r}")
     # Block subqueries and SQL keywords that shouldn't appear in type definitions
     dangerous = re.compile(
-        r'\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|UNION|INTO|FROM|WHERE|EXEC)\b',
+        r"\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|UNION|INTO|FROM|WHERE|EXEC)\b",
         re.IGNORECASE,
     )
     if dangerous.search(col_type):

@@ -1,4 +1,5 @@
 """aiomysql connection pool registry, keyed by session ID."""
+
 import asyncio
 import ssl as ssl_mod
 
@@ -14,7 +15,9 @@ _lock: asyncio.Lock | None = None
 class DatabaseConnectionError(Exception):
     """Raised when a saved session cannot open a database connection."""
 
-    def __init__(self, session_name: str, host: str, port: int, username: str, cause: Exception):
+    def __init__(
+        self, session_name: str, host: str, port: int, username: str, cause: Exception
+    ):
         self.session_name = session_name
         self.host = host
         self.port = port

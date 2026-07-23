@@ -1,4 +1,5 @@
 """Schema browser API endpoints."""
+
 from fastapi import APIRouter, HTTPException
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
@@ -133,6 +134,8 @@ async def get_create_sql(session_id: str, db: str, table: str) -> dict:
     pool = await _get_pool_or_404(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(f"SHOW CREATE TABLE {quote_ident(db)}.{quote_ident(table)}")
+            await cur.execute(
+                f"SHOW CREATE TABLE {quote_ident(db)}.{quote_ident(table)}"
+            )
             row = await cur.fetchone()
     return {"create_sql": row[1] if row else ""}

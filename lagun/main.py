@@ -1,4 +1,5 @@
 """FastAPI application factory."""
+
 import os
 import json
 import logging
@@ -26,7 +27,10 @@ if _log_file := os.getenv("LAGUN_LOG_FILE"):
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
         datefmt="%H:%M:%S",
-        handlers=[logging.StreamHandler(), logging.FileHandler(_log_file, encoding="utf-8")],
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(_log_file, encoding="utf-8"),
+        ],
     )
 
 
@@ -38,6 +42,7 @@ async def lifespan(app: FastAPI):
     await sync_connections_config(os.getenv("LAGUN_CONNECTIONS_CONFIG"))
     yield
     from lagun.db.pool import close_all_pools
+
     await close_all_pools()
 
 
@@ -53,7 +58,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.61", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.62", lifespan=lifespan)
 
 
 def _audit_details(body: bytes) -> str | None:
@@ -76,12 +81,30 @@ async def ldap_connection_access_and_audit(request: Request, call_next):
     """Enforce session ownership and write a private audit row in LDAP mode."""
     username = getattr(request.state, "user", None) if ldap_enabled() else None
     session_match = re.match(r"^/api/v1/sessions/([^/]+)(?:/|$)", request.url.path)
-    session_id = session_match.group(1) if session_match and session_match.group(1) != "probe" else None
+    session_id = (
+        session_match.group(1)
+        if session_match and session_match.group(1) != "probe"
+        else None
+    )
     started = time.monotonic()
-    if username and request.url.path in {"/api/v1/config/export", "/api/v1/config/import"}:
-        response = JSONResponse(status_code=403, content={"detail": "Connection config import/export is disabled in LDAP mode"})
-    elif username and session_id and not await session_store.can_access_session(session_id, username):
-        response = JSONResponse(status_code=404, content={"detail": "Session not found"})
+    if username and request.url.path in {
+        "/api/v1/config/export",
+        "/api/v1/config/import",
+    }:
+        response = JSONResponse(
+            status_code=403,
+            content={
+                "detail": "Connection config import/export is disabled in LDAP mode"
+            },
+        )
+    elif (
+        username
+        and session_id
+        and not await session_store.can_access_session(session_id, username)
+    ):
+        response = JSONResponse(
+            status_code=404, content={"detail": "Session not found"}
+        )
     else:
         response = await call_next(request)
     duration = round((time.monotonic() - started) * 1000, 2)
@@ -96,9 +119,13 @@ async def ldap_connection_access_and_audit(request: Request, call_next):
                 except ValueError:
                     pass
             await session_store.record_audit_event(
-                username=username, method=request.method, path=request.url.path,
-                session_id=session_id, details=details,
-                status_code=response.status_code, duration_ms=duration,
+                username=username,
+                method=request.method,
+                path=request.url.path,
+                session_id=session_id,
+                details=details,
+                status_code=response.status_code,
+                duration_ms=duration,
             )
         except Exception:
             # Activity logging must never make a database action fail.
@@ -107,7 +134,9 @@ async def ldap_connection_access_and_audit(request: Request, call_next):
 
 
 @app.exception_handler(DatabaseConnectionError)
-async def database_connection_error_handler(request: Request, exc: DatabaseConnectionError):
+async def database_connection_error_handler(
+    request: Request, exc: DatabaseConnectionError
+):
     return JSONResponse(status_code=502, content={"detail": str(exc)})
 
 
@@ -119,6 +148,7 @@ async def add_app_security_headers(request: Request, call_next):
     if request.url.path.startswith("/assets/"):
         response.headers.setdefault("Cache-Control", HASHED_ASSET_CACHE_CONTROL)
     return response
+
 
 # CORS for development (Vite dev server)
 if os.getenv("LAGUN_DEV"):
@@ -164,6 +194,7 @@ _static = _static_dir()
 if _static and (_static / "assets").exists():
     app.mount("/assets", StaticFiles(directory=_static / "assets"), name="assets")
 
+
 @app.get("/favicon.svg", include_in_schema=False)
 async def favicon():
     if _static:
@@ -178,7 +209,10 @@ def _ensure_ldapgate_static_paths(config) -> None:
     proxy_config = getattr(config, "proxy", None)
     if proxy_config is None:
         return
-    if getattr(proxy_config, "session_cookie_name", "ldapgate_session") == "ldapgate_session":
+    if (
+        getattr(proxy_config, "session_cookie_name", "ldapgate_session")
+        == "ldapgate_session"
+    ):
         proxy_config.session_cookie_name = "lagun_session"
     static_paths = list(getattr(proxy_config, "static_paths", []) or [])
     for path in ("/favicon.svg", "/favicon.ico"):

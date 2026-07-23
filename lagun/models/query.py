@@ -1,4 +1,5 @@
 """Pydantic models for query execution."""
+
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
@@ -59,7 +60,7 @@ class ScriptQueryValidationResult(BaseModel):
 class CellUpdateRequest(BaseModel):
     database: str
     table: str
-    primary_key: dict[str, Any]   # {col: value} identifying the row
+    primary_key: dict[str, Any]  # {col: value} identifying the row
     column: str
     new_value: Any
 
@@ -74,7 +75,7 @@ class CellUpdateResult(BaseModel):
 class RowInsertRequest(BaseModel):
     database: str
     table: str
-    values: dict[str, Any]        # {col: value}
+    values: dict[str, Any]  # {col: value}
 
 
 class RowInsertResult(BaseModel):
@@ -88,8 +89,8 @@ class RowInsertResult(BaseModel):
 class RowUpdateRequest(BaseModel):
     database: str
     table: str
-    primary_key: dict[str, Any]   # old PK values for WHERE
-    updates: dict[str, Any]       # {col: new_value, ...}
+    primary_key: dict[str, Any]  # old PK values for WHERE
+    updates: dict[str, Any]  # {col: new_value, ...}
 
 
 class RowUpdateResult(BaseModel):

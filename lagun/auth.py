@@ -2,6 +2,7 @@
 
 These helpers deliberately become no-ops for the existing single-user mode.
 """
+
 import os
 
 from fastapi import HTTPException, Request

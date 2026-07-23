@@ -1,4 +1,5 @@
 """Pydantic models for schema introspection."""
+
 from typing import Optional
 from pydantic import BaseModel
 
@@ -24,7 +25,7 @@ class IndexInfo(BaseModel):
 
 class TableInfo(BaseModel):
     name: str
-    table_type: str          # BASE TABLE | VIEW
+    table_type: str  # BASE TABLE | VIEW
     engine: Optional[str]
     row_count: Optional[int]
     data_length: Optional[int]

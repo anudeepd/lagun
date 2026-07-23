@@ -36,6 +36,12 @@ function sqlLiteral(v: unknown): string {
   return `'${String(v).split("'").join("''")}'`
 }
 
+function sqlPredicate(column: string, value: unknown): string {
+  return value === null || value === undefined
+    ? `${quoteIdent(column)} IS NULL`
+    : `${quoteIdent(column)} = ${sqlLiteral(value)}`
+}
+
 function quoteIdent(identifier: string): string {
   return `\`${identifier.replace(/`/g, '``')}\``
 }
@@ -107,7 +113,7 @@ export const buildFrontendContent = (
     const where = effectivePks
       .map(pk => {
         const idx = data.columns.indexOf(pk)
-        return `${quoteIdent(pk)} = ${sqlLiteral(idx >= 0 ? r[idx] : null)}`
+        return sqlPredicate(pk, idx >= 0 ? r[idx] : null)
       })
       .join(' AND ')
     return `DELETE FROM ${target} WHERE ${where};`
@@ -121,7 +127,7 @@ export const buildFrontendContent = (
     return data.rows.map(r => {
       const idx = effectivePks.map(pk => data.columns.indexOf(pk))
       const where = effectivePks
-        .map((pk, i) => `${quoteIdent(pk)} = ${sqlLiteral(idx[i] >= 0 ? r[idx[i]] : null)}`)
+        .map((pk, i) => sqlPredicate(pk, idx[i] >= 0 ? r[idx[i]] : null))
         .join(' AND ')
       const vals = `(${r.map(sqlLiteral).join(', ')})`
       return `DELETE FROM ${target} WHERE ${where};\n` +
@@ -161,13 +167,20 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
 
   const effectiveDelimiter = csvDelimiter === 'custom' ? csvDelimiterCustom : csvDelimiter
 
+  const ensureValidCsvOptions = () => {
+    if (format !== 'csv') return
+    if (effectiveDelimiter === csvQuotechar || (csvEscapechar && effectiveDelimiter === csvEscapechar)) {
+      throw new Error('CSV delimiter, quote, and escape characters must be compatible')
+    }
+  }
+
   const buildBody = () => {
     const parsedBatchSize = parseInt(batchSize, 10)
     return JSON.stringify({
       database,
       ...(customSql ? { sql: customSql } : { table }),
       format,
-      batch_size: Number.isNaN(parsedBatchSize) || parsedBatchSize < 1 ? 500 : parsedBatchSize,
+      batch_size: Number.isNaN(parsedBatchSize) || parsedBatchSize < 1 || parsedBatchSize > 10_000 ? 500 : parsedBatchSize,
       ...(format === 'insert' || format === 'delete+insert' ? { insert_mode: insertMode } : {}),
       ...(format !== 'csv' ? { include_schema: includeSchema } : {}),
       ...(pkValues ? { pk_values: pkValues } : {}),
@@ -193,6 +206,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     setExporting(true)
     setError(null)
     try {
+      ensureValidCsvOptions()
       let blob: Blob
       let filename: string
       if (rowsOverride) {
@@ -231,6 +245,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     setCopying(true)
     setError(null)
     try {
+      ensureValidCsvOptions()
       let text: string
       if (rowsOverride) {
         text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)

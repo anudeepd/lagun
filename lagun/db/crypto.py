@@ -1,4 +1,5 @@
 """Credential encryption using Fernet + OS keychain master key."""
+
 import base64
 from pathlib import Path
 
@@ -15,6 +16,7 @@ def _get_or_create_master_key() -> bytes:
     """Retrieve master key from keyring, falling back to file."""
     try:
         import keyring
+
         stored = keyring.get_password(_KEY_SERVICE, _KEY_ACCOUNT)
         if stored:
             return stored.encode()
@@ -70,9 +72,17 @@ def derive_key_from_passphrase(passphrase: str, salt: bytes) -> bytes:
 
 def encrypt_with_passphrase(password: str, passphrase: str, salt: bytes) -> str:
     """Encrypt a password with a key derived from passphrase+salt."""
-    return Fernet(derive_key_from_passphrase(passphrase, salt)).encrypt(password.encode()).decode()
+    return (
+        Fernet(derive_key_from_passphrase(passphrase, salt))
+        .encrypt(password.encode())
+        .decode()
+    )
 
 
 def decrypt_with_passphrase(encrypted: str, passphrase: str, salt: bytes) -> str:
     """Decrypt a token produced by encrypt_with_passphrase. Raises InvalidToken on wrong passphrase."""
-    return Fernet(derive_key_from_passphrase(passphrase, salt)).decrypt(encrypted.encode()).decode()
+    return (
+        Fernet(derive_key_from_passphrase(passphrase, salt))
+        .decrypt(encrypted.encode())
+        .decode()
+    )
