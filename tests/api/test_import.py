@@ -1,6 +1,8 @@
 """Integration tests for the import API."""
 
 import json
+import pytest
+
 
 
 CSV_WITH_HEADER = b"name,age\nAlice,30\nBob,25\n"
@@ -128,11 +130,12 @@ async def test_import_strategy_insert_ignore(client, session_id, test_db):
     alice_id = r.json()["rows"][0][0]
 
     duplicate_csv = f"id,name,age\n{alice_id},Alice,30\n".encode()
-    r2 = await client.post(
-        f"/api/v1/sessions/{session_id}/import",
-        files={"file": ("data.csv", duplicate_csv, "text/csv")},
-        data={"config": _config(strategy="insert_ignore")},
-    )
+    with pytest.warns(Warning, match=r"Duplicate entry .*users\.PRIMARY"):
+        r2 = await client.post(
+            f"/api/v1/sessions/{session_id}/import",
+            files={"file": ("data.csv", duplicate_csv, "text/csv")},
+            data={"config": _config(strategy="insert_ignore")},
+        )
     assert r2.status_code == 200
     assert r2.json()["ok"] is True
     # Row count should remain 2 (duplicate ignored)

@@ -36,6 +36,7 @@ export default function Select({ label, error, className, containerClassName, co
   })
   const selectedValue = value === undefined ? uncontrolledValue : String(value)
   const selected = options.find(option => option.value === selectedValue) ?? options[0]
+  const isInsideDialog = rootRef.current?.closest('[role="dialog"]') !== null
 
   useEffect(() => {
     if (!open) return
@@ -116,7 +117,7 @@ export default function Select({ label, error, className, containerClassName, co
               exit={{ opacity: 0, scale: 0.98, y: -4 }}
               transition={open ? surfaceTransition : exitTransition}
               style={{ position: 'fixed', top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, maxHeight: 'min(320px, calc(100vh - 16px))' }}
-              className="z-popover origin-top overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-xl"
+              className={clsx(isInsideDialog ? 'z-critical' : 'z-popover', 'origin-top overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-xl')}
             >
               {options.filter(o => !o.disabled).map(option => (
                 <button

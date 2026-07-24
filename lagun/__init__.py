@@ -1,3 +1,3 @@
 """Lagun — web-based MySQL/MariaDB editor."""
 
-__version__ = "0.1.62"
+__version__ = "0.1.63"

@@ -17,6 +17,12 @@ describe('ImportDialog formats', () => {
     expect(screen.getByText('CSV Format Options')).toBeInTheDocument()
   })
 
+  it('layers the target-table menu above the import dialog', async () => {
+    render(<ImportDialog {...props} />)
+    await userEvent.click(screen.getByLabelText('Target Table'))
+    expect(screen.getByRole('listbox', { name: 'Target Table' })).toHaveClass('z-critical')
+  })
+
   it('allows dump imports without a target table and warns about SQL execution', async () => {
     render(<ImportDialog {...props} />)
     await userEvent.click(screen.getByLabelText('File Format'))

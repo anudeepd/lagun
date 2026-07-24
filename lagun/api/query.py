@@ -438,6 +438,7 @@ async def execute_query(session_id: str, req: QueryRequest):
                         )
                     else:
                         return QueryResult(
+                            columns=[],
                             rows=[],
                             row_count=cur.rowcount,
                             exec_time_ms=round((time.monotonic() - t0) * 1000, 2),

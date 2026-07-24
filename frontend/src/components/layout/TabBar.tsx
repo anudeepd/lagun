@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { useTabStore } from '../../store/tabStore'
@@ -30,14 +30,24 @@ export default function TabBar() {
   const [renameTargetId, setRenameTargetId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const tabListRef = useRef<HTMLDivElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!activeTabId) return
-    tabButtonRefs.current[activeTabId]?.scrollIntoView({
-      block: 'nearest',
-      inline: 'nearest',
+  useLayoutEffect(() => {
+    const tab = activeTabId ? tabButtonRefs.current[activeTabId]?.parentElement : null
+    const tabList = tabListRef.current
+    if (!tab || !tabList) return
+
+    const frame = window.requestAnimationFrame(() => {
+      const tabRect = tab.getBoundingClientRect()
+      const tabListRect = tabList.getBoundingClientRect()
+      if (tabRect.left < tabListRect.left) {
+        tabList.scrollLeft += tabRect.left - tabListRect.left
+      } else if (tabRect.right > tabListRect.right) {
+        tabList.scrollLeft += tabRect.right - tabListRect.right
+      }
     })
+    return () => window.cancelAnimationFrame(frame)
   }, [activeTabId, tabs.length])
 
   // Close context menu on click outside
@@ -148,7 +158,7 @@ export default function TabBar() {
   return (
     <div className="flex h-[46px] items-center bg-surface-900 border-b border-surface-800">
       <div className="flex-1 h-full overflow-hidden">
-        <div role="tablist" aria-label="Open tabs" className="flex h-full items-center flex-nowrap overflow-x-scroll overflow-y-hidden space-x-1">
+        <div ref={tabListRef} role="tablist" aria-label="Open tabs" className="flex h-full items-center flex-nowrap overflow-x-scroll overflow-y-hidden space-x-1">
           <AnimatePresence initial={false} mode="sync">
           {tabs.map((tab, index) => (
             <m.div
