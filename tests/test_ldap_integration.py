@@ -58,6 +58,8 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert ".submit-label { min-width: 4.75rem; }" in template
     assert "appearance: none;" in template
     assert "-webkit-appearance: none;" in template
+    assert "@supports (-moz-appearance: none)" in template
+    assert "padding-right: 0.75rem;" in template
     assert 'tabindex="-1"' not in template
     assert '<span class="submit-label" aria-live="polite">Sign in</span>' in template
     assert "submitLabel.textContent = 'Signing in';" in template
