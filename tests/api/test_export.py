@@ -1,5 +1,7 @@
 """Integration tests for the export API."""
 
+import json
+
 
 async def test_export_insert_format(client, session_id, test_db):
     r = await client.post(
@@ -146,6 +148,35 @@ async def test_export_insert_batch_mode(client, session_id, test_db):
     )
 
 
+async def test_export_batch_size_spans_database_fetches(client, session_id, test_db):
+    setup = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "database": test_db,
+            "sql": "CREATE TABLE export_batches (id INT PRIMARY KEY)",
+        },
+    )
+    assert setup.status_code == 200
+    values = ", ".join(f"({index})" for index in range(250))
+    insert = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"database": test_db, "sql": f"INSERT INTO export_batches VALUES {values}"},
+    )
+    assert insert.status_code == 200
+    exported = await client.post(
+        f"/api/v1/sessions/{session_id}/export",
+        json={
+            "database": test_db,
+            "table": "export_batches",
+            "format": "insert",
+            "insert_mode": "batch",
+            "batch_size": 125,
+        },
+    )
+    assert exported.status_code == 200
+    assert exported.text.count("INSERT INTO") == 2
+
+
 async def test_export_delete_insert_single_mode(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/export",
@@ -218,12 +249,38 @@ async def test_export_custom_select(client, session_id, test_db):
     assert "Bob" not in body
 
 
+async def test_export_download_form_streams_attachment(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/export/download",
+        data={
+            "config": json.dumps(
+                {"database": test_db, "table": "users", "format": "csv"}
+            )
+        },
+    )
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].startswith("attachment;")
+    assert "Alice" in r.text
+
+
 async def test_export_non_select_sql_rejected(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/export",
         json={
             "database": test_db,
             "sql": "DROP TABLE users",
+            "format": "csv",
+        },
+    )
+    assert r.status_code == 400
+
+
+async def test_export_rejects_multiple_select_statements(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/export",
+        json={
+            "database": test_db,
+            "sql": "SELECT 1; SELECT 2",
             "format": "csv",
         },
     )
@@ -358,3 +415,52 @@ async def test_export_pk_values_uses_is_null(client, session_id, test_db):
     assert "`id` IS NULL" in r.text
     assert "missing" in r.text
     assert "present" not in r.text
+
+
+async def test_export_rejects_explicit_empty_pk_filter(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/export",
+        json={
+            "database": test_db,
+            "table": "users",
+            "format": "insert",
+            "pk_values": [],
+        },
+    )
+    assert r.status_code == 422
+
+
+async def test_export_sql_preserves_binary_and_backslashes(client, session_id, test_db):
+    create = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "database": test_db,
+            "sql": (
+                "CREATE TABLE export_binary "
+                "(id INT PRIMARY KEY, payload VARBINARY(16), path VARCHAR(32))"
+            ),
+        },
+    )
+    assert create.status_code == 200
+    insert = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "database": test_db,
+            "sql": (
+                "INSERT INTO export_binary VALUES "
+                "(1, 0x00ff616263, 0x433a5c6e6577)"
+            ),
+        },
+    )
+    assert insert.status_code == 200
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/export",
+        json={
+            "database": test_db,
+            "table": "export_binary",
+            "format": "insert",
+        },
+    )
+    assert r.status_code == 200
+    assert "0x00ff616263" in r.text
+    assert "0x433a5c6e6577" in r.text

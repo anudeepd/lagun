@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useId, useRef } from 'react'
+import { forwardRef, type ReactNode, type RefObject, useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, useIsPresent } from 'motion/react'
 import * as m from 'motion/react-m'
@@ -24,7 +24,7 @@ interface ModalShellProps extends Omit<ModalProps, 'open' | 'restoreFocus'> {
   titleId: string
 }
 
-function ModalShell({ onClose, title, children, footer, width = 'max-w-lg', dialogRef, titleId }: ModalShellProps) {
+const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShell({ onClose, title, children, footer, width = 'max-w-lg', dialogRef, titleId }, presenceRef) {
   const isPresent = useIsPresent()
 
   useEffect(() => {
@@ -33,6 +33,7 @@ function ModalShell({ onClose, title, children, footer, width = 'max-w-lg', dial
 
   return (
     <m.div
+      ref={presenceRef}
       className={`fixed inset-0 z-modal flex items-center justify-center p-4 ${isPresent ? '' : 'pointer-events-none'}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1, transition: spatialTransition }}
@@ -69,7 +70,7 @@ function ModalShell({ onClose, title, children, footer, width = 'max-w-lg', dial
       </m.div>
     </m.div>
   )
-}
+})
 
 export default function Modal({ open, onClose, title, children, footer, width = 'max-w-lg', initialFocusRef, restoreFocus = true }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)

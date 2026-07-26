@@ -1,6 +1,7 @@
 """Shared SQL identifier quoting and validation utilities."""
 
 import re
+import math
 
 SYSTEM_DBS = frozenset({"information_schema", "performance_schema", "sys", "mysql"})
 
@@ -82,19 +83,23 @@ def validate_col_type(col_type: str) -> str:
 
 
 def escape_value(v) -> str:
-    """Escape a Python value for use in a SQL literal context.
-
-    Uses SQL-standard single-quote doubling (not backslash escaping) so the
-    output is safe regardless of the server's NO_BACKSLASH_ESCAPES setting.
-    """
+    """Serialize a Python value as a lossless MySQL literal."""
     if v is None:
         return "NULL"
     if isinstance(v, bool):
         return "1" if v else "0"
-    if isinstance(v, (int, float)):
+    if isinstance(v, float):
+        if not math.isfinite(v):
+            raise ValueError(f"MySQL cannot represent non-finite float {v!r}")
+        return repr(v)
+    if isinstance(v, int):
         return str(v)
-    s = str(v).replace("'", "''")
-    return f"'{s}'"
+    if isinstance(v, (bytes, bytearray, memoryview)):
+        return f"0x{bytes(v).hex()}"
+    s = str(v)
+    if "\\" in s or "\0" in s or "\x1a" in s:
+        return f"0x{s.encode('utf-8').hex()}"
+    return f"'{s.replace(chr(39), chr(39) * 2)}'"
 
 
 def escape_string_literal(val: str) -> str:

@@ -161,6 +161,19 @@ def test_escape_value_string_with_multiple_quotes():
     assert escape_value("it's a 'test'") == "'it''s a ''test'''"
 
 
+def test_escape_value_binary_uses_lossless_hex_literal():
+    assert escape_value(b"\x00\xffabc") == "0x00ff616263"
+
+
+def test_escape_value_backslashes_use_sql_mode_independent_hex_literal():
+    assert escape_value(r"C:\new") == "0x433a5c6e6577"
+
+
+def test_escape_value_rejects_non_finite_floats():
+    with pytest.raises(ValueError, match="non-finite"):
+        escape_value(float("nan"))
+
+
 # ---------------------------------------------------------------------------
 # escape_string_literal
 # ---------------------------------------------------------------------------

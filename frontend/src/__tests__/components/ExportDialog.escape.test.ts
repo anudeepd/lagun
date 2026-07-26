@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildFrontendContent } from '../../components/table/ExportDialog'
+import { buildFrontendContent, responseTextWithLimit } from '../../components/table/ExportDialog'
 
 const DB = 'db'
 const TBL = 'tbl'
@@ -293,6 +293,18 @@ describe('delete+insert format', () => {
     expect(out).toBe(
       'DELETE FROM `db`.`tbl` WHERE `id` = 1;\n' +
       "INSERT INTO `db`.`tbl` (`id`, `name`) VALUES (1, 'Alice');\n"
+    )
+  })
+})
+
+describe('copy response limit', () => {
+  it('reads responses below the memory cap', async () => {
+    await expect(responseTextWithLimit(new Response('small'), 16)).resolves.toBe('small')
+  })
+
+  it('rejects responses above the memory cap', async () => {
+    await expect(responseTextWithLimit(new Response('too large'), 4)).rejects.toThrow(
+      'Copy is limited',
     )
   })
 })

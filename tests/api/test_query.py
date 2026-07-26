@@ -157,6 +157,46 @@ async def test_invalid_sql_returns_error_field(client, session_id, test_db):
     assert data["error"] is not None
 
 
+async def test_query_deadline_closes_slow_connection(
+    client, session_id, test_db, monkeypatch
+):
+    import lagun.api.query as query_module
+
+    monkeypatch.setattr(query_module, "_QUERY_MAX_RUNTIME_SECONDS", 0.1)
+    timed_out = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT SLEEP(1)", "database": test_db},
+    )
+    assert timed_out.status_code == 200
+    assert "0.1-second execution limit" in timed_out.json()["error"]
+
+    recovered = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT 1", "database": test_db},
+    )
+    assert recovered.status_code == 200
+    assert recovered.json()["rows"] == [[1]]
+
+
+async def test_query_capacity_timeout_returns_retryable_503(
+    client, session_id, monkeypatch
+):
+    import lagun.api.query as query_module
+    from lagun.db.pool import DatabaseCapacityError
+
+    async def saturated_pool(_session_id):
+        raise DatabaseCapacityError("Database is busy.")
+
+    monkeypatch.setattr(query_module, "get_pool", saturated_pool)
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT 1"},
+    )
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert response.json()["detail"] == "Database is busy."
+
+
 async def test_query_nonexistent_session(client):
     r = await client.post("/api/v1/sessions/does-not-exist/query", json={"sql": "SELECT 1"})
     assert r.status_code == 404

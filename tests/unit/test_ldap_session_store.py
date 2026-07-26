@@ -1,4 +1,5 @@
 """Tests for LDAP-owned and server-managed connection storage."""
+import asyncio
 
 from lagun.db import session_store
 from lagun.db.connections_config import sync_connections_config
@@ -108,3 +109,27 @@ async def test_audit_events_can_be_filtered_and_purged(keep_event_loop_awake):
     )
     assert (await session_store.list_audit_events("alice"))[0]["details"] == "SELECT 1"
     assert await session_store.purge_audit_events(0) == 1
+
+
+async def test_two_hundred_concurrent_audit_writes(keep_event_loop_awake):
+    await session_store.init_db()
+
+    await asyncio.gather(
+        *(
+            session_store.record_audit_event(
+                username=f"user-{index}",
+                method="GET",
+                path="/api/v1/sessions",
+                session_id=None,
+                details=None,
+                status_code=200,
+                duration_ms=1,
+            )
+            for index in range(200)
+        )
+    )
+
+    assert len(await session_store.list_audit_events(limit=250)) == 200
+    async with session_store._connect() as db:
+        async with db.execute("PRAGMA journal_mode") as cursor:
+            assert (await cursor.fetchone())[0] == "wal"

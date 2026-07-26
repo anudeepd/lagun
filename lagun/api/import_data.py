@@ -7,7 +7,6 @@ import csv
 import io
 import os
 import re
-import tempfile
 from typing import BinaryIO, Literal, Optional, TextIO
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
@@ -23,8 +22,8 @@ router = APIRouter(tags=["import"])
 IMPORT_MAX_FILE_BYTES = int(
     os.getenv("LAGUN_IMPORT_MAX_FILE_BYTES", str(1024 * 1024 * 1024))
 )
-IMPORT_CHUNK_BYTES = int(os.getenv("LAGUN_IMPORT_CHUNK_BYTES", str(1024 * 1024)))
 IMPORT_MAX_BATCH_BYTES = int(os.getenv("LAGUN_IMPORT_MAX_BATCH_BYTES", str(512 * 1024)))
+IMPORT_PREVIEW_CELL_CHARS = 500
 
 
 class ImportConfig(BaseModel):
@@ -60,9 +59,14 @@ class ImportConfig(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def csv_table_required(self) -> "ImportConfig":
+    def validate_options(self) -> "ImportConfig":
         if self.format == "csv" and not self.table:
             raise ValueError("table is required for csv imports")
+        if self.format == "csv":
+            if self.quotechar and self.delimiter == self.quotechar:
+                raise ValueError("delimiter and quotechar must differ")
+            if self.escapechar and self.delimiter == self.escapechar:
+                raise ValueError("delimiter and escapechar must differ")
         return self
 
 
@@ -108,26 +112,20 @@ def _csv_reader_kwargs(cfg: ImportConfig) -> dict:
     return kwargs
 
 
-async def _stage_upload(file: UploadFile) -> tuple[BinaryIO, int]:
-    staged = tempfile.SpooledTemporaryFile(max_size=IMPORT_CHUNK_BYTES, mode="w+b")
-    total = 0
-    try:
-        while True:
-            chunk = await file.read(IMPORT_CHUNK_BYTES)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > IMPORT_MAX_FILE_BYTES:
-                raise HTTPException(
-                    413,
-                    f"File too large ({total} bytes). Max is {IMPORT_MAX_FILE_BYTES} bytes.",
-                )
-            await asyncio.to_thread(staged.write, chunk)
-        staged.seek(0)
-        return staged, total
-    except Exception:
-        staged.close()
-        raise
+async def _open_upload(file: UploadFile) -> tuple[BinaryIO, int]:
+    """Use Starlette's spooled upload directly instead of copying it again."""
+    if file.size is None:
+        await asyncio.to_thread(file.file.seek, 0, os.SEEK_END)
+        total = await asyncio.to_thread(file.file.tell)
+    else:
+        total = file.size
+    if total > IMPORT_MAX_FILE_BYTES:
+        raise HTTPException(
+            413,
+            f"File too large ({total} bytes). Max is {IMPORT_MAX_FILE_BYTES} bytes.",
+        )
+    await file.seek(0)
+    return file.file, total
 
 
 def _decode_error(encoding: str, error: UnicodeDecodeError) -> HTTPException:
@@ -136,6 +134,13 @@ def _decode_error(encoding: str, error: UnicodeDecodeError) -> HTTPException:
 
 def _open_text(staged: BinaryIO, encoding: str) -> TextIO:
     try:
+        normalized = encoding.lower().replace("_", "-")
+        if normalized in {"utf-8", "utf8"}:
+            position = staged.tell()
+            has_bom = staged.read(3) == b"\xef\xbb\xbf"
+            staged.seek(position)
+            if has_bom:
+                encoding = "utf-8-sig"
         return io.TextIOWrapper(staged, encoding=encoding, newline="")
     except LookupError as error:
         raise HTTPException(400, f"Unknown encoding '{encoding}': {error}") from error
@@ -145,6 +150,7 @@ def _preview_csv(staged: BinaryIO, cfg: ImportConfig) -> PreviewResult:
     staged.seek(0)
     text = _open_text(staged, cfg.encoding)
     try:
+        csv.field_size_limit(IMPORT_MAX_BATCH_BYTES)
         reader = csv.reader(text, **_csv_reader_kwargs(cfg))
         sampled: list[list[str]] = []
         for _ in range(11):
@@ -160,8 +166,24 @@ def _preview_csv(staged: BinaryIO, cfg: ImportConfig) -> PreviewResult:
         else:
             columns = [f"col_{i + 1}" for i in range(len(sampled[0]))]
             rows = sampled
+        bounded_columns = [
+            value if len(value) <= IMPORT_PREVIEW_CELL_CHARS
+            else value[:IMPORT_PREVIEW_CELL_CHARS] + "…"
+            for value in columns
+        ]
+        bounded_rows = [
+            [
+                value if len(value) <= IMPORT_PREVIEW_CELL_CHARS
+                else value[:IMPORT_PREVIEW_CELL_CHARS] + "…"
+                for value in row
+            ]
+            for row in rows[:10]
+        ]
         return PreviewResult(
-            columns=columns, rows=rows[:10], total_lines_sampled=len(rows), format="csv"
+            columns=bounded_columns,
+            rows=bounded_rows,
+            total_lines_sampled=len(rows),
+            format="csv",
         )
     except csv.Error as error:
         raise HTTPException(400, f"CSV parse error: {error}") from error
@@ -181,7 +203,7 @@ async def _preview_dump(staged: BinaryIO, cfg: ImportConfig) -> PreviewResult:
             item = await asyncio.to_thread(_next_sql_statement, iterator)
             if item is None:
                 break
-            statements.append({"line": item.line, "sql": item.sql})
+            statements.append({"line": item.line, "sql": _statement_preview(item.sql)})
         return PreviewResult(format="mysql_dump", statements=statements)
     except UnicodeDecodeError as error:
         raise _decode_error(cfg.encoding, error) from error
@@ -243,6 +265,7 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
     rows_processed = 0
     rows_imported = 0
     warnings: list[str] = []
+    csv.field_size_limit(IMPORT_MAX_BATCH_BYTES)
     reader = csv.reader(text, **_csv_reader_kwargs(cfg))
     try:
         try:
@@ -332,7 +355,7 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                     return ImportResult(
                         ok=False,
                         rows_processed=rows_processed,
-                        rows_imported=rows_imported,
+                        rows_imported=0,
                         method="batch_insert",
                         error=str(error.detail),
                         warnings=warnings,
@@ -345,7 +368,7 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                     return ImportResult(
                         ok=False,
                         rows_processed=rows_processed,
-                        rows_imported=rows_imported,
+                        rows_imported=0,
                         method="batch_insert",
                         error=str(error),
                         warnings=warnings,
@@ -358,7 +381,7 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                     return ImportResult(
                         ok=False,
                         rows_processed=rows_processed,
-                        rows_imported=rows_imported,
+                        rows_imported=0,
                         method="batch_insert",
                         error=str(error),
                         warnings=warnings,
@@ -476,13 +499,10 @@ async def import_preview(session_id: str, file: UploadFile, config: str = Form(.
     if not await get_session(session_id):
         raise HTTPException(404, "Session not found")
     cfg = _parse_config(config)
-    staged, _ = await _stage_upload(file)
-    try:
-        if cfg.format == "csv":
-            return await asyncio.to_thread(_preview_csv, staged, cfg)
-        return await _preview_dump(staged, cfg)
-    finally:
-        staged.close()
+    staged, _ = await _open_upload(file)
+    if cfg.format == "csv":
+        return await asyncio.to_thread(_preview_csv, staged, cfg)
+    return await _preview_dump(staged, cfg)
 
 
 @router.post("/sessions/{session_id}/import")
@@ -490,11 +510,8 @@ async def import_data(session_id: str, file: UploadFile, config: str = Form(...)
     if not await get_session(session_id):
         raise HTTPException(404, "Session not found")
     cfg = _parse_config(config)
-    staged, _ = await _stage_upload(file)
-    try:
-        pool = await get_pool(session_id)
-        if cfg.format == "csv":
-            return await _batch_insert(pool, cfg, staged)
-        return await _mysql_dump_import(pool, cfg, staged)
-    finally:
-        staged.close()
+    staged, _ = await _open_upload(file)
+    pool = await get_pool(session_id)
+    if cfg.format == "csv":
+        return await _batch_insert(pool, cfg, staged)
+    return await _mysql_dump_import(pool, cfg, staged)

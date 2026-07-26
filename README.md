@@ -97,6 +97,24 @@ When LDAP is enabled, a logout button appears in the top-right corner of the tab
 
 See the [ldapgate README](https://github.com/anudeepd/ldapgate) for config file documentation.
 
+## Concurrent Deployments
+
+Lagun bounds database work so bursts from many browser tabs queue instead of
+opening unlimited upstream connections. Defaults suit a single application
+instance serving a small or medium internal team:
+
+- `LAGUN_DB_POOL_MAX_SIZE=10` — connections per saved database session.
+- `LAGUN_DB_GLOBAL_CONNECTION_LIMIT=100` — connections leased across all sessions.
+- `LAGUN_DB_ACQUIRE_TIMEOUT_SECONDS=10` — maximum queue wait before HTTP 503.
+- `LAGUN_DB_POOL_IDLE_SECONDS=900` — close pools unused for 15 minutes.
+- `LAGUN_QUERY_MAX_RUNTIME_SECONDS=30` — normal query execution deadline.
+- `LAGUN_SQLITE_BUSY_SECONDS=10` — local metadata/audit write wait.
+
+Raise pool limits only after checking the connection ceilings and workload of
+the target MySQL/MariaDB servers. Run one Lagun process per local `lagun.db`;
+the SQLite metadata store and in-process query cancellation state are not
+designed for shared multi-process deployment.
+
 ## Large Write Scripts
 
 For large write scripts (25+ `INSERT`, `UPDATE`, or `DELETE` statements), Lagun

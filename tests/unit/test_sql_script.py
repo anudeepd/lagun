@@ -61,6 +61,11 @@ def test_parser_preserves_comment_markers_across_reads():
     ]
 
 
+def test_double_minus_without_following_whitespace_is_not_a_comment():
+    statements = list(iter_sql_statements(StringIO("SELECT 10--2; SELECT 3;")))
+    assert [item.sql for item in statements] == ["SELECT 10--2", "SELECT 3"]
+
+
 def test_parser_accepts_final_delimiter_directive_without_newline():
     sql = "DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\nDELIMITER ;"
     statements = list(iter_sql_statements(StringIO(sql)))

@@ -28,6 +28,16 @@ def _max_statement_bytes() -> int:
     )
 
 
+def _starts_dash_comment(text: str, index: int) -> bool:
+    """Match MySQL's ``--<whitespace>`` line-comment syntax."""
+    marker_end = index + 2
+    return (
+        text.startswith("--", index)
+        and marker_end < len(text)
+        and text[marker_end].isspace()
+    )
+
+
 def _has_sql_content(text: str) -> bool:
     """Return whether text contains SQL or an executable MySQL comment."""
     i = 0
@@ -35,7 +45,7 @@ def _has_sql_content(text: str) -> bool:
         if text[i].isspace():
             i += 1
             continue
-        if text.startswith("--", i):
+        if _starts_dash_comment(text, i):
             end = text.find("\n", i + 2)
             i = len(text) if end < 0 else end + 1
             continue
@@ -176,7 +186,7 @@ def iter_sql_statements(
                 i += 1
                 continue
 
-            if ch == "-" and nxt == "-":
+            if _starts_dash_comment(data, i):
                 append("--")
                 in_line_comment = True
                 i += 2

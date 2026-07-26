@@ -9,13 +9,14 @@ import re
 from typing import Literal, Optional
 
 import aiomysql
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import escape_value, quote_ident
+from lagun.api.sql_script import SqlScriptError, split_sql_script
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["export"])
@@ -25,6 +26,8 @@ _BLOCKED_SQL = re.compile(
     re.IGNORECASE,
 )
 _SAFE_FILENAME = re.compile(r"[^\w.\-]")
+_EXPORT_FETCH_ROWS = 100
+_EXPORT_STREAM_CHARS = 256 * 1024
 
 
 def _safe_filename_part(s: str) -> str:
@@ -60,7 +63,7 @@ class ExportRequest(BaseModel):
     batch_size: int = Field(default=500, ge=1, le=10_000)
     insert_mode: Literal["batch", "single"] = "single"
     include_schema: bool = False
-    pk_values: Optional[list] = None
+    pk_values: Optional[list[dict[str, object]]] = None
     csv_delimiter: str = ","
     csv_quotechar: str = '"'
     csv_escapechar: str = ""
@@ -89,44 +92,82 @@ class ExportRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def valid_csv_options(self) -> "ExportRequest":
+    def valid_request(self) -> "ExportRequest":
         if self.csv_quotechar and self.csv_delimiter == self.csv_quotechar:
             raise ValueError("csv_delimiter and csv_quotechar must differ")
         if self.csv_escapechar and self.csv_escapechar == self.csv_delimiter:
             raise ValueError("csv_escapechar and csv_delimiter must differ")
+        if self.sql and self.format in {"delete", "delete+insert"}:
+            raise ValueError("DELETE exports require a table")
+        if self.pk_values is not None:
+            if not self.table:
+                raise ValueError("pk_values require a table")
+            if not self.pk_values or any(not item for item in self.pk_values):
+                raise ValueError("pk_values must contain non-empty key objects")
+            if len(self.pk_values) > 10_000:
+                raise ValueError("pk_values cannot contain more than 10,000 rows")
+            if sum(len(item) for item in self.pk_values) > 50_000:
+                raise ValueError("pk_values contains too many key columns")
+            for item in self.pk_values:
+                for column in item:
+                    quote_ident(column)
+        quote_ident(self.database)
+        if self.table:
+            quote_ident(self.table)
         return self
 
 
 @router.post("/sessions/{session_id}/export")
 async def export_data(session_id: str, req: ExportRequest):
+    return await _export_response(session_id, req)
+
+
+@router.post("/sessions/{session_id}/export/download")
+async def download_export(session_id: str, config: str = Form(...)):
+    try:
+        req = ExportRequest.model_validate_json(config)
+    except ValidationError as error:
+        raise HTTPException(
+            422, detail=error.errors(include_context=False)
+        ) from error
+    return await _export_response(session_id, req)
+
+
+async def _export_response(session_id: str, req: ExportRequest):
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
+    if req.sql and req.table:
+        raise HTTPException(400, "Provide either 'table' or 'sql', not both")
 
     if req.sql:
-        stripped = req.sql.strip().rstrip(";").strip()
-        if not re.match(r"^\s*SELECT\b", stripped, re.IGNORECASE):
+        try:
+            statements = split_sql_script(req.sql)
+        except SqlScriptError as error:
+            raise HTTPException(400, f"Invalid export query: {error}") from error
+        if len(statements) != 1:
+            raise HTTPException(400, "Export query must contain one SELECT statement")
+        stripped = statements[0].strip()
+        if not re.match(r"^SELECT\b", stripped, re.IGNORECASE):
             raise HTTPException(400, "Only SELECT statements are allowed for export")
         if _BLOCKED_SQL.search(stripped):
             raise HTTPException(400, "SQL contains disallowed functions")
-        select_sql = req.sql
+        select_sql = stripped
     elif req.table:
         select_sql = (
-            f"SELECT * FROM {quote_ident(req.database)}.{quote_ident(req.table)}"
+            f"SELECT * FROM {quote_ident(req.database)}.{quote_ident(req.table or '')}"
         )
-        if req.pk_values:
+        if req.pk_values is not None:
             conditions = []
             for pk_dict in req.pk_values:
-                if not pk_dict:
-                    continue
                 parts = [_where_value(col, val) for col, val in pk_dict.items()]
                 conditions.append(f"({' AND '.join(parts)})")
-            if conditions:
-                select_sql += f" WHERE {' OR '.join(conditions)}"
+            select_sql += f" WHERE {' OR '.join(conditions)}"
     else:
         raise HTTPException(400, "Provide either 'table' or 'sql'")
 
     pool = await get_pool(session_id)
+    fetch_size = min(req.batch_size, _EXPORT_FETCH_ROWS)
 
     async def _generate_insert():
         async with pool.acquire() as conn:
@@ -141,28 +182,46 @@ async def export_data(session_id: str, req: ExportRequest):
 
                 yield f"-- Lagun export: {tbl_label}\n"
                 yield f"-- Format: INSERT ({req.insert_mode})\n\n"
+                buf = io.StringIO()
                 if req.insert_mode == "single":
                     while True:
-                        rows = await cur.fetchmany(req.batch_size)
+                        rows = await cur.fetchmany(fetch_size)
                         if not rows:
                             break
                         for row in rows:
                             vals = ", ".join(escape_value(v) for v in row)
-                            yield f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                            buf.write(
+                                f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                            )
+                            if buf.tell() >= _EXPORT_STREAM_CHARS:
+                                yield buf.getvalue()
+                                buf.seek(0)
+                                buf.truncate(0)
                 else:
+                    rows_in_statement = 0
                     while True:
-                        rows = await cur.fetchmany(req.batch_size)
+                        rows = await cur.fetchmany(fetch_size)
                         if not rows:
                             break
-                        values = []
                         for row in rows:
+                            if rows_in_statement == 0:
+                                buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
+                            else:
+                                buf.write(",\n")
                             vals = ", ".join(escape_value(v) for v in row)
-                            values.append(f"({vals})")
-                        yield (
-                            f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n"
-                            + ",\n".join(values)
-                            + ";\n"
-                        )
+                            buf.write(f"({vals})")
+                            rows_in_statement += 1
+                            if rows_in_statement == req.batch_size:
+                                buf.write(";\n")
+                                rows_in_statement = 0
+                            if buf.tell() >= _EXPORT_STREAM_CHARS:
+                                yield buf.getvalue()
+                                buf.seek(0)
+                                buf.truncate(0)
+                    if rows_in_statement:
+                        buf.write(";\n")
+                if buf.tell():
+                    yield buf.getvalue()
 
     async def _generate_delete():
         async with pool.acquire() as conn:
@@ -184,8 +243,9 @@ async def export_data(session_id: str, req: ExportRequest):
                 where_cols = pk_cols if pk_cols else cols
 
                 yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE\n\n"
+                buf = io.StringIO()
                 while True:
-                    rows = await cur.fetchmany(req.batch_size)
+                    rows = await cur.fetchmany(fetch_size)
                     if not rows:
                         break
                     for row in rows:
@@ -193,7 +253,13 @@ async def export_data(session_id: str, req: ExportRequest):
                         where = " AND ".join(
                             _where_value(c, row_dict[c]) for c in where_cols
                         )
-                        yield f"DELETE FROM {tbl_q} WHERE {where};\n"
+                        buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
+                        if buf.tell() >= _EXPORT_STREAM_CHARS:
+                            yield buf.getvalue()
+                            buf.seek(0)
+                            buf.truncate(0)
+                if buf.tell():
+                    yield buf.getvalue()
 
     async def _generate_delete_insert():
         async with pool.acquire() as conn:
@@ -217,8 +283,9 @@ async def export_data(session_id: str, req: ExportRequest):
 
                 yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE+INSERT ({req.insert_mode})\n\n"
                 if req.insert_mode == "single":
+                    buf = io.StringIO()
                     while True:
-                        rows = await cur.fetchmany(req.batch_size)
+                        rows = await cur.fetchmany(fetch_size)
                         if not rows:
                             break
                         for row in rows:
@@ -227,27 +294,34 @@ async def export_data(session_id: str, req: ExportRequest):
                                 _where_value(c, row_dict[c]) for c in where_cols
                             )
                             vals = ", ".join(escape_value(v) for v in row)
-                            yield f"DELETE FROM {tbl_q} WHERE {where};\n"
-                            yield f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                            buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
+                            buf.write(
+                                f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                            )
+                            if buf.tell() >= _EXPORT_STREAM_CHARS:
+                                yield buf.getvalue()
+                                buf.seek(0)
+                                buf.truncate(0)
+                    if buf.tell():
+                        yield buf.getvalue()
                 else:
                     while True:
-                        rows = await cur.fetchmany(req.batch_size)
+                        rows = await cur.fetchmany(fetch_size)
                         if not rows:
                             break
-                        values = []
+                        buf = io.StringIO()
                         for row in rows:
                             row_dict = dict(zip(cols, row))
                             where = " AND ".join(
                                 _where_value(c, row_dict[c]) for c in where_cols
                             )
+                            buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
+                        buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
+                        for index, row in enumerate(rows):
                             vals = ", ".join(escape_value(v) for v in row)
-                            yield f"DELETE FROM {tbl_q} WHERE {where};\n"
-                            values.append(f"({vals})")
-                        yield (
-                            f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n"
-                            + ",\n".join(values)
-                            + ";\n"
-                        )
+                            buf.write((",\n" if index else "") + f"({vals})")
+                        buf.write(";\n")
+                        yield buf.getvalue()
 
     async def _generate_csv():
         writer_kwargs: dict = {
@@ -270,9 +344,6 @@ async def export_data(session_id: str, req: ExportRequest):
         else:
             byte_enc, enc_errors = "utf-8", "strict"
 
-        def to_bytes(text: str) -> bytes:
-            return text.encode(byte_enc, errors=enc_errors)
-
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
                 await cur.execute(f"USE {quote_ident(req.database)}")
@@ -282,18 +353,22 @@ async def export_data(session_id: str, req: ExportRequest):
                     yield b"\xef\xbb\xbf"
 
                 buf = io.StringIO()
-                csv.writer(buf, **writer_kwargs).writerow(cols)
-                yield to_bytes(buf.getvalue())
+                writer = csv.writer(buf, **writer_kwargs)
+                writer.writerow(cols)
                 while True:
-                    rows = await cur.fetchmany(req.batch_size)
+                    rows = await cur.fetchmany(fetch_size)
                     if not rows:
                         break
-                    buf = io.StringIO()
-                    csv.writer(buf, **writer_kwargs).writerows(
-                        (("" if value is None else value) for value in row)
-                        for row in rows
-                    )
-                    yield to_bytes(buf.getvalue())
+                    for row in rows:
+                        writer.writerow(
+                            "" if value is None else value for value in row
+                        )
+                        if buf.tell() >= _EXPORT_STREAM_CHARS:
+                            yield buf.getvalue().encode(byte_enc, errors=enc_errors)
+                            buf.seek(0)
+                            buf.truncate(0)
+                if buf.tell():
+                    yield buf.getvalue().encode(byte_enc, errors=enc_errors)
 
     db = _safe_filename_part(req.database)
     tbl = _safe_filename_part(req.table or "query")

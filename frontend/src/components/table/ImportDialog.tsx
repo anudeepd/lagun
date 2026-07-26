@@ -62,6 +62,9 @@ interface Preview {
   statements?: { line: number; sql: string }[]
 }
 
+const PREVIEW_SAMPLE_BYTES = 1024 * 1024
+
+
 export default function ImportDialog({ open, onClose, sessionId, database, table: preselectedTable, onImportComplete }: Props) {
   const [format, setFormat] = useState<'csv' | 'mysql_dump'>('csv')
   const [file, setFile] = useState<File | null>(null)
@@ -74,21 +77,13 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   const [delimiterCustom, setDelimiterCustom] = useState('')
   const [quotechar, setQuotechar] = useState('"')
   const [escapechar, setEscapechar] = useState('"')
-  const [lineterminator, setLineterminator] = useState('crlf')
   const [encoding, setEncoding] = useState('utf-8')
-
-  // Map line ending names to actual characters
-  const lineTerminatorMap: Record<string, string> = {
-    crlf: '\r\n',
-    lf: '\n',
-    cr: '\r',
-  }
-  const effectiveLineterminator = lineTerminatorMap[lineterminator] || '\r\n'
 
   // Import config
   const [firstRowHeader, setFirstRowHeader] = useState(true)
   const [targetTable, setTargetTable] = useState(preselectedTable ?? '')
   const [strategy, setStrategy] = useState<'insert' | 'insert_ignore' | 'replace'>('insert')
+  const [preserveEmptyStrings, setPreserveEmptyStrings] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Status
@@ -113,61 +108,58 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
       delimiter: effectiveDelimiter,
       quotechar,
       escapechar,
-      lineterminator: effectiveLineterminator,
       encoding,
       first_row_header: firstRowHeader,
       strategy,
+      preserve_empty_strings: preserveEmptyStrings,
     } : {}),
-  }), [database, format, targetTable, effectiveDelimiter, quotechar, escapechar, effectiveLineterminator, encoding, firstRowHeader, strategy])
+  }), [database, format, targetTable, effectiveDelimiter, quotechar, escapechar, encoding, firstRowHeader, strategy, preserveEmptyStrings])
 
-  // Fetch preview when file format or CSV configuration changes
-  const fetchPreviewTimer = useRef<number | undefined>(undefined)
   const previewRequestId = useRef(0)
   useEffect(() => {
+    previewRequestId.current += 1
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
+  }, [file, buildConfigJson])
+
+  const fetchPreview = async () => {
+    if (!file) return
     const requestId = ++previewRequestId.current
-    if (!file) {
-      setPreview(null)
-      setPreviewError(null)
-      return
-    }
-
-    window.clearTimeout(fetchPreviewTimer.current)
-    fetchPreviewTimer.current = window.setTimeout(async () => {
-      setPreviewLoading(true)
-      setPreviewError(null)
-      try {
-        const formData = new FormData()
-        formData.append('file', file)
-        formData.append('config', buildConfigJson())
-        const res = await apiFetch(`/api/v1/sessions/${sessionId}/import/preview`, {
-          method: 'POST',
-          body: formData,
-        })
-        if (requestId !== previewRequestId.current) return
-        if (!res.ok) {
-          setPreviewError(importResponseError(await res.text(), res.statusText))
-          setPreview(null)
-        } else {
-          setPreview(await res.json())
-          setPreviewError(null)
-        }
-      } catch (e) {
-        if (requestId !== previewRequestId.current) return
-        setPreviewError(String(e))
+    setPreviewLoading(true)
+    setPreviewError(null)
+    try {
+      const sample = file.size > PREVIEW_SAMPLE_BYTES
+        ? file.slice(0, PREVIEW_SAMPLE_BYTES, file.type)
+        : file
+      const formData = new FormData()
+      formData.append('file', sample, file.name)
+      formData.append('config', buildConfigJson())
+      const res = await apiFetch(`/api/v1/sessions/${sessionId}/import/preview`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (requestId !== previewRequestId.current) return
+      if (!res.ok) {
+        setPreviewError(importResponseError(await res.text(), res.statusText))
         setPreview(null)
-      } finally {
-        if (requestId === previewRequestId.current) setPreviewLoading(false)
+      } else {
+        setPreview(await res.json())
+        setPreviewError(null)
       }
-    }, 300)
-
-    return () => window.clearTimeout(fetchPreviewTimer.current)
-  }, [file, format, effectiveDelimiter, quotechar, escapechar, lineterminator, encoding, firstRowHeader, sessionId, buildConfigJson])
+    } catch (error) {
+      if (requestId !== previewRequestId.current) return
+      setPreviewError(error instanceof Error ? error.message : String(error))
+      setPreview(null)
+    } finally {
+      if (requestId === previewRequestId.current) setPreviewLoading(false)
+    }
+  }
 
   const handleFileSelect = (files: FileList | null) => {
-    if (files && files.length > 0) {
-      setFile(files[0])
-      setResult(null)
-    }
+    if (!files || files.length === 0) return
+    setFile(files[0])
+    setResult(null)
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -201,17 +193,22 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
     }
   }
 
+  const handleClose = () => {
+    if (!importing) onClose()
+  }
+
+
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={format === 'mysql_dump'
         ? `Import MySQL dump into ${database}`
         : `Import into ${database}${targetTable ? '.' + targetTable : ''}`}
       width="max-w-2xl"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose} disabled={importing}>Cancel</Button>
           <Button
             variant="primary"
             onClick={handleImport}
@@ -222,34 +219,42 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         </>
       }
     >
-      <div className="flex flex-col gap-4">
+      <fieldset disabled={importing} className="flex flex-col gap-4">
         {/* File drop zone */}
-        <div
-          className="border-2 border-dashed border-surface-700 rounded-lg p-6 text-center cursor-pointer hover:border-surface-600 transition-colors"
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.tsv,.txt,.sql,.dump"
+          className="hidden"
+          onChange={e => handleFileSelect(e.target.files)}
+        />
+        <button
+          type="button"
+          className="w-full border-2 border-dashed border-surface-700 rounded-lg p-6 text-center cursor-pointer hover:border-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           onClick={() => fileInputRef.current?.click()}
           onDragOver={e => e.preventDefault()}
           onDrop={handleDrop}
+          aria-label={file ? `Selected file ${file.name}. Choose another file` : 'Choose import file'}
         >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.tsv,.txt,.sql,.dump"
-            className="hidden"
-            onChange={e => handleFileSelect(e.target.files)}
-          />
           {file ? (
-            <div className="text-sm">
+            <span className="block text-sm">
               <Upload size={20} className="mx-auto mb-2 text-brand-400" />
-              <p className="text-slate-200">{file.name}</p>
-              <p className="text-xs text-slate-500 mt-1">{(file.size / 1024).toFixed(1)} KB</p>
-            </div>
+              <span className="block text-slate-200">{file.name}</span>
+              <span className="block text-xs text-slate-500 mt-1">{(file.size / 1024).toFixed(1)} KB</span>
+            </span>
           ) : (
-            <div className="text-sm text-slate-500">
+            <span className="block text-sm text-slate-500">
               <Upload size={20} className="mx-auto mb-2" />
-              <p>Drop a CSV or MySQL dump file here or click to select</p>
-              <p className="text-xs mt-1">.csv, .tsv, .txt, .sql, .dump</p>
-            </div>
+              <span className="block">Drop a CSV or MySQL dump file here or click to select</span>
+              <span className="block text-xs mt-1">.csv, .tsv, .txt, .sql, .dump</span>
+            </span>
           )}
+        </button>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-slate-500">Preview reads at most first 1 MB. Import still reads complete file.</p>
+          <Button variant="ghost" size="sm" onClick={fetchPreview} disabled={!file || previewLoading}>
+            {previewLoading ? 'Previewing…' : preview ? 'Refresh Preview' : 'Preview'}
+          </Button>
         </div>
 
         {/* Preview */}
@@ -402,15 +407,6 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
               </div>
               <div className="flex gap-3">
                 <Select
-                  label="Line Ending"
-                  value={lineterminator}
-                  onChange={e => setLineterminator(e.target.value)}
-                >
-                  <option value="crlf">CRLF (Windows)</option>
-                  <option value="lf">LF (Unix/Mac)</option>
-                  <option value="cr">CR (Legacy Mac)</option>
-                </Select>
-                <Select
                   label="Encoding"
                   value={encoding}
                   onChange={e => setEncoding(e.target.value)}
@@ -420,6 +416,15 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
                   <option value="ascii">ASCII</option>
                 </Select>
               </div>
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={preserveEmptyStrings}
+                  onChange={e => setPreserveEmptyStrings(e.target.checked)}
+                  className="rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-500"
+                />
+                Preserve blank fields as empty strings instead of NULL
+              </label>
             </m.div>
           )}
           </AnimatePresence>
@@ -456,7 +461,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             )}
           </div>
         )}
-      </div>
+      </fieldset>
     </Modal>
   )
 }

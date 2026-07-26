@@ -54,6 +54,47 @@ async def test_preview_empty_file_rejected(client, session_id, test_db):
     assert r.status_code == 400
 
 
+async def test_dump_preview_bounds_statement_text(client, session_id, test_db):
+    dump = ("SELECT '" + ("x" * 10_000) + "';").encode()
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/import/preview",
+        files={"file": ("data.sql", dump, "application/sql")},
+        data={"config": json.dumps({"database": test_db, "format": "mysql_dump"})},
+    )
+    assert r.status_code == 200
+    assert len(r.json()["statements"][0]["sql"]) <= 500
+
+
+async def test_csv_preview_accepts_large_fields_and_bounds_response(
+    client, session_id, test_db
+):
+    csv_data = b"name,age\n" + (b"x" * 200_000) + b",42\n"
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/import/preview",
+        files={"file": ("data.csv", csv_data, "text/csv")},
+        data={"config": _config()},
+    )
+    assert r.status_code == 200
+    assert len(r.json()["rows"][0][0]) == 501
+    assert r.json()["rows"][0][0].endswith("…")
+
+
+async def test_csv_preview_auto_detects_utf8_bom(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/import/preview",
+        files={
+            "file": (
+                "data.csv",
+                b"\xef\xbb\xbfname,age\nAlice,30\n",
+                "text/csv",
+            )
+        },
+        data={"config": _config()},
+    )
+    assert r.status_code == 200
+    assert r.json()["columns"] == ["name", "age"]
+
+
 async def test_preview_nonexistent_session(client):
     r = await client.post(
         "/api/v1/sessions/no-such/import/preview",
@@ -96,15 +137,17 @@ async def test_import_inserts_rows(client, session_id, test_db):
 async def test_import_rollback_on_error(client, session_id, test_db):
     """A row that violates a constraint should roll back the whole batch."""
     # 'name' column is NOT NULL — inserting NULL should fail
-    bad_csv = b"name,age\n,99\n"  # empty name → NULL violation
+    bad_csv = b"name,age\nValid before rollback,42\n,99\n"
     r = await client.post(
         f"/api/v1/sessions/{session_id}/import",
         files={"file": ("data.csv", bad_csv, "text/csv")},
-        data={"config": _config()},
+        data={"config": _config(batch_size=1)},
     )
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is False
+    assert data["rows_processed"] == 1
+    assert data["rows_imported"] == 0
     assert data["error"] is not None
 
     # Row count should be unchanged (rollback worked)
@@ -161,6 +204,21 @@ async def test_import_tab_delimited(client, session_id, test_db):
     assert r.json()["rows_processed"] == 1
 
 
+async def test_import_can_preserve_empty_strings(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/import",
+        files={"file": ("data.csv", b"name,age\n,22\n", "text/csv")},
+        data={"config": _config(preserve_empty_strings=True)},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    result = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT COUNT(*) FROM users WHERE name=''", "database": test_db},
+    )
+    assert result.json()["rows"][0][0] == 1
+
+
 async def test_import_rejects_zero_batch_size(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/import",
@@ -180,6 +238,15 @@ async def test_import_invalid_config_returns_serializable_422(
     )
     assert r.status_code == 422
     assert "database must not be empty" in r.text
+
+
+async def test_import_rejects_ambiguous_csv_characters(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/import",
+        files={"file": ("data.csv", CSV_WITH_HEADER, "text/csv")},
+        data={"config": _config(delimiter='"', quotechar='"')},
+    )
+    assert r.status_code == 422
 
 
 async def test_import_large_csv_uses_bounded_batches(client, session_id, test_db):

@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from lagun.db.pool import get_pool
+from lagun.db.pool import DatabaseCapacityError, DatabaseConnectionError, get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, escape_string_literal
 from lagun.api.sql_script import SqlScriptError, split_sql_script
@@ -47,6 +47,9 @@ _BULK_LOCK_WAIT_TIMEOUT_SECONDS = int(
     os.getenv("LAGUN_BULK_LOCK_WAIT_TIMEOUT_SECONDS", "5")
 )
 _BULK_MAX_RUNTIME_SECONDS = int(os.getenv("LAGUN_BULK_MAX_RUNTIME_SECONDS", "120"))
+_QUERY_MAX_RUNTIME_SECONDS = float(
+    os.getenv("LAGUN_QUERY_MAX_RUNTIME_SECONDS", "30")
+)
 _BULK_PREVIEW_CHARS = 160
 _NONTRANSACTIONAL_ENGINES = {
     "MYISAM",
@@ -411,44 +414,56 @@ async def execute_query(session_id: str, req: QueryRequest):
 
     t0 = time.monotonic()
     thread_id = None
+    deadline_error = (
+        f"Query exceeded the {_QUERY_MAX_RUNTIME_SECONDS:g}-second execution limit"
+    )
     try:
         async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                # Register connection thread_id so it can be killed if needed
-                await cur.execute("SELECT CONNECTION_ID()")
-                row = await cur.fetchone()
-                thread_id = row[0]
-                if session_id not in _active_queries:
-                    _active_queries[session_id] = set()
-                _active_queries[session_id].add(thread_id)
-                try:
-                    if req.database:
-                        await cur.execute(f"USE {quote_ident(req.database)}")
-                    await cur.execute(sql)
-                    if cur.description:
-                        columns = [d[0] for d in cur.description]
-                        rows = [list(r) for r in (await cur.fetchall())]
-                        # Serialize non-JSON-native types
-                        rows = [[_serialize(v) for v in row] for row in rows]
-                        return QueryResult(
-                            columns=columns,
-                            rows=rows,
-                            row_count=len(rows),
-                            exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
-                        )
-                    else:
-                        return QueryResult(
-                            columns=[],
-                            rows=[],
-                            row_count=cur.rowcount,
-                            exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
-                            affected_rows=cur.rowcount,
-                            insert_id=cur.lastrowid,
-                        )
-                finally:
-                    _active_queries[session_id].discard(thread_id)
-                    if not _active_queries[session_id]:
-                        del _active_queries[session_id]
+            try:
+                async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                    async with conn.cursor() as cur:
+                        # Register connection thread_id so it can be killed if needed
+                        await cur.execute("SELECT CONNECTION_ID()")
+                        row = await cur.fetchone()
+                        thread_id = row[0]
+                        if session_id not in _active_queries:
+                            _active_queries[session_id] = set()
+                        _active_queries[session_id].add(thread_id)
+                        try:
+                            if req.database:
+                                await cur.execute(f"USE {quote_ident(req.database)}")
+                            await cur.execute(sql)
+                            if cur.description:
+                                columns = [d[0] for d in cur.description]
+                                rows = [list(r) for r in (await cur.fetchall())]
+                                rows = [[_serialize(v) for v in row] for row in rows]
+                                return QueryResult(
+                                    columns=columns,
+                                    rows=rows,
+                                    row_count=len(rows),
+                                    exec_time_ms=round(
+                                        (time.monotonic() - t0) * 1000, 2
+                                    ),
+                                )
+                            return QueryResult(
+                                columns=[],
+                                rows=[],
+                                row_count=cur.rowcount,
+                                exec_time_ms=round(
+                                    (time.monotonic() - t0) * 1000, 2
+                                ),
+                                affected_rows=cur.rowcount,
+                                insert_id=cur.lastrowid,
+                            )
+                        finally:
+                            _active_queries[session_id].discard(thread_id)
+                            if not _active_queries[session_id]:
+                                del _active_queries[session_id]
+            except TimeoutError as error:
+                conn.close()
+                raise TimeoutError(deadline_error) from error
+    except (DatabaseCapacityError, DatabaseConnectionError):
+        raise
     except Exception as exc:
         if thread_id is not None:
             queries = _active_queries.get(session_id)

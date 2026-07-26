@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 
-import aiosqlite
 import yaml
 
 from lagun.db.crypto import encrypt_password
@@ -21,7 +20,7 @@ async def sync_connections_config(path: str | None) -> None:
     if not isinstance(entries, list):
         raise ValueError("connections.yaml: 'connections' must be a list")
 
-    async with aiosqlite.connect(session_store._DB_PATH) as db:
+    async with session_store._connect() as db:
         for entry in entries:
             key = entry.get("id")
             users = entry.get("allowed_users", [])

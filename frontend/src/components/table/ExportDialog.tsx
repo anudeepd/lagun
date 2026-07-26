@@ -137,6 +137,64 @@ export const buildFrontendContent = (
   const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
   return deleteLines + '\n\n' + `INSERT INTO ${target} (${cols}) VALUES\n${values};\n`
 }
+const COPY_LIMIT_BYTES = 16 * 1024 * 1024
+
+export async function responseTextWithLimit(response: Response, limit = COPY_LIMIT_BYTES): Promise<string> {
+  if (!response.body) {
+    const text = await response.text()
+    if (new Blob([text]).size > limit) throw new Error(`Copy is limited to ${limit / 1024 / 1024} MB. Use Download for large exports.`)
+    return text
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const parts: string[] = []
+  let bytes = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    bytes += value.byteLength
+    if (bytes > limit) {
+      await reader.cancel()
+      throw new Error(`Copy is limited to ${limit / 1024 / 1024} MB. Use Download for large exports.`)
+    }
+    parts.push(decoder.decode(value, { stream: true }))
+  }
+  parts.push(decoder.decode())
+  return parts.join('')
+}
+
+
+function beginNativeDownload(url: string, config: string, onError: (message: string) => void) {
+  const target = `lagun-export-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const iframe = document.createElement('iframe')
+  iframe.name = target
+  iframe.title = 'Export download'
+  iframe.hidden = true
+  document.body.appendChild(iframe)
+
+  const cleanup = () => iframe.remove()
+  iframe.addEventListener('load', () => {
+    if (iframe.contentWindow?.location.href === 'about:blank') return
+    const message = iframe.contentDocument?.body.textContent?.trim()
+    if (message) onError(message)
+    cleanup()
+  })
+  window.addEventListener('pagehide', cleanup, { once: true })
+
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = url
+  form.target = target
+  form.hidden = true
+  const input = document.createElement('input')
+  input.type = 'hidden'
+  input.name = 'config'
+  input.value = config
+  form.appendChild(input)
+  document.body.appendChild(form)
+  form.submit()
+  form.remove()
+}
 
 export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, rowsOverrideLabel = 'filtered rows', pkColumnsForSql = [] }: Props) {
   const [format, setFormat] = useState<'insert' | 'delete' | 'delete+insert' | 'csv'>(customSql ? 'csv' : 'insert')
@@ -207,33 +265,29 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     setError(null)
     try {
       ensureValidCsvOptions()
-      let blob: Blob
-      let filename: string
       if (rowsOverride) {
         const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)
-        blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-        filename = `${database}_${table}_filtered.${format === 'csv' ? 'csv' : 'sql'}`
+        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.download = `${database}_${table}_filtered.${format === 'csv' ? 'csv' : 'sql'}`
+        a.href = url
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
       } else {
-        const res = await apiFetch(`/api/v1/sessions/${sessionId}/export`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: buildBody(),
-        })
-        if (!res.ok) throw new Error(await res.text())
-        blob = await res.blob()
-        const cd = res.headers.get('Content-Disposition') ?? ''
-        const match = cd.match(/filename="([^"]+)"/)
-        filename = match ? match[1] : `${database}_${table}.${format === 'csv' ? 'csv' : 'sql'}`
+        beginNativeDownload(
+          `/api/v1/sessions/${sessionId}/export/download`,
+          buildBody(),
+          message => {
+            const errorMessage = `Export failed: ${message}`
+            showToast(errorMessage, 'error')
+          },
+        )
       }
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.download = filename
-      a.href = url
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
       onClose()
-    } catch (e) {
-      const message = `Export failed: ${e}`
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      const message = `Export failed: ${error instanceof Error ? error.message : String(error)}`
       setError(message)
       showToast(message, 'error')
     } finally {
@@ -249,6 +303,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       let text: string
       if (rowsOverride) {
         text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)
+        if (new Blob([text]).size > COPY_LIMIT_BYTES) {
+          throw new Error('Copy is limited to 16 MB. Use Download for large exports.')
+        }
       } else {
         const res = await apiFetch(`/api/v1/sessions/${sessionId}/export`, {
           method: 'POST',
@@ -256,14 +313,13 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           body: buildBody(),
         })
         if (!res.ok) throw new Error(await res.text())
-        const blob = await res.blob()
-        text = await blob.text()
+        text = await responseTextWithLimit(res)
       }
       await clipboardWrite(text)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    } catch (e) {
-      const message = `Copy failed: ${e}`
+    } catch (error) {
+      const message = `Copy failed: ${error instanceof Error ? error.message : String(error)}`
       setError(message)
       showToast(message, 'error')
     } finally {
@@ -306,7 +362,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             value={insertMode}
             onChange={e => setInsertMode(e.target.value as typeof insertMode)}
           >
-            <option value="batch">Batch (all rows in one INSERT)</option>
+            <option value="batch">Batch (bounded rows per INSERT)</option>
             <option value="single">Single (one INSERT per row)</option>
           </Select>
         )}
@@ -411,8 +467,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             ? <>Exporting <strong className="text-slate-300">{rowsOverride.rows.length} {rowsOverrideLabel}</strong> from <code className="text-slate-300">{table}</code>.</>
             : pkValues
               ? <>Exporting <strong className="text-slate-300">{pkValues.length} selected rows</strong> from <code className="text-slate-300">{table}</code>.</>
-              : <>Exports all rows from <code className="text-slate-300">{table}</code>. Large tables are streamed in batches.</>
+              : <>Downloads all rows from <code className="text-slate-300">{table}</code> as a bounded-memory stream.</>
           }
+          {!rowsOverride && <><br />Copy is capped at 16 MB. Download handles large exports without buffering them in this page.</>}
         </p>
       </div>
     </Modal>

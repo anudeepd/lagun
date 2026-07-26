@@ -2,9 +2,8 @@ import { Children, isValidElement, useEffect, useId, useLayoutEffect, useRef, us
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
-import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
-import { exitTransition, surfaceTransition } from '../../motion/tokens'
+import { surfaceTransition } from '../../motion/tokens'
 
 interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'multiple'> {
   label?: string
@@ -105,17 +104,15 @@ export default function Select({ label, error, className, containerClassName, co
       </m.button>
       {error && <p className="text-xs text-red-400">{error}</p>}
       {createPortal(
-        <AnimatePresence>
-          {open && (
-            <m.div
+        open ? (
+          <m.div
               ref={menuRef}
               id={menuId}
               role="listbox"
               aria-label={ariaLabel ?? label}
               initial={{ opacity: 0, scale: 0.96, y: -6 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.98, y: -4 }}
-              transition={open ? surfaceTransition : exitTransition}
+              transition={surfaceTransition}
               style={{ position: 'fixed', top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, maxHeight: 'min(320px, calc(100vh - 16px))' }}
               className={clsx(isInsideDialog ? 'z-critical' : 'z-popover', 'origin-top overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-xl')}
             >
@@ -139,8 +136,7 @@ export default function Select({ label, error, className, containerClassName, co
                 </button>
               ))}
             </m.div>
-          )}
-        </AnimatePresence>, document.body,
+        ) : null, document.body,
       )}
     </div>
   )

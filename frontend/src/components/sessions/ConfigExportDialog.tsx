@@ -24,6 +24,7 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
   }
 
   const handleExport = async () => {
+    if (loading) return
     setError(null)
     if (!passphrase) {
       setError('Enter a passphrase to protect the exported passwords.')
@@ -38,7 +39,7 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
       await api.exportConfig(passphrase)
       handleClose()
     } catch (e) {
-      setError(String(e))
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
@@ -47,12 +48,12 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
   return (
     <Modal
       open={open}
-      onClose={handleClose}
+      onClose={() => { if (!loading) handleClose() }}
       title="Export Connections"
       width="max-w-md"
       footer={
         <>
-          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose} disabled={loading}>Cancel</Button>
           <Button variant="primary" onClick={handleExport} disabled={loading}>
             {loading ? <Loader2 size={12} className="animate-spin mr-1" /> : <Download size={12} className="mr-1" />}
             Download
@@ -72,6 +73,7 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
           onChange={e => setPassphrase(e.target.value)}
           placeholder="Strong passphrase"
           autoComplete="new-password"
+          disabled={loading}
         />
         <Input
           label="Confirm passphrase"
@@ -80,9 +82,10 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
           onChange={e => setConfirm(e.target.value)}
           placeholder="Repeat passphrase"
           autoComplete="new-password"
-          onKeyDown={e => e.key === 'Enter' && handleExport()}
+          disabled={loading}
+          onKeyDown={e => e.key === 'Enter' && !loading && handleExport()}
         />
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
       </div>
     </Modal>
   )

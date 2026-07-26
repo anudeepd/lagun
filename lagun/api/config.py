@@ -40,6 +40,7 @@ async def get_server_config():
 
 
 _KDF_ITERATIONS = 600_000
+_CONFIG_IMPORT_MAX_BYTES = 5 * 1024 * 1024
 
 
 class ExportRequest(BaseModel):
@@ -129,40 +130,48 @@ async def import_config(
             400, "A passphrase is required to decrypt the imported passwords"
         )
 
-    raw = await file.read()
-    if len(raw) > 5 * 1024 * 1024:
+    raw = await file.read(_CONFIG_IMPORT_MAX_BYTES + 1)
+    if len(raw) > _CONFIG_IMPORT_MAX_BYTES:
         raise HTTPException(413, "File too large (max 5 MB)")
 
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(400, f"Invalid JSON: {exc}")
+        raise HTTPException(400, f"Invalid JSON: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Invalid export: root value must be an object")
 
     if payload.get("version") != _EXPORT_VERSION:
         raise HTTPException(
             400, f"Unsupported export version: {payload.get('version')}"
         )
+    if payload.get("kdf") != "pbkdf2-hmac-sha256":
+        raise HTTPException(400, "Unsupported password key derivation")
+    if payload.get("kdf_iterations") != _KDF_ITERATIONS:
+        raise HTTPException(400, "Unsupported password key derivation parameters")
 
     try:
-        salt_bytes = base64.b64decode(payload["kdf_salt"])
-    except Exception as exc:
-        raise HTTPException(400, f"Malformed kdf_salt: {exc}")
+        salt_bytes = base64.b64decode(payload["kdf_salt"], validate=True)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Malformed kdf_salt: {exc}") from exc
+    if len(salt_bytes) != 16:
+        raise HTTPException(400, "Malformed kdf_salt: expected 16 bytes")
 
-    imported = 0
+    entries = payload.get("sessions")
+    if not isinstance(entries, list):
+        raise HTTPException(400, "Invalid export: sessions must be an array")
+
+    prepared: list[SessionCreate] = []
     skipped = 0
-
-    for entry in payload.get("sessions", []):
+    for entry in entries:
+        if not isinstance(entry, dict):
+            skipped += 1
+            continue
         try:
-            try:
-                plaintext_password = decrypt_with_passphrase(
-                    entry["password_enc"], passphrase, salt_bytes
-                )
-            except InvalidToken:
-                raise HTTPException(
-                    400, "Wrong passphrase — could not decrypt passwords"
-                )
-
-            await session_store.create_session(
+            plaintext_password = decrypt_with_passphrase(
+                entry["password_enc"], passphrase, salt_bytes
+            )
+            prepared.append(
                 SessionCreate(
                     name=entry["name"],
                     host=entry.get("host", "localhost"),
@@ -175,9 +184,18 @@ async def import_config(
                     selected_databases=entry.get("selected_databases", []),
                 )
             )
+        except InvalidToken as exc:
+            raise HTTPException(
+                400, "Wrong passphrase — could not decrypt passwords"
+            ) from exc
+        except Exception:
+            skipped += 1
+
+    imported = 0
+    for session in prepared:
+        try:
+            await session_store.create_session(session)
             imported += 1
-        except HTTPException:
-            raise
         except Exception:
             skipped += 1
 

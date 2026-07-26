@@ -20,6 +20,11 @@ def _default_db_path() -> Path:
 
 
 _DB_PATH = _default_db_path()
+_SQLITE_BUSY_SECONDS = float(os.getenv("LAGUN_SQLITE_BUSY_SECONDS", "10"))
+
+
+def _connect() -> aiosqlite.Connection:
+    return aiosqlite.connect(_DB_PATH, timeout=max(1, _SQLITE_BUSY_SECONDS))
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -70,7 +75,12 @@ CREATE TABLE IF NOT EXISTS settings (
 
 async def init_db():
     _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
+        await db.execute(
+            f"PRAGMA busy_timeout={int(max(1, _SQLITE_BUSY_SECONDS) * 1000)}"
+        )
         await db.executescript(_SCHEMA)
         # Migrate existing DBs that lack the selected_databases column
         try:
@@ -94,6 +104,14 @@ async def init_db():
         await db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS sessions_config_key_unique "
             "ON sessions(config_key) WHERE config_key IS NOT NULL"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS sessions_owner_username_idx "
+            "ON sessions(owner_username)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx "
+            "ON audit_events(occurred_at)"
         )
         await db.commit()
 
@@ -122,7 +140,7 @@ _READ_COLUMNS = "id, name, host, port, username, default_db, query_limit, ssl_en
 
 
 async def list_sessions(owner_username: str | None = None) -> list[SessionRead]:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             f"SELECT {_READ_COLUMNS} FROM sessions ORDER BY is_default DESC, name"
@@ -132,7 +150,7 @@ async def list_sessions(owner_username: str | None = None) -> list[SessionRead]:
 
 
 async def list_sessions_for_user(username: str) -> list[SessionRead]:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             f"SELECT DISTINCT s.{_READ_COLUMNS.replace(', ', ', s.')} FROM sessions s "
@@ -147,7 +165,7 @@ async def list_sessions_for_user(username: str) -> list[SessionRead]:
 
 
 async def get_session(session_id: str) -> Optional[SessionRead]:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             f"SELECT {_READ_COLUMNS} FROM sessions WHERE id = ?",
@@ -158,7 +176,7 @@ async def get_session(session_id: str) -> Optional[SessionRead]:
 
 
 async def get_session_password(session_id: str) -> Optional[str]:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         async with db.execute(
             "SELECT password_enc FROM sessions WHERE id = ?", (session_id,)
         ) as cur:
@@ -174,7 +192,7 @@ async def create_session(
     sid = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     enc = encrypt_password(data.password)
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         await db.execute(
             "INSERT INTO sessions (id, name, host, port, username, password_enc, default_db, query_limit, ssl_enabled, created_at, updated_at, selected_databases, owner_username, managed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)",
             (
@@ -223,7 +241,7 @@ async def update_session(session_id: str, data: SessionUpdate) -> Optional[Sessi
 
     fields["updated_at"] = datetime.now(timezone.utc).isoformat()
     set_clause = ", ".join(f"{k} = ?" for k in fields)
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         await db.execute(
             f"UPDATE sessions SET {set_clause} WHERE id = ?",
             (*fields.values(), session_id),
@@ -233,14 +251,14 @@ async def update_session(session_id: str, data: SessionUpdate) -> Optional[Sessi
 
 
 async def delete_session(session_id: str) -> bool:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         cur = await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         await db.commit()
         return cur.rowcount > 0
 
 
 async def can_access_session(session_id: str, username: str) -> bool:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         async with db.execute(
             "SELECT 1 FROM sessions s LEFT JOIN shared_session_access a ON a.session_id=s.id AND a.username=? "
             "LEFT JOIN hidden_shared_sessions h ON h.session_id=s.id AND h.username=? "
@@ -251,7 +269,7 @@ async def can_access_session(session_id: str, username: str) -> bool:
 
 
 async def is_managed_session(session_id: str) -> bool:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         async with db.execute(
             "SELECT managed FROM sessions WHERE id=?", (session_id,)
         ) as cur:
@@ -260,7 +278,7 @@ async def is_managed_session(session_id: str) -> bool:
 
 
 async def hide_shared_session(session_id: str, username: str) -> None:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         await db.execute(
             "INSERT OR IGNORE INTO hidden_shared_sessions (session_id, username) VALUES (?, ?)",
             (session_id, username),
@@ -278,7 +296,7 @@ async def record_audit_event(
     status_code: int,
     duration_ms: float,
 ) -> None:
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         await db.execute(
             "INSERT INTO audit_events (occurred_at, username, method, path, session_id, details, status_code, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
@@ -307,7 +325,7 @@ async def list_audit_events(
         clauses.append("occurred_at >= ?")
         values.append(since)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             f"SELECT occurred_at, username, method, path, session_id, details, status_code, duration_ms FROM audit_events{where} ORDER BY id DESC LIMIT ?",
@@ -320,7 +338,7 @@ async def purge_audit_events(older_than_days: int) -> int:
     from datetime import timedelta
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         cur = await db.execute(
             "DELETE FROM audit_events WHERE occurred_at < ?", (cutoff,)
         )
@@ -330,7 +348,7 @@ async def purge_audit_events(older_than_days: int) -> int:
 
 async def list_sessions_raw() -> list[dict]:
     """Return all sessions as dicts including password_enc. Used only by config export."""
-    async with aiosqlite.connect(_DB_PATH) as db:
+    async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT id, name, host, port, username, password_enc, default_db, "

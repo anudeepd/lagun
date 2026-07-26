@@ -20,6 +20,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   const handleClose = () => {
+    if (loading) return
     setFile(null)
     setPassphrase('')
     setResult(null)
@@ -28,6 +29,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
   }
 
   const handleImport = async () => {
+    if (loading) return
     if (!file) { setError('Select a file first.'); return }
     if (!passphrase) { setError('Enter the passphrase used during export.'); return }
     setLoading(true)
@@ -37,7 +39,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
       setResult(r)
       await loadSessions()
     } catch (e) {
-      setError(String(e))
+      setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
@@ -54,7 +56,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
           <Button variant="primary" onClick={handleClose}>Done</Button>
         ) : (
           <>
-            <Button variant="ghost" onClick={handleClose}>Cancel</Button>
+            <Button variant="ghost" onClick={handleClose} disabled={loading}>Cancel</Button>
             <Button variant="primary" onClick={handleImport} disabled={loading || !file}>
               {loading ? <Loader2 size={12} className="animate-spin mr-1" /> : <Upload size={12} className="mr-1" />}
               Import
@@ -73,18 +75,29 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-4">
+        <fieldset disabled={loading} className="flex flex-col gap-4">
           <p className="text-xs text-slate-400">
             Select a Lagun export file (.json) to restore saved connections.
           </p>
           <div>
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wide block mb-1">
+            <label htmlFor="config-import-file" className="text-xs font-medium text-slate-400 uppercase tracking-wide block mb-1">
               Export file
             </label>
             <input
+              id="config-import-file"
               type="file"
               accept=".json,application/json"
-              onChange={e => { setFile(e.target.files?.[0] ?? null); setError(null) }}
+              onChange={e => {
+                const selected = e.target.files?.[0] ?? null
+                if (selected && selected.size > 5 * 1024 * 1024) {
+                  setFile(null)
+                  setError('Export file exceeds 5 MB limit.')
+                  e.target.value = ''
+                  return
+                }
+                setFile(selected)
+                setError(null)
+              }}
               className="text-sm text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0
                          file:text-xs file:font-medium file:bg-surface-700 file:text-slate-200
                          hover:file:bg-surface-600 cursor-pointer"
@@ -97,10 +110,11 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
             onChange={e => setPassphrase(e.target.value)}
             placeholder="Passphrase used during export"
             autoComplete="current-password"
-            onKeyDown={e => e.key === 'Enter' && handleImport()}
+            disabled={loading}
+            onKeyDown={e => e.key === 'Enter' && !loading && handleImport()}
           />
-          {error && <p className="text-xs text-red-400">{error}</p>}
-        </div>
+          {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+        </fieldset>
       )}
     </Modal>
   )

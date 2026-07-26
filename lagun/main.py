@@ -18,7 +18,7 @@ from lagun.db.session_store import init_db
 from lagun.db import session_store
 from lagun.db.connections_config import sync_connections_config
 from lagun.auth import ldap_enabled
-from lagun.db.pool import DatabaseConnectionError
+from lagun.db.pool import DatabaseCapacityError, DatabaseConnectionError
 from lagun.api import sessions, query, schema, table_ops, export, import_data, config
 
 
@@ -40,9 +40,10 @@ async def lifespan(app: FastAPI):
     if os.getenv("LAGUN_CONNECTIONS_CONFIG") and not os.getenv("LAGUN_LDAP_CONFIG"):
         raise RuntimeError("--connections-config requires --ldap-config")
     await sync_connections_config(os.getenv("LAGUN_CONNECTIONS_CONFIG"))
-    yield
-    from lagun.db.pool import close_all_pools
+    from lagun.db.pool import close_all_pools, start_pool_reaper
 
+    start_pool_reaper()
+    yield
     await close_all_pools()
 
 
@@ -58,7 +59,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.65", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.66", lifespan=lifespan)
 
 
 def _audit_details(body: bytes) -> str | None:
@@ -138,6 +139,17 @@ async def database_connection_error_handler(
     request: Request, exc: DatabaseConnectionError
 ):
     return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+@app.exception_handler(DatabaseCapacityError)
+async def database_capacity_error_handler(
+    request: Request, exc: DatabaseCapacityError
+):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc)},
+        headers={"Retry-After": "1"},
+    )
 
 
 @app.middleware("http")

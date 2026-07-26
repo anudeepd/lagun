@@ -96,6 +96,30 @@ async def test_import_wrong_passphrase_returns_400(client):
     assert r.status_code == 400
 
 
+async def test_import_validates_all_passwords_before_writing(client):
+    first = await _create_session(client, "First")
+    second = await _create_session(client, "Second")
+    payload = json.loads(await _make_export_file(client, "correct-pass"))
+    payload["sessions"][1]["password_enc"] = "invalid-token"
+    await client.delete(f"/api/v1/sessions/{first}")
+    await client.delete(f"/api/v1/sessions/{second}")
+
+    r = await client.post(
+        "/api/v1/config/import",
+        files={
+            "file": (
+                "sessions.json",
+                json.dumps(payload).encode(),
+                "application/json",
+            )
+        },
+        data={"passphrase": "correct-pass"},
+    )
+    assert r.status_code == 400
+    sessions = await client.get("/api/v1/sessions")
+    assert sessions.json() == []
+
+
 async def test_import_invalid_json_returns_400(client):
     r = await client.post(
         "/api/v1/config/import",
@@ -103,6 +127,30 @@ async def test_import_invalid_json_returns_400(client):
         data={"passphrase": "pass"},
     )
     assert r.status_code == 400
+
+
+async def test_import_rejects_non_object_root(client):
+    r = await client.post(
+        "/api/v1/config/import",
+        files={"file": ("sessions.json", b"[]", "application/json")},
+        data={"passphrase": "pass"},
+    )
+    assert r.status_code == 400
+
+
+async def test_import_caps_upload_before_json_parsing(client):
+    r = await client.post(
+        "/api/v1/config/import",
+        files={
+            "file": (
+                "sessions.json",
+                b"x" * (5 * 1024 * 1024 + 1),
+                "application/json",
+            )
+        },
+        data={"passphrase": "pass"},
+    )
+    assert r.status_code == 413
 
 
 async def test_import_wrong_version_returns_400(client):
