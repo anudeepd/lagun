@@ -926,11 +926,13 @@ function TableTab({ tab, active = true }: Props) {
   })
   const loadAbortRef = useRef<AbortController | null>(null)
   const loadSeqRef = useRef(0)
+  const loadExecutionIdRef = useRef<string | null>(null)
+  const loadCancellationRef = useRef<Promise<void>>(Promise.resolve())
   const colPickerRef = useRef<HTMLDivElement>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
   const setTableDataState = useTabStore(s => s.setTableDataState)
   const setTabDirty = useTabStore(s => s.setTabDirty)
-  const { invalidateTablesForDb, loadTables } = useSchemaStore()
+  const { invalidateTablesForDb, loadTables, loadColumns } = useSchemaStore()
 
   const pkColumns = useMemo(() =>
     columns.filter(c => c.is_primary_key).map(c => c.name),
@@ -946,33 +948,72 @@ function TableTab({ tab, active = true }: Props) {
     const effectiveLimit = overrideLimit ?? limit
     const effectiveSearch = searchOverride !== undefined ? searchOverride : globalSearch
     const effectiveWhere = whereOverride !== undefined ? whereOverride : appliedWhere
-
-    // Cancel any in-flight load and start a fresh one
-    loadAbortRef.current?.abort()
-    const controller = new AbortController()
-    loadAbortRef.current = controller
     const requestSeq = ++loadSeqRef.current
-    const isCurrentRequest = () =>
-      loadAbortRef.current === controller && loadSeqRef.current === requestSeq && !controller.signal.aborted
+
+    // Abort browser work immediately, then wait for targeted MySQL cancellation.
+    // Every newer caller shares the same cancellation promise; only the latest
+    // sequence proceeds to another database scan.
+    const previousExecutionId = loadExecutionIdRef.current
+    loadAbortRef.current?.abort()
+    loadAbortRef.current = null
+    loadExecutionIdRef.current = null
+    if (previousExecutionId) {
+      loadCancellationRef.current = api
+        .killQueryExecution(tab.sessionId, previousExecutionId)
+        .then(() => undefined)
+        .catch(() => undefined)
+    }
+    await loadCancellationRef.current
+    if (loadSeqRef.current !== requestSeq) return
+
+    const controller = new AbortController()
+    const executionId = globalThis.crypto?.randomUUID?.()
+      ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    loadAbortRef.current = controller
+    loadExecutionIdRef.current = executionId
 
     setSelectedRows([])
-
     if (result === null) {
       setInitialLoading(true)
     } else {
       setRefreshing(true)
     }
 
-    const start = Date.now()
+    const started = performance.now()
     try {
-      // Fetch columns first so we can build LIKE conditions across all columns
-      const cols = await api.getColumns(tab.sessionId, tab.database, tab.table, controller.signal)
-      if (!isCurrentRequest()) return
+      const metadataStarted = performance.now()
+      const cols = await loadColumns(tab.sessionId, tab.database, tab.table)
+      const metadataMs = Math.round((performance.now() - metadataStarted) * 100) / 100
+      if (
+        loadAbortRef.current !== controller
+        || loadExecutionIdRef.current !== executionId
+        || loadSeqRef.current !== requestSeq
+        || controller.signal.aborted
+      ) return
+      if (cols.length === 0) throw new Error('Could not load table columns.')
       setColumns(cols)
 
       const selectSql = buildTableDataSelectSql(tab.database, tab.table, cols, effectiveSearch, effectiveWhere)
-      const res = await api.executeQuery(tab.sessionId, selectSql, undefined, effectiveLimit, controller.signal)
-      if (!isCurrentRequest()) return
+      const response = await api.executeQuery(
+        tab.sessionId,
+        selectSql,
+        undefined,
+        effectiveLimit,
+        controller.signal,
+        executionId,
+      )
+      if (
+        loadAbortRef.current !== controller
+        || loadExecutionIdRef.current !== executionId
+        || loadSeqRef.current !== requestSeq
+        || controller.signal.aborted
+      ) return
+      const res: QueryResult = response.timings
+        ? {
+            ...response,
+            timings: { ...response.timings, metadata_ms: metadataMs },
+          }
+        : response
       if (shouldKeepPreviousResultOnLoad(res, result)) {
         setStatusMsg(`Refresh failed; showing previous result. ${res.error}`)
         setTimeout(() => setStatusMsg(null), 7000)
@@ -982,19 +1023,21 @@ function TableTab({ tab, active = true }: Props) {
           setAppliedWhere(commitWhereOnSuccess)
         }
       }
-      try { addEntry({ sql: selectSql, sessionId: tab.sessionId, database: tab.database, rowCount: res.row_count ?? undefined, execTimeMs: res.exec_time_ms ?? (Date.now() - start), error: res.error ?? undefined }) } catch { /* ignore */ }
+      try { addEntry({ sql: selectSql, sessionId: tab.sessionId, database: tab.database, rowCount: res.row_count ?? undefined, execTimeMs: res.exec_time_ms ?? (performance.now() - started), error: res.error ?? undefined }) } catch { /* ignore */ }
     } catch (e) {
-      if ((e as Error).name === 'AbortError') {
-        return
-      }
+      if ((e as Error).name === 'AbortError') return
       setStatusMsg(result
         ? `Refresh failed; showing previous result. ${(e as Error).message}`
         : `Could not load data. ${(e as Error).message}`)
       setTimeout(() => setStatusMsg(null), 7000)
     } finally {
       if (loadAbortRef.current === controller) {
+        loadAbortRef.current = null
         setInitialLoading(false)
         setRefreshing(false)
+      }
+      if (loadExecutionIdRef.current === executionId) {
+        loadExecutionIdRef.current = null
       }
     }
   }
@@ -1013,8 +1056,14 @@ function TableTab({ tab, active = true }: Props) {
     return () => {
       loadSeqRef.current += 1
       loadAbortRef.current?.abort()
+      const executionId = loadExecutionIdRef.current
+      loadAbortRef.current = null
+      loadExecutionIdRef.current = null
+      if (executionId) {
+        void api.killQueryExecution(tab.sessionId, executionId).catch(() => undefined)
+      }
     }
-  }, [])
+  }, [tab.id, tab.sessionId, tab.database, tab.table])
 
   useEffect(() => {
     if (view === 'data') {

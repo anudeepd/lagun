@@ -1,4 +1,5 @@
 import { redirectToLdapLogin } from '../utils/authRedirect'
+import type { QueryResult } from '../types'
 
 const BASE = '/api/v1'
 
@@ -104,14 +105,26 @@ export const api = {
     ),
 
   // Query
-  executeQuery: (sessionId: string, sql: string, database?: string, limit?: number, signal?: AbortSignal) =>
-    request<import('../types').QueryResult>(`/sessions/${sessionId}/query`, {
+  executeQuery: (
+    sessionId: string,
+    sql: string,
+    database?: string,
+    limit?: number,
+    signal?: AbortSignal,
+    executionId?: string,
+  ) =>
+    request<QueryResult>(`/sessions/${sessionId}/query`, {
       method: 'POST',
-      body: JSON.stringify({ sql, database, limit }),
+      body: JSON.stringify({ sql, database, limit, execution_id: executionId }),
       signal,
     }),
   killQuery: (sessionId: string) =>
     request<{ ok: boolean; error?: string }>(`/sessions/${sessionId}/query`, { method: 'DELETE' }),
+  killQueryExecution: (sessionId: string, executionId: string) =>
+    request<{ ok: boolean; error?: string }>(
+      `/sessions/${sessionId}/query/${encodeURIComponent(executionId)}`,
+      { method: 'DELETE' },
+    ),
   validateScriptQuery: (sessionId: string, payload: {
     execution_id: string; sql: string; database?: string; mode?: 'transaction'
   }, signal?: AbortSignal) =>

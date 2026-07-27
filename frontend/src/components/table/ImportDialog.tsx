@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Upload, ChevronRight, ChevronDown } from 'lucide-react'
+import { CircleAlert, Upload, ChevronRight, ChevronDown } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import { LoadingState } from '../ui/Spinner'
@@ -63,6 +63,9 @@ interface Preview {
 }
 
 const PREVIEW_SAMPLE_BYTES = 1024 * 1024
+const DRAG_OVERLAY_STALE_MS = 1_500
+const DROP_DELAYED_MS = 15_000
+type DropWaitState = 'preparing' | 'delayed' | null
 
 
 export default function ImportDialog({ open, onClose, sessionId, database, table: preselectedTable, onImportComplete }: Props) {
@@ -89,8 +92,11 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   // Status
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [dropWaitState, setDropWaitState] = useState<DropWaitState>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const dragOverlayTimerRef = useRef<number | null>(null)
+  const dropDelayTimerRef = useRef<number | null>(null)
   const tables = useSchemaStore(s => s.tables[`${sessionId}/${database}`] ?? [])
   const { loadTables } = useSchemaStore()
 
@@ -122,6 +128,57 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
     setPreviewError(null)
     setPreviewLoading(false)
   }, [file, buildConfigJson])
+
+  const clearDropFeedback = useCallback(() => {
+    if (dragOverlayTimerRef.current !== null) {
+      window.clearTimeout(dragOverlayTimerRef.current)
+      dragOverlayTimerRef.current = null
+    }
+    if (dropDelayTimerRef.current !== null) {
+      window.clearTimeout(dropDelayTimerRef.current)
+      dropDelayTimerRef.current = null
+    }
+    setDropWaitState(null)
+  }, [])
+
+  const refreshDropFeedback = useCallback(() => {
+    setDropWaitState(null)
+    if (dragOverlayTimerRef.current !== null) window.clearTimeout(dragOverlayTimerRef.current)
+    if (dropDelayTimerRef.current !== null) {
+      window.clearTimeout(dropDelayTimerRef.current)
+      dropDelayTimerRef.current = null
+    }
+    dragOverlayTimerRef.current = window.setTimeout(() => {
+      dragOverlayTimerRef.current = null
+      setDropWaitState('preparing')
+      dropDelayTimerRef.current = window.setTimeout(() => {
+        dropDelayTimerRef.current = null
+        setDropWaitState('delayed')
+      }, DROP_DELAYED_MS)
+    }, DRAG_OVERLAY_STALE_MS)
+  }, [])
+
+  useEffect(() => {
+    if (!open) {
+      clearDropFeedback()
+      return
+    }
+    const clearWhenHidden = () => {
+      if (document.hidden) clearDropFeedback()
+    }
+    window.addEventListener('drop', clearDropFeedback)
+    window.addEventListener('dragend', clearDropFeedback)
+    window.addEventListener('blur', clearDropFeedback)
+    document.addEventListener('visibilitychange', clearWhenHidden)
+    return () => {
+      window.removeEventListener('drop', clearDropFeedback)
+      window.removeEventListener('dragend', clearDropFeedback)
+      window.removeEventListener('blur', clearDropFeedback)
+      document.removeEventListener('visibilitychange', clearWhenHidden)
+      if (dragOverlayTimerRef.current !== null) window.clearTimeout(dragOverlayTimerRef.current)
+      if (dropDelayTimerRef.current !== null) window.clearTimeout(dropDelayTimerRef.current)
+    }
+  }, [clearDropFeedback, open])
 
   const fetchPreview = async () => {
     if (!file) return
@@ -158,6 +215,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
 
   const handleFileSelect = (files: FileList | null) => {
     if (!files || files.length === 0) return
+    clearDropFeedback()
     setFile(files[0])
     setResult(null)
   }
@@ -194,7 +252,9 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   }
 
   const handleClose = () => {
-    if (!importing) onClose()
+    if (importing) return
+    clearDropFeedback()
+    onClose()
   }
 
 
@@ -226,13 +286,14 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           type="file"
           accept=".csv,.tsv,.txt,.sql,.dump"
           className="hidden"
-          onChange={e => handleFileSelect(e.target.files)}
+          onChange={e => { handleFileSelect(e.target.files); e.currentTarget.value = '' }}
         />
         <button
           type="button"
           className="w-full border-2 border-dashed border-surface-700 rounded-lg p-6 text-center cursor-pointer hover:border-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           onClick={() => fileInputRef.current?.click()}
-          onDragOver={e => e.preventDefault()}
+          onDragOver={e => { e.preventDefault(); refreshDropFeedback() }}
+          onDragLeave={e => { if (e.currentTarget === e.target) clearDropFeedback() }}
           onDrop={handleDrop}
           aria-label={file ? `Selected file ${file.name}. Choose another file` : 'Choose import file'}
         >
@@ -250,6 +311,22 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             </span>
           )}
         </button>
+        {dropWaitState && (
+          <div className="flex min-h-9 items-center gap-2 rounded border border-surface-700 border-l-2 border-l-brand-400 bg-surface-900 px-3 py-1.5 font-mono text-[11px] text-slate-300">
+            {dropWaitState === 'preparing' ? (
+              <LoadingState label="Preparing upload…" compact className="min-w-0 flex-1 justify-start py-0" />
+            ) : (
+              <>
+                <CircleAlert size={14} className="flex-shrink-0 text-amber-400" />
+                <span role="status" aria-live="polite" className="min-w-0 flex-1">Upload hasn't started yet.</span>
+              </>
+            )}
+            {dropWaitState === 'delayed' && (
+              <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()}>Choose file</Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={clearDropFeedback}>Dismiss</Button>
+          </div>
+        )}
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-slate-500">Preview reads at most first 1 MB. Import still reads complete file.</p>
           <Button variant="ghost" size="sm" onClick={fetchPreview} disabled={!file || previewLoading}>

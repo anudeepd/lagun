@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ImportDialog from '../../components/table/ImportDialog'
 
@@ -11,6 +11,32 @@ const props = {
 }
 
 describe('ImportDialog formats', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('shows non-blocking feedback when a drop event is delayed', () => {
+    vi.useFakeTimers()
+    render(<ImportDialog {...props} />)
+
+    const dropZone = screen.getByRole('button', { name: 'Choose import file' })
+    fireEvent.dragOver(dropZone)
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(screen.queryByText('Preparing upload…')).not.toBeInTheDocument()
+
+    fireEvent.dragOver(dropZone)
+    act(() => vi.advanceTimersByTime(1_000))
+    expect(screen.queryByText('Preparing upload…')).not.toBeInTheDocument()
+
+    act(() => vi.advanceTimersByTime(500))
+    expect(screen.getByRole('status')).toHaveTextContent('Preparing upload…')
+
+    act(() => vi.advanceTimersByTime(15_000))
+    expect(screen.getByRole('status')).toHaveTextContent("Upload hasn't started yet.")
+    expect(screen.getByRole('button', { name: 'Choose file' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
   it('offers CSV and MySQL dump formats', () => {
     render(<ImportDialog {...props} />)
     expect(screen.getByLabelText('File Format')).toBeInTheDocument()

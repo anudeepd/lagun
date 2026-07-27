@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest'
-import type { ColumnInfo, QueryResult } from '../../types'
+import { describe, it, expect, vi } from 'vitest'
+import { createElement } from 'react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ColumnInfo, QueryResult, Tab } from '../../types'
+import { api } from '../../api/client'
+import { useSchemaStore } from '../../store/schemaStore'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldDebounceDataSearch, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import TabContent, { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldDebounceDataSearch, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -439,6 +443,56 @@ describe('data tab search loading', () => {
   it('debounces a real search edit only while Data is visible', () => {
     expect(shouldDebounceDataSearch('', 'alice', 'data')).toBe(true)
     expect(shouldDebounceDataSearch('', 'alice', 'schema')).toBe(false)
+  })
+
+  it('reuses cached columns and cancels an active scan before the latest search', async () => {
+    const columns = [makeColumn('id', true), makeColumn('name')]
+    useSchemaStore.setState({
+      columns: { 'session-1/db/users': columns },
+    })
+    const getColumns = vi.spyOn(api, 'getColumns')
+    vi.spyOn(api, 'getFunctions').mockResolvedValue([])
+    const killQueryExecution = vi.spyOn(api, 'killQueryExecution')
+      .mockResolvedValue({ ok: true })
+    const executeQuery = vi.spyOn(api, 'executeQuery')
+      .mockImplementation((_sessionId, _sql, _database, _limit, signal) => (
+        new Promise<QueryResult>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'))
+          }, { once: true })
+        })
+      ))
+    const tab: Tab = {
+      id: 'table-search',
+      label: 'users',
+      type: 'table',
+      sessionId: 'session-1',
+      database: 'db',
+      table: 'users',
+      dataState: { view: 'data' },
+    }
+
+    const view = render(createElement(TabContent, { tab }))
+    await waitFor(() => expect(executeQuery).toHaveBeenCalledTimes(1))
+    const firstExecutionId = executeQuery.mock.calls[0][5]
+
+    fireEvent.change(screen.getByPlaceholderText('Search all columns…'), {
+      target: { value: 'alice' },
+    })
+
+    await waitFor(() => expect(executeQuery).toHaveBeenCalledTimes(2), {
+      timeout: 1500,
+    })
+    expect(getColumns).not.toHaveBeenCalled()
+    expect(killQueryExecution).toHaveBeenCalledWith(
+      'session-1',
+      firstExecutionId,
+    )
+    expect(executeQuery.mock.calls[1][1]).toContain("LIKE '%alice%'")
+
+    view.unmount()
+    vi.restoreAllMocks()
+    useSchemaStore.setState({ columns: {} })
   })
 })
 

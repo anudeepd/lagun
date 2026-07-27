@@ -1,4 +1,5 @@
 """Integration tests for the query API."""
+import asyncio
 
 
 async def test_select_all(client, session_id, test_db):
@@ -13,6 +14,59 @@ async def test_select_all(client, session_id, test_db):
     assert "name" in data["columns"]
     assert len(data["rows"]) == 2
     assert data["row_count"] == 2
+
+async def test_query_reports_detailed_timings_and_compresses_large_results(
+    client, session_id, test_db
+):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        headers={"Accept-Encoding": "gzip"},
+        json={
+            "sql": "SELECT REPEAT('x', 5000) AS payload",
+            "database": test_db,
+            "execution_id": "timing-query-1",
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["execution_id"] == "timing-query-1"
+    assert data["exec_time_ms"] == data["timings"]["total_ms"]
+    assert data["timings"]["metadata_ms"] is None
+    for field in (
+        "pool_wait_ms",
+        "setup_ms",
+        "execute_ms",
+        "fetch_ms",
+        "value_serialize_ms",
+        "total_ms",
+    ):
+        assert data["timings"][field] >= 0
+    assert r.headers["content-encoding"] == "gzip"
+
+
+async def test_request_specific_query_cancellation(client, session_id, test_db):
+    running = asyncio.create_task(
+        client.post(
+            f"/api/v1/sessions/{session_id}/query",
+            json={
+                "sql": "SELECT SLEEP(5)",
+                "database": test_db,
+                "execution_id": "cancel-query-1",
+            },
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    cancelled = await client.delete(
+        f"/api/v1/sessions/{session_id}/query/cancel-query-1"
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["ok"] is True
+
+    result = await asyncio.wait_for(running, timeout=2)
+    assert result.status_code == 200
+    assert result.json()["execution_id"] == "cancel-query-1"
+    assert result.json()["error"] == "Query cancelled"
 
 
 async def test_select_auto_limit(client, session_id, test_db):

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -59,7 +60,8 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.66", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.67", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
 def _audit_details(body: bytes) -> str | None:

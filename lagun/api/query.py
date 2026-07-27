@@ -17,6 +17,7 @@ from lagun.api.sql_script import SqlScriptError, split_sql_script
 from lagun.models.query import (
     QueryRequest,
     QueryResult,
+    QueryTimings,
     ScriptQueryRequest,
     ScriptQueryResult,
     ScriptQueryValidationResult,
@@ -33,8 +34,13 @@ from lagun.models.query import (
 
 router = APIRouter(tags=["query"])
 
-# Maps session_id → set of MySQL thread_ids of currently running queries
+# Maps session_id to MySQL thread IDs of currently running queries.
 _active_queries: dict[str, set[int]] = {}
+# Maps one request-specific execution to its MySQL thread ID. None means request
+# is registered but has not acquired a connection yet.
+_active_query_executions: dict[tuple[str, str], int | None] = {}
+_cancelled_query_executions: set[tuple[str, str]] = set()
+_active_queries_lock = asyncio.Lock()
 _active_script_queries: dict[str, dict[str, int | None]] = {}
 _active_script_queries_lock = asyncio.Lock()
 _JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991
@@ -398,99 +404,258 @@ async def _check_transactional_targets(
             )
     return None
 
+class _QueryCancelled(Exception):
+    pass
+
+
+def _elapsed_ms(started: float) -> float:
+    return round((time.monotonic() - started) * 1000, 2)
+
+
+async def _begin_query_execution(
+    session_id: str, execution_id: str | None
+) -> tuple[str, str] | None:
+    if execution_id is None:
+        return None
+    key = (session_id, execution_id)
+    async with _active_queries_lock:
+        if key in _active_query_executions:
+            raise HTTPException(409, "Query execution ID is already active")
+        _active_query_executions[key] = None
+        _cancelled_query_executions.discard(key)
+    return key
+
+
+async def _register_query_thread(
+    session_id: str,
+    execution_key: tuple[str, str] | None,
+    thread_id: int,
+) -> bool:
+    async with _active_queries_lock:
+        _active_queries.setdefault(session_id, set()).add(thread_id)
+        if execution_key is not None:
+            _active_query_executions[execution_key] = thread_id
+            return execution_key in _cancelled_query_executions
+    return False
+
+
+async def _is_query_cancelled(
+    execution_key: tuple[str, str] | None,
+) -> bool:
+    if execution_key is None:
+        return False
+    async with _active_queries_lock:
+        return execution_key in _cancelled_query_executions
+
+
+async def _finish_query_execution(
+    session_id: str,
+    execution_key: tuple[str, str] | None,
+    thread_id: int | None,
+) -> None:
+    async with _active_queries_lock:
+        if thread_id is not None:
+            queries = _active_queries.get(session_id)
+            if queries is not None:
+                queries.discard(thread_id)
+                if not queries:
+                    del _active_queries[session_id]
+        if execution_key is not None:
+            _active_query_executions.pop(execution_key, None)
+            _cancelled_query_executions.discard(execution_key)
+
+
+async def _kill_query_threads(session_id: str, thread_ids: list[int]) -> None:
+    if not thread_ids:
+        return
+    pool, _ = await _get_pool_or_404(session_id)
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for thread_id in thread_ids:
+                await cur.execute(f"KILL QUERY {thread_id}")
+
+
+def _query_timings(
+    started: float,
+    *,
+    pool_wait_ms: float,
+    setup_ms: float,
+    execute_ms: float,
+    fetch_ms: float,
+    value_serialize_ms: float,
+) -> QueryTimings:
+    return QueryTimings(
+        pool_wait_ms=pool_wait_ms,
+        setup_ms=setup_ms,
+        execute_ms=execute_ms,
+        fetch_ms=fetch_ms,
+        value_serialize_ms=value_serialize_ms,
+        total_ms=_elapsed_ms(started),
+    )
+
+
 
 @router.post("/sessions/{session_id}/query", response_model=QueryResult)
 async def execute_query(session_id: str, req: QueryRequest):
-    pool, session = await _get_pool_or_404(session_id)
-
-    sql = req.sql.strip().rstrip(";").strip()
-    limit = req.limit or session.query_limit
-
-    # Auto-append LIMIT for plain SELECT without existing LIMIT
-    is_select = re.match(r"^\s*SELECT\b", sql, re.IGNORECASE)
-    has_limit = re.search(r"\bLIMIT\b", _strip_quotes(sql), re.IGNORECASE)
-    if is_select and not has_limit:
-        sql = f"{sql} LIMIT {limit}"
-
-    t0 = time.monotonic()
-    thread_id = None
+    started = time.monotonic()
+    execution_key = await _begin_query_execution(session_id, req.execution_id)
+    thread_id: int | None = None
+    pool_wait_ms = 0.0
+    setup_ms = 0.0
+    execute_ms = 0.0
+    fetch_ms = 0.0
+    value_serialize_ms = 0.0
     deadline_error = (
         f"Query exceeded the {_QUERY_MAX_RUNTIME_SECONDS:g}-second execution limit"
     )
     try:
+        if await _is_query_cancelled(execution_key):
+            raise _QueryCancelled
+        pool, session = await _get_pool_or_404(session_id)
+        sql = req.sql.strip().rstrip(";").strip()
+        limit = req.limit or session.query_limit
+
+        # Auto-append LIMIT for plain SELECT without existing LIMIT
+        is_select = re.match(r"^\s*SELECT\b", sql, re.IGNORECASE)
+        has_limit = re.search(r"\bLIMIT\b", _strip_quotes(sql), re.IGNORECASE)
+        if is_select and not has_limit:
+            sql = f"{sql} LIMIT {limit}"
+
+        pool_wait_started = time.monotonic()
         async with pool.acquire() as conn:
+            pool_wait_ms = _elapsed_ms(pool_wait_started)
             try:
                 async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
                     async with conn.cursor() as cur:
-                        # Register connection thread_id so it can be killed if needed
+                        setup_started = time.monotonic()
                         await cur.execute("SELECT CONNECTION_ID()")
                         row = await cur.fetchone()
                         thread_id = row[0]
-                        if session_id not in _active_queries:
-                            _active_queries[session_id] = set()
-                        _active_queries[session_id].add(thread_id)
-                        try:
-                            if req.database:
-                                await cur.execute(f"USE {quote_ident(req.database)}")
-                            await cur.execute(sql)
-                            if cur.description:
-                                columns = [d[0] for d in cur.description]
-                                rows = [list(r) for r in (await cur.fetchall())]
-                                rows = [[_serialize(v) for v in row] for row in rows]
-                                return QueryResult(
-                                    columns=columns,
-                                    rows=rows,
-                                    row_count=len(rows),
-                                    exec_time_ms=round(
-                                        (time.monotonic() - t0) * 1000, 2
-                                    ),
-                                )
-                            return QueryResult(
-                                columns=[],
-                                rows=[],
-                                row_count=cur.rowcount,
-                                exec_time_ms=round(
-                                    (time.monotonic() - t0) * 1000, 2
-                                ),
-                                affected_rows=cur.rowcount,
-                                insert_id=cur.lastrowid,
+                        cancelled = await _register_query_thread(
+                            session_id, execution_key, thread_id
+                        )
+                        if cancelled:
+                            raise _QueryCancelled
+                        if req.database:
+                            await cur.execute(f"USE {quote_ident(req.database)}")
+                        if await _is_query_cancelled(execution_key):
+                            raise _QueryCancelled
+                        setup_ms = _elapsed_ms(setup_started)
+
+                        execute_started = time.monotonic()
+                        await cur.execute(sql)
+                        execute_ms = _elapsed_ms(execute_started)
+                        if await _is_query_cancelled(execution_key):
+                            raise _QueryCancelled
+                        if cur.description:
+                            columns = [d[0] for d in cur.description]
+                            fetch_started = time.monotonic()
+                            raw_rows = [list(r) for r in (await cur.fetchall())]
+                            fetch_ms = _elapsed_ms(fetch_started)
+                            serialize_started = time.monotonic()
+                            rows = [
+                                [_serialize(value) for value in row]
+                                for row in raw_rows
+                            ]
+                            value_serialize_ms = _elapsed_ms(serialize_started)
+                            timings = _query_timings(
+                                started,
+                                pool_wait_ms=pool_wait_ms,
+                                setup_ms=setup_ms,
+                                execute_ms=execute_ms,
+                                fetch_ms=fetch_ms,
+                                value_serialize_ms=value_serialize_ms,
                             )
-                        finally:
-                            _active_queries[session_id].discard(thread_id)
-                            if not _active_queries[session_id]:
-                                del _active_queries[session_id]
+                            return QueryResult(
+                                columns=columns,
+                                rows=rows,
+                                row_count=len(rows),
+                                exec_time_ms=timings.total_ms,
+                                execution_id=req.execution_id,
+                                timings=timings,
+                            )
+                        timings = _query_timings(
+                            started,
+                            pool_wait_ms=pool_wait_ms,
+                            setup_ms=setup_ms,
+                            execute_ms=execute_ms,
+                            fetch_ms=fetch_ms,
+                            value_serialize_ms=value_serialize_ms,
+                        )
+                        return QueryResult(
+                            columns=[],
+                            rows=[],
+                            row_count=cur.rowcount,
+                            exec_time_ms=timings.total_ms,
+                            affected_rows=cur.rowcount,
+                            insert_id=cur.lastrowid,
+                            execution_id=req.execution_id,
+                            timings=timings,
+                        )
             except TimeoutError as error:
                 conn.close()
                 raise TimeoutError(deadline_error) from error
+    except HTTPException:
+        raise
     except (DatabaseCapacityError, DatabaseConnectionError):
         raise
+    except _QueryCancelled:
+        error = "Query cancelled"
     except Exception as exc:
-        if thread_id is not None:
-            queries = _active_queries.get(session_id)
-            if queries:
-                queries.discard(thread_id)
-                if not queries:
-                    del _active_queries[session_id]
-        return QueryResult(
-            columns=[],
-            rows=[],
-            row_count=0,
-            exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
-            error=str(exc),
+        error = str(exc)
+    finally:
+        await _finish_query_execution(
+            session_id, execution_key, thread_id
         )
+
+    timings = _query_timings(
+        started,
+        pool_wait_ms=pool_wait_ms,
+        setup_ms=setup_ms,
+        execute_ms=execute_ms,
+        fetch_ms=fetch_ms,
+        value_serialize_ms=value_serialize_ms,
+    )
+    return QueryResult(
+        columns=[],
+        rows=[],
+        row_count=0,
+        exec_time_ms=timings.total_ms,
+        error=error,
+        execution_id=req.execution_id,
+        timings=timings,
+    )
 
 
 @router.delete("/sessions/{session_id}/query")
 async def kill_query(session_id: str):
-    thread_ids = _active_queries.get(session_id)
-    if not thread_ids:
+    async with _active_queries_lock:
+        execution_keys = [
+            key for key in _active_query_executions if key[0] == session_id
+        ]
+        thread_ids = list(_active_queries.get(session_id, set()))
+        for key in execution_keys:
+            _cancelled_query_executions.add(key)
+    if not thread_ids and not execution_keys:
         return {"ok": False, "error": "No active query"}
     try:
-        pool, _ = await _get_pool_or_404(session_id)
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                for thread_id in list(thread_ids):
-                    await cur.execute(f"KILL QUERY {thread_id}")
+        await _kill_query_threads(session_id, thread_ids)
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.delete("/sessions/{session_id}/query/{execution_id}")
+async def kill_query_execution(session_id: str, execution_id: str):
+    key = (session_id, execution_id)
+    async with _active_queries_lock:
+        if key not in _active_query_executions:
+            return {"ok": True}
+        _cancelled_query_executions.add(key)
+        thread_id = _active_query_executions[key]
+    try:
+        if thread_id is not None:
+            await _kill_query_threads(session_id, [thread_id])
         return {"ok": True}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

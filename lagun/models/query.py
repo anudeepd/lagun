@@ -8,6 +8,22 @@ class QueryRequest(BaseModel):
     sql: str
     database: Optional[str] = None
     limit: Optional[int] = Field(None, ge=1, le=100000)  # overrides session default
+    execution_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+
+
+class QueryTimings(BaseModel):
+    pool_wait_ms: float = 0
+    setup_ms: float = 0
+    execute_ms: float = 0
+    fetch_ms: float = 0
+    value_serialize_ms: float = 0
+    total_ms: float = 0
+    metadata_ms: Optional[float] = None
 
 
 class QueryResult(BaseModel):
@@ -18,6 +34,8 @@ class QueryResult(BaseModel):
     error: Optional[str] = None
     affected_rows: Optional[int] = None
     insert_id: Optional[int] = None
+    execution_id: Optional[str] = None
+    timings: Optional[QueryTimings] = None
 
 
 class ScriptQueryRequest(BaseModel):

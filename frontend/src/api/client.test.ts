@@ -34,4 +34,51 @@ describe('apiFetch', () => {
     expect(res.status).toBe(500)
     expect(redirectToLdapLogin).not.toHaveBeenCalled()
   })
+
+  it('sends request-specific query execution IDs and cancellation', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        columns: [],
+        rows: [],
+        row_count: 0,
+        exec_time_ms: 1,
+        execution_id: 'search-1',
+      }), { headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Dynamic import is required because this suite resets the module cache to
+    // test the client module's authentication redirect dependency.
+    const { api } = await import('./client')
+    await api.executeQuery(
+      'session-1',
+      'SELECT 1',
+      undefined,
+      1000,
+      undefined,
+      'search-1',
+    )
+    await api.killQueryExecution('session-1', 'search-1')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/sessions/session-1/query',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          sql: 'SELECT 1',
+          database: undefined,
+          limit: 1000,
+          execution_id: 'search-1',
+        }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/sessions/session-1/query/search-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
 })

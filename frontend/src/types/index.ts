@@ -44,6 +44,16 @@ export interface ProbeRequest {
   ssl_enabled?: boolean
 }
 
+export interface QueryTimings {
+  pool_wait_ms: number
+  setup_ms: number
+  execute_ms: number
+  fetch_ms: number
+  value_serialize_ms: number
+  total_ms: number
+  metadata_ms?: number | null
+}
+
 export interface QueryResult {
   columns: string[]
   rows: unknown[][]
@@ -52,6 +62,8 @@ export interface QueryResult {
   error?: string
   affected_rows?: number
   insert_id?: number
+  execution_id?: string | null
+  timings?: QueryTimings | null
 }
 
 export interface ScriptQueryError {
