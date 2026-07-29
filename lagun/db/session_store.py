@@ -26,6 +26,7 @@ _SQLITE_BUSY_SECONDS = float(os.getenv("LAGUN_SQLITE_BUSY_SECONDS", "10"))
 def _connect() -> aiosqlite.Connection:
     return aiosqlite.connect(_DB_PATH, timeout=max(1, _SQLITE_BUSY_SECONDS))
 
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id                  TEXT PRIMARY KEY,

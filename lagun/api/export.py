@@ -127,9 +127,7 @@ async def download_export(session_id: str, config: str = Form(...)):
     try:
         req = ExportRequest.model_validate_json(config)
     except ValidationError as error:
-        raise HTTPException(
-            422, detail=error.errors(include_context=False)
-        ) from error
+        raise HTTPException(422, detail=error.errors(include_context=False)) from error
     return await _export_response(session_id, req)
 
 
@@ -360,9 +358,7 @@ async def _export_response(session_id: str, req: ExportRequest):
                     if not rows:
                         break
                     for row in rows:
-                        writer.writerow(
-                            "" if value is None else value for value in row
-                        )
+                        writer.writerow("" if value is None else value for value in row)
                         if buf.tell() >= _EXPORT_STREAM_CHARS:
                             yield buf.getvalue().encode(byte_enc, errors=enc_errors)
                             buf.seek(0)

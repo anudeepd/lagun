@@ -167,13 +167,15 @@ def _preview_csv(staged: BinaryIO, cfg: ImportConfig) -> PreviewResult:
             columns = [f"col_{i + 1}" for i in range(len(sampled[0]))]
             rows = sampled
         bounded_columns = [
-            value if len(value) <= IMPORT_PREVIEW_CELL_CHARS
+            value
+            if len(value) <= IMPORT_PREVIEW_CELL_CHARS
             else value[:IMPORT_PREVIEW_CELL_CHARS] + "…"
             for value in columns
         ]
         bounded_rows = [
             [
-                value if len(value) <= IMPORT_PREVIEW_CELL_CHARS
+                value
+                if len(value) <= IMPORT_PREVIEW_CELL_CHARS
                 else value[:IMPORT_PREVIEW_CELL_CHARS] + "…"
                 for value in row
             ]

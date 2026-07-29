@@ -1,4 +1,5 @@
 """Shared fixtures for lagun tests."""
+
 import asyncio
 
 import pytest
@@ -14,6 +15,7 @@ import lagun.db.crypto as _crypto_mod
 @pytest.fixture(scope="session")
 def mysql_container():
     from testcontainers.mysql import MySqlContainer
+
     with MySqlContainer("mysql:8.0") as c:
         yield c
 
@@ -61,6 +63,7 @@ def reset_pool_state():
 @pytest_asyncio.fixture
 async def keep_event_loop_awake():
     """Keep Python 3.13 test loops responsive to aiosqlite worker callbacks."""
+
     async def tick():
         while True:
             await asyncio.sleep(0.05)
@@ -80,9 +83,13 @@ async def keep_event_loop_awake():
 async def client(keep_event_loop_awake):
     """Fresh HTTP client pointing at the FastAPI app."""
     from lagun.db.session_store import init_db
+
     await init_db()
     from lagun.main import app
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c
 
 
@@ -111,7 +118,9 @@ async def test_db(mysql_container):
     """
     host = mysql_container.get_container_host_ip()
     port = int(mysql_container.get_exposed_port(3306))
-    conn = await aiomysql.connect(host=host, port=port, user="root", password="test", autocommit=True)
+    conn = await aiomysql.connect(
+        host=host, port=port, user="root", password="test", autocommit=True
+    )
     try:
         async with conn.cursor() as cur:
             await cur.execute("CREATE DATABASE IF NOT EXISTS `lagun_test`")
@@ -131,7 +140,9 @@ async def test_db(mysql_container):
     finally:
         conn.close()
     yield "lagun_test"
-    conn = await aiomysql.connect(host=host, port=port, user="root", password="test", autocommit=True)
+    conn = await aiomysql.connect(
+        host=host, port=port, user="root", password="test", autocommit=True
+    )
     try:
         async with conn.cursor() as cur:
             await cur.execute("DROP DATABASE IF EXISTS `lagun_test`")

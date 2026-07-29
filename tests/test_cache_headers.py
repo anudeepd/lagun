@@ -19,4 +19,6 @@ async def test_spa_shell_revalidates_and_hashed_assets_are_immutable():
     bundled_asset = await add_app_security_headers(request, asset_response)
 
     assert shell.headers["cache-control"] == "no-cache, must-revalidate"
-    assert bundled_asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert (
+        bundled_asset.headers["cache-control"] == "public, max-age=31536000, immutable"
+    )

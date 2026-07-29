@@ -160,7 +160,10 @@ async def test_export_batch_size_spans_database_fetches(client, session_id, test
     values = ", ".join(f"({index})" for index in range(250))
     insert = await client.post(
         f"/api/v1/sessions/{session_id}/query",
-        json={"database": test_db, "sql": f"INSERT INTO export_batches VALUES {values}"},
+        json={
+            "database": test_db,
+            "sql": f"INSERT INTO export_batches VALUES {values}",
+        },
     )
     assert insert.status_code == 200
     exported = await client.post(
@@ -447,8 +450,7 @@ async def test_export_sql_preserves_binary_and_backslashes(client, session_id, t
         json={
             "database": test_db,
             "sql": (
-                "INSERT INTO export_binary VALUES "
-                "(1, 0x00ff616263, 0x433a5c6e6577)"
+                "INSERT INTO export_binary VALUES (1, 0x00ff616263, 0x433a5c6e6577)"
             ),
         },
     )

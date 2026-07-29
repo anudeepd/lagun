@@ -4,7 +4,6 @@ import json
 import pytest
 
 
-
 CSV_WITH_HEADER = b"name,age\nAlice,30\nBob,25\n"
 CSV_NO_HEADER = b"Alice,30\nBob,25\n"
 

@@ -5,6 +5,7 @@
 # CRUD
 # ---------------------------------------------------------------------------
 
+
 async def test_list_sessions_empty(client):
     r = await client.get("/api/v1/sessions")
     assert r.status_code == 200
@@ -12,7 +13,12 @@ async def test_list_sessions_empty(client):
 
 
 async def test_create_and_get_session(client):
-    payload = {"name": "My DB", "host": "db.example.com", "port": 3306, "username": "root"}
+    payload = {
+        "name": "My DB",
+        "host": "db.example.com",
+        "port": 3306,
+        "username": "root",
+    }
     r = await client.post("/api/v1/sessions", json=payload)
     assert r.status_code == 201
     data = r.json()
@@ -29,7 +35,9 @@ async def test_create_and_get_session(client):
 
 
 async def test_create_session_defaults(client):
-    r = await client.post("/api/v1/sessions", json={"name": "Defaults", "username": "u"})
+    r = await client.post(
+        "/api/v1/sessions", json={"name": "Defaults", "username": "u"}
+    )
     assert r.status_code == 201
     data = r.json()
     assert data["host"] == "localhost"
@@ -87,7 +95,9 @@ async def test_create_session_validates_name_too_long(client):
 
 
 async def test_create_session_validates_port_range(client):
-    r = await client.post("/api/v1/sessions", json={"name": "n", "username": "u", "port": 99999})
+    r = await client.post(
+        "/api/v1/sessions", json={"name": "n", "username": "u", "port": 99999}
+    )
     assert r.status_code == 422
 
 
@@ -95,13 +105,17 @@ async def test_create_session_validates_port_range(client):
 # Connection probe
 # ---------------------------------------------------------------------------
 
+
 async def test_probe_bad_host_returns_ok_false(client):
-    r = await client.post("/api/v1/sessions/probe", json={
-        "host": "127.0.0.1",
-        "port": 1,
-        "username": "user",
-        "password": "pass",
-    })
+    r = await client.post(
+        "/api/v1/sessions/probe",
+        json={
+            "host": "127.0.0.1",
+            "port": 1,
+            "username": "user",
+            "password": "pass",
+        },
+    )
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is False
@@ -109,13 +123,16 @@ async def test_probe_bad_host_returns_ok_false(client):
 
 
 async def test_saved_session_connection_error_is_user_facing(client):
-    r = await client.post("/api/v1/sessions", json={
-        "name": "Bad DB",
-        "host": "127.0.0.1",
-        "port": 1,
-        "username": "bad_user",
-        "password": "bad_password",
-    })
+    r = await client.post(
+        "/api/v1/sessions",
+        json={
+            "name": "Bad DB",
+            "host": "127.0.0.1",
+            "port": 1,
+            "username": "bad_user",
+            "password": "bad_password",
+        },
+    )
     assert r.status_code == 201
 
     sid = r.json()["id"]
@@ -126,12 +143,15 @@ async def test_saved_session_connection_error_is_user_facing(client):
 
 
 async def test_probe_good_connection(client, mysql_container):
-    r = await client.post("/api/v1/sessions/probe", json={
-        "host": mysql_container.get_container_host_ip(),
-        "port": int(mysql_container.get_exposed_port(3306)),
-        "username": "test",
-        "password": "test",
-    })
+    r = await client.post(
+        "/api/v1/sessions/probe",
+        json={
+            "host": mysql_container.get_container_host_ip(),
+            "port": int(mysql_container.get_exposed_port(3306)),
+            "username": "test",
+            "password": "test",
+        },
+    )
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is True

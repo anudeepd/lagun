@@ -5,14 +5,20 @@
 # Create / Drop table
 # ---------------------------------------------------------------------------
 
+
 async def test_create_and_drop_table(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/databases/{test_db}/tables",
         json={
             "name": "products",
             "columns": [
-                {"name": "id", "type": "INT", "nullable": False,
-                 "auto_increment": True, "primary_key": True},
+                {
+                    "name": "id",
+                    "type": "INT",
+                    "nullable": False,
+                    "auto_increment": True,
+                    "primary_key": True,
+                },
                 {"name": "title", "type": "VARCHAR(200)", "nullable": False},
                 {"name": "price", "type": "DECIMAL(10,2)", "nullable": True},
             ],
@@ -45,10 +51,13 @@ async def test_truncate_table(client, session_id, test_db):
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
-    r2 = await client.post(f"/api/v1/sessions/{session_id}/query", json={
-        "sql": "SELECT COUNT(*) FROM users",
-        "database": test_db,
-    })
+    r2 = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "sql": "SELECT COUNT(*) FROM users",
+            "database": test_db,
+        },
+    )
     assert r2.json()["rows"][0][0] == 0
 
 
@@ -56,10 +65,16 @@ async def test_truncate_table(client, session_id, test_db):
 # Indexes
 # ---------------------------------------------------------------------------
 
+
 async def test_create_and_drop_index(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/indexes",
-        json={"name": "idx_name", "columns": ["name"], "unique": False, "index_type": "BTREE"},
+        json={
+            "name": "idx_name",
+            "columns": ["name"],
+            "unique": False,
+            "index_type": "BTREE",
+        },
     )
     assert r.status_code == 201
     assert r.json()["ok"] is True
@@ -88,7 +103,12 @@ async def test_create_and_drop_index(client, session_id, test_db):
 async def test_create_unique_index(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/indexes",
-        json={"name": "uniq_name", "columns": ["name"], "unique": True, "index_type": "BTREE"},
+        json={
+            "name": "uniq_name",
+            "columns": ["name"],
+            "unique": True,
+            "index_type": "BTREE",
+        },
     )
     assert r.status_code == 201
     r2 = await client.get(
@@ -101,6 +121,7 @@ async def test_create_unique_index(client, session_id, test_db):
 # ---------------------------------------------------------------------------
 # Primary key
 # ---------------------------------------------------------------------------
+
 
 async def test_set_primary_key(client, session_id, test_db):
     # Create a table without a PK first
@@ -136,6 +157,7 @@ async def test_drop_primary_key(client, session_id, test_db):
 # ---------------------------------------------------------------------------
 # Columns
 # ---------------------------------------------------------------------------
+
 
 async def test_add_column(client, session_id, test_db):
     r = await client.post(

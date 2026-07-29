@@ -1,14 +1,18 @@
 """Integration tests for the config export/import API."""
+
 import json
 
 
 async def _create_session(client, name="Test Session"):
-    r = await client.post("/api/v1/sessions", json={
-        "name": name,
-        "host": "db.example.com",
-        "username": "root",
-        "password": "secret",
-    })
+    r = await client.post(
+        "/api/v1/sessions",
+        json={
+            "name": name,
+            "host": "db.example.com",
+            "username": "root",
+            "password": "secret",
+        },
+    )
     assert r.status_code == 201
     return r.json()["id"]
 
@@ -16,6 +20,7 @@ async def _create_session(client, name="Test Session"):
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
+
 
 async def test_export_requires_passphrase(client):
     r = await client.post("/api/v1/config/export", json={"passphrase": ""})
@@ -53,6 +58,7 @@ async def test_export_does_not_leak_plaintext_password(client):
 # ---------------------------------------------------------------------------
 # Import
 # ---------------------------------------------------------------------------
+
 
 async def _make_export_file(client, passphrase="pass") -> bytes:
     """Export current sessions and return the raw JSON bytes."""

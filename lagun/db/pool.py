@@ -18,9 +18,7 @@ _GLOBAL_CONNECTION_LIMIT = max(
 _ACQUIRE_TIMEOUT_SECONDS = max(
     0.1, float(os.getenv("LAGUN_DB_ACQUIRE_TIMEOUT_SECONDS", "10"))
 )
-_POOL_IDLE_SECONDS = max(
-    1, float(os.getenv("LAGUN_DB_POOL_IDLE_SECONDS", "900"))
-)
+_POOL_IDLE_SECONDS = max(1, float(os.getenv("LAGUN_DB_POOL_IDLE_SECONDS", "900")))
 _POOL_REAP_INTERVAL_SECONDS = max(
     1, float(os.getenv("LAGUN_DB_POOL_REAP_INTERVAL_SECONDS", "60"))
 )

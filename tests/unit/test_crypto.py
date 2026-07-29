@@ -1,4 +1,5 @@
 """Unit tests for lagun/db/crypto.py."""
+
 import pytest
 from cryptography.fernet import InvalidToken
 

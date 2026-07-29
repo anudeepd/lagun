@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Development runner: starts FastAPI + Vite concurrently."""
+
 import os
 import subprocess
 import sys
@@ -18,8 +19,17 @@ def main():
     try:
         # Start FastAPI backend
         api_proc = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "lagun.main:app",
-             "--reload", "--port", "8000", "--host", "127.0.0.1"],
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "lagun.main:app",
+                "--reload",
+                "--port",
+                "8000",
+                "--host",
+                "127.0.0.1",
+            ],
             cwd=ROOT,
         )
         procs.append(api_proc)

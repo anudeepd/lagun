@@ -3,6 +3,7 @@
 Verifies that special characters in cell values (quotes, commas, newlines,
 huge SQL blobs, unicode, nulls, etc.) survive the export → csv.reader round-trip.
 """
+
 import csv
 import io
 import pytest
@@ -23,7 +24,7 @@ NASTY_VALUES = [
     ("newline_cr", "line1\rline2"),
     ("tab", "col1\tcol2"),
     ("backslash", r"C:\Users\test\file.txt"),
-    ("backslash_quote", r'path \"escaped\"'),
+    ("backslash_quote", r"path \"escaped\""),
     ("unicode_emoji", "hello 🎉 world"),
     ("unicode_cjk", "数据库"),
     ("unicode_rtl", "مرحبا بالعالم"),
@@ -31,31 +32,36 @@ NASTY_VALUES = [
     ("only_quotes", '"""'),
     ("only_comma", ",,,"),
     ("only_newlines", "\n\n\n"),
-    ("mixed_special", 'a,b\nc"d\re\'f'),
+    ("mixed_special", "a,b\nc\"d\re'f"),
     ("leading_quote", '"starts with quote'),
     ("trailing_quote", 'ends with quote"'),
     ("sql_select", "SELECT * FROM `users` WHERE name = 'Alice' AND age > 18"),
     ("sql_insert", "INSERT INTO `t` (`a`,`b`) VALUES ('x','y\",z')"),
-    ("sql_with_newlines",
-     "SELECT\n  id,\n  name\nFROM users\nWHERE age > 18\nORDER BY name ASC;"),
-    ("sql_giant", (
-        "SELECT u.id, u.name, u.email, o.id AS order_id, o.total, "
-        "p.name AS product, p.sku, p.price, c.name AS category "
-        "FROM users u "
-        "JOIN orders o ON o.user_id = u.id "
-        "JOIN order_items oi ON oi.order_id = o.id "
-        "JOIN products p ON p.id = oi.product_id "
-        "JOIN categories c ON c.id = p.category_id "
-        "WHERE u.created_at >= '2024-01-01' "
-        "  AND o.status IN ('paid', 'shipped', 'delivered') "
-        "  AND p.price > 9.99 "
-        "  AND c.slug NOT IN ('archived', 'draft') "
-        "GROUP BY u.id, o.id, p.id "
-        "HAVING SUM(oi.qty) > 0 "
-        "ORDER BY o.total DESC "
-        "LIMIT 1000 OFFSET 500;\n"
-        "-- this comment has a \"quoted\" word and a comma, plus\r\na bare CR+LF"
-    )),
+    (
+        "sql_with_newlines",
+        "SELECT\n  id,\n  name\nFROM users\nWHERE age > 18\nORDER BY name ASC;",
+    ),
+    (
+        "sql_giant",
+        (
+            "SELECT u.id, u.name, u.email, o.id AS order_id, o.total, "
+            "p.name AS product, p.sku, p.price, c.name AS category "
+            "FROM users u "
+            "JOIN orders o ON o.user_id = u.id "
+            "JOIN order_items oi ON oi.order_id = o.id "
+            "JOIN products p ON p.id = oi.product_id "
+            "JOIN categories c ON c.id = p.category_id "
+            "WHERE u.created_at >= '2024-01-01' "
+            "  AND o.status IN ('paid', 'shipped', 'delivered') "
+            "  AND p.price > 9.99 "
+            "  AND c.slug NOT IN ('archived', 'draft') "
+            "GROUP BY u.id, o.id, p.id "
+            "HAVING SUM(oi.qty) > 0 "
+            "ORDER BY o.total DESC "
+            "LIMIT 1000 OFFSET 500;\n"
+            '-- this comment has a "quoted" word and a comma, plus\r\na bare CR+LF'
+        ),
+    ),
     ("repeated_quotes", '""""""'),
     ("csv_injection_attempt", "=CMD|'/c calc'!A0"),
     ("very_long", "x" * 65_000),
@@ -147,26 +153,40 @@ async def test_csv_backslash_escaping(client, session_id, special_db):
     self-escaped (\\) so parsers don't misinterpret the next character.
     """
     body = await _export(
-        client, session_id, special_db,
-        quotechar='"', escapechar="\\",
+        client,
+        session_id,
+        special_db,
+        quotechar='"',
+        escapechar="\\",
     )
-    _check_round_trip(body, NASTY_VALUES, quotechar='"', escapechar="\\", doublequote=False)
+    _check_round_trip(
+        body, NASTY_VALUES, quotechar='"', escapechar="\\", doublequote=False
+    )
     # Raw format assertions — round-trip alone is insufficient because csv.reader
     # with escapechar="\\" silently accepts misescaped output.
     assert '\\"' in body, "Expected backslash-escaped quotes in raw output"
     # Empty fields produce "" which is valid; we check a specific value instead
-    assert r'"say \"hello\" to me"' in body, "Expected backslash escaping for embedded quotes"
-    assert r'"C:\\Users\\test\\file.txt"' in body, "Expected backslash self-escaped in path value"
+    assert r'"say \"hello\" to me"' in body, (
+        "Expected backslash escaping for embedded quotes"
+    )
+    assert r'"C:\\Users\\test\\file.txt"' in body, (
+        "Expected backslash self-escaped in path value"
+    )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("export_kw,reader_kw", [
-    ({"delimiter": ";"}, {"delimiter": ";"}),
-    ({"delimiter": "\t"}, {"delimiter": "\t"}),
-    ({"delimiter": "|"}, {"delimiter": "|"}),
-    ({"lineterminator": "\n"}, {}),
-])
-async def test_csv_delimiter_variants(client, session_id, special_db, export_kw, reader_kw):
+@pytest.mark.parametrize(
+    "export_kw,reader_kw",
+    [
+        ({"delimiter": ";"}, {"delimiter": ";"}),
+        ({"delimiter": "\t"}, {"delimiter": "\t"}),
+        ({"delimiter": "|"}, {"delimiter": "|"}),
+        ({"lineterminator": "\n"}, {}),
+    ],
+)
+async def test_csv_delimiter_variants(
+    client, session_id, special_db, export_kw, reader_kw
+):
     body = await _export(client, session_id, special_db, **export_kw)
     _check_round_trip(body, NASTY_VALUES, quotechar='"', doublequote=True, **reader_kw)
 
@@ -210,7 +230,9 @@ async def test_csv_explicit_null_row(client, session_id, special_db, mysql_conta
     rows = parse_csv(body, quotechar='"', doublequote=True)
     null_rows = [r for r in rows[1:] if r[1] == "explicit_null"]
     assert len(null_rows) == 1
-    assert null_rows[0][2] == "", f"NULL should be empty string, got {null_rows[0][2]!r}"
+    assert null_rows[0][2] == "", (
+        f"NULL should be empty string, got {null_rows[0][2]!r}"
+    )
 
 
 @pytest.mark.asyncio

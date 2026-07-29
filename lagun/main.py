@@ -60,7 +60,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.68", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.69", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
@@ -144,9 +144,7 @@ async def database_connection_error_handler(
 
 
 @app.exception_handler(DatabaseCapacityError)
-async def database_capacity_error_handler(
-    request: Request, exc: DatabaseCapacityError
-):
+async def database_capacity_error_handler(request: Request, exc: DatabaseCapacityError):
     return JSONResponse(
         status_code=503,
         content={"detail": str(exc)},

@@ -6,10 +6,12 @@ import decimal
 import os
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from lagun.auth import request_username
 from lagun.db.pool import DatabaseCapacityError, DatabaseConnectionError, get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, escape_string_literal
@@ -34,11 +36,19 @@ from lagun.models.query import (
 
 router = APIRouter(tags=["query"])
 
-# Maps session_id to MySQL thread IDs of currently running queries.
-_active_queries: dict[str, set[int]] = {}
-# Maps one request-specific execution to its MySQL thread ID. None means request
-# is registered but has not acquired a connection yet.
-_active_query_executions: dict[tuple[str, str], int | None] = {}
+
+@dataclass
+class _ActiveQuery:
+    thread_id: int | None
+    owner_username: str | None
+
+
+# Maps session_id to MySQL thread IDs and their LDAP owners. A None owner is the
+# existing single-user mode, where session-wide cancellation remains available.
+_active_queries: dict[str, dict[int, str | None]] = {}
+# Maps one request-specific execution to its thread and LDAP owner. A None
+# thread means the request is registered but has not acquired a connection yet.
+_active_query_executions: dict[tuple[str, str], _ActiveQuery] = {}
 _cancelled_query_executions: set[tuple[str, str]] = set()
 _active_queries_lock = asyncio.Lock()
 _active_script_queries: dict[str, dict[str, int | None]] = {}
@@ -53,9 +63,7 @@ _BULK_LOCK_WAIT_TIMEOUT_SECONDS = int(
     os.getenv("LAGUN_BULK_LOCK_WAIT_TIMEOUT_SECONDS", "5")
 )
 _BULK_MAX_RUNTIME_SECONDS = int(os.getenv("LAGUN_BULK_MAX_RUNTIME_SECONDS", "120"))
-_QUERY_MAX_RUNTIME_SECONDS = float(
-    os.getenv("LAGUN_QUERY_MAX_RUNTIME_SECONDS", "30")
-)
+_QUERY_MAX_RUNTIME_SECONDS = float(os.getenv("LAGUN_QUERY_MAX_RUNTIME_SECONDS", "30"))
 _BULK_PREVIEW_CHARS = 160
 _NONTRANSACTIONAL_ENGINES = {
     "MYISAM",
@@ -404,6 +412,7 @@ async def _check_transactional_targets(
             )
     return None
 
+
 class _QueryCancelled(Exception):
     pass
 
@@ -413,7 +422,9 @@ def _elapsed_ms(started: float) -> float:
 
 
 async def _begin_query_execution(
-    session_id: str, execution_id: str | None
+    session_id: str,
+    execution_id: str | None,
+    owner_username: str | None,
 ) -> tuple[str, str] | None:
     if execution_id is None:
         return None
@@ -421,7 +432,10 @@ async def _begin_query_execution(
     async with _active_queries_lock:
         if key in _active_query_executions:
             raise HTTPException(409, "Query execution ID is already active")
-        _active_query_executions[key] = None
+        _active_query_executions[key] = _ActiveQuery(
+            thread_id=None,
+            owner_username=owner_username,
+        )
         _cancelled_query_executions.discard(key)
     return key
 
@@ -430,11 +444,15 @@ async def _register_query_thread(
     session_id: str,
     execution_key: tuple[str, str] | None,
     thread_id: int,
+    owner_username: str | None,
 ) -> bool:
     async with _active_queries_lock:
-        _active_queries.setdefault(session_id, set()).add(thread_id)
+        _active_queries.setdefault(session_id, {})[thread_id] = owner_username
         if execution_key is not None:
-            _active_query_executions[execution_key] = thread_id
+            _active_query_executions[execution_key] = _ActiveQuery(
+                thread_id=thread_id,
+                owner_username=owner_username,
+            )
             return execution_key in _cancelled_query_executions
     return False
 
@@ -457,7 +475,7 @@ async def _finish_query_execution(
         if thread_id is not None:
             queries = _active_queries.get(session_id)
             if queries is not None:
-                queries.discard(thread_id)
+                queries.pop(thread_id, None)
                 if not queries:
                     del _active_queries[session_id]
         if execution_key is not None:
@@ -494,11 +512,15 @@ def _query_timings(
     )
 
 
-
 @router.post("/sessions/{session_id}/query", response_model=QueryResult)
-async def execute_query(session_id: str, req: QueryRequest):
+async def execute_query(session_id: str, req: QueryRequest, request: Request):
     started = time.monotonic()
-    execution_key = await _begin_query_execution(session_id, req.execution_id)
+    owner_username = request_username(request)
+    execution_key = await _begin_query_execution(
+        session_id,
+        req.execution_id,
+        owner_username,
+    )
     thread_id: int | None = None
     pool_wait_ms = 0.0
     setup_ms = 0.0
@@ -532,7 +554,10 @@ async def execute_query(session_id: str, req: QueryRequest):
                         row = await cur.fetchone()
                         thread_id = row[0]
                         cancelled = await _register_query_thread(
-                            session_id, execution_key, thread_id
+                            session_id,
+                            execution_key,
+                            thread_id,
+                            owner_username,
                         )
                         if cancelled:
                             raise _QueryCancelled
@@ -554,8 +579,7 @@ async def execute_query(session_id: str, req: QueryRequest):
                             fetch_ms = _elapsed_ms(fetch_started)
                             serialize_started = time.monotonic()
                             rows = [
-                                [_serialize(value) for value in row]
-                                for row in raw_rows
+                                [_serialize(value) for value in row] for row in raw_rows
                             ]
                             value_serialize_ms = _elapsed_ms(serialize_started)
                             timings = _query_timings(
@@ -604,9 +628,7 @@ async def execute_query(session_id: str, req: QueryRequest):
     except Exception as exc:
         error = str(exc)
     finally:
-        await _finish_query_execution(
-            session_id, execution_key, thread_id
-        )
+        await _finish_query_execution(session_id, execution_key, thread_id)
 
     timings = _query_timings(
         started,
@@ -628,12 +650,22 @@ async def execute_query(session_id: str, req: QueryRequest):
 
 
 @router.delete("/sessions/{session_id}/query")
-async def kill_query(session_id: str):
+async def kill_query(session_id: str, request: Request):
+    owner_username = request_username(request)
     async with _active_queries_lock:
         execution_keys = [
-            key for key in _active_query_executions if key[0] == session_id
+            key
+            for key, active_query in _active_query_executions.items()
+            if key[0] == session_id
+            and (
+                owner_username is None or active_query.owner_username == owner_username
+            )
         ]
-        thread_ids = list(_active_queries.get(session_id, set()))
+        thread_ids = [
+            thread_id
+            for thread_id, query_owner in _active_queries.get(session_id, {}).items()
+            if owner_username is None or query_owner == owner_username
+        ]
         for key in execution_keys:
             _cancelled_query_executions.add(key)
     if not thread_ids and not execution_keys:
@@ -646,13 +678,21 @@ async def kill_query(session_id: str):
 
 
 @router.delete("/sessions/{session_id}/query/{execution_id}")
-async def kill_query_execution(session_id: str, execution_id: str):
+async def kill_query_execution(
+    session_id: str,
+    execution_id: str,
+    request: Request,
+):
     key = (session_id, execution_id)
+    owner_username = request_username(request)
     async with _active_queries_lock:
-        if key not in _active_query_executions:
+        active_query = _active_query_executions.get(key)
+        if active_query is None or (
+            owner_username is not None and active_query.owner_username != owner_username
+        ):
             return {"ok": True}
         _cancelled_query_executions.add(key)
-        thread_id = _active_query_executions[key]
+        thread_id = active_query.thread_id
     try:
         if thread_id is not None:
             await _kill_query_threads(session_id, [thread_id])

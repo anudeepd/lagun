@@ -1,4 +1,5 @@
 """Unit tests for lagun/db/utils.py."""
+
 import pytest
 
 from lagun.db.utils import (
@@ -17,6 +18,7 @@ from lagun.db.utils import (
 # ---------------------------------------------------------------------------
 # quote_ident
 # ---------------------------------------------------------------------------
+
 
 def test_quote_ident_simple():
     assert quote_ident("users") == "`users`"
@@ -50,6 +52,7 @@ def test_quote_ident_rejects_backtick():
 # validate_engine
 # ---------------------------------------------------------------------------
 
+
 def test_validate_engine_innodb():
     assert validate_engine("InnoDB") == "InnoDB"
 
@@ -67,6 +70,7 @@ def test_validate_engine_rejects_unknown():
 # ---------------------------------------------------------------------------
 # validate_index_type
 # ---------------------------------------------------------------------------
+
 
 def test_validate_index_type_btree():
     assert validate_index_type("BTREE") == "BTREE"
@@ -86,6 +90,7 @@ def test_validate_index_type_rejects_unknown():
 # validate_charset / validate_collation
 # ---------------------------------------------------------------------------
 
+
 def test_validate_charset_valid():
     assert validate_charset("utf8mb4") == "utf8mb4"
     assert validate_charset("latin1") == "latin1"
@@ -103,6 +108,7 @@ def test_validate_collation_valid():
 # ---------------------------------------------------------------------------
 # validate_col_type
 # ---------------------------------------------------------------------------
+
 
 def test_validate_col_type_simple():
     assert validate_col_type("INT") == "INT"
@@ -131,6 +137,7 @@ def test_validate_col_type_rejects_quotes():
 # ---------------------------------------------------------------------------
 # escape_value
 # ---------------------------------------------------------------------------
+
 
 def test_escape_value_none():
     assert escape_value(None) == "NULL"
@@ -178,6 +185,7 @@ def test_escape_value_rejects_non_finite_floats():
 # escape_string_literal
 # ---------------------------------------------------------------------------
 
+
 def test_escape_string_literal_simple():
     assert escape_string_literal("hello") == "hello"
 
@@ -199,6 +207,7 @@ def test_escape_string_literal_rejects_double_dash():
 # ---------------------------------------------------------------------------
 # SYSTEM_DBS
 # ---------------------------------------------------------------------------
+
 
 def test_system_dbs_contains_known_entries():
     assert "information_schema" in SYSTEM_DBS
