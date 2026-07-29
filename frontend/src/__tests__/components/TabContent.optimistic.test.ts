@@ -259,9 +259,34 @@ describe('buildResultGridRowData — row identity', () => {
       [2, 'Sam'],
     ])
 
-    const rows = buildResultGridRowData({ result, primaryKeyColumns: ['id'] })
+    const first = buildResultGridRowData({ result, primaryKeyColumns: ['id'] })
+    const second = buildResultGridRowData({ result, primaryKeyColumns: ['id'] })
+    const firstIds = first.map(row => row.__ag_rowId)
 
-    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2'])
+    expect(firstIds).toEqual(second.map(row => row.__ag_rowId))
+    expect(firstIds[0]).not.toBe(firstIds[1])
+  })
+  it('keeps internal row ids bounded when a key value is very large', () => {
+    const result = makeResult(['id', 'payload'], [
+      ['x'.repeat(100_000), 'large row'],
+    ])
+
+    const [row] = buildResultGridRowData({ result, primaryKeyColumns: ['id'] })
+
+    expect(String(row.__ag_rowId).length).toBeLessThan(64)
+  })
+
+  it('does not give NULL and empty-string keys the same row id', () => {
+    const nullKey = buildResultGridRowData({
+      result: makeResult(['id'], [[null]]),
+      primaryKeyColumns: ['id'],
+    })
+    const emptyKey = buildResultGridRowData({
+      result: makeResult(['id'], [['']]),
+      primaryKeyColumns: ['id'],
+    })
+
+    expect(nullKey[0].__ag_rowId).not.toBe(emptyKey[0].__ag_rowId)
   })
 })
 
@@ -631,11 +656,13 @@ describe('buildResultGridRowData — duplicated row draft placement', () => {
     [2, 'Bob'],
     [3, 'Carol'],
   ])
+  const sourceRows = buildResultGridRowData({ result, primaryKeyColumns: ['id'] })
+  const sourceIds = sourceRows.map(row => row.__ag_rowId as string)
 
   it('places a duplicated row draft immediately below the source row', () => {
     const drafts = new Map<string, Record<string, unknown>>()
     drafts.set('__insert__1', { id: 2, name: 'Bob' })
-    const anchors = new Map([['__insert__1', { afterRowId: '2' }]])
+    const anchors = new Map([['__insert__1', { afterRowId: sourceIds[1] }]])
 
     const rows = buildResultGridRowData({
       result,
@@ -644,7 +671,7 @@ describe('buildResultGridRowData — duplicated row draft placement', () => {
       insertDraftAnchors: anchors,
     })
 
-    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '__insert__1', '3'])
+    expect(rows.map(row => row.__ag_rowId)).toEqual([sourceIds[0], sourceIds[1], '__insert__1', sourceIds[2]])
     expect(rows[2].__lagun_insertDraft).toBe(true)
     expect(rows[2].name).toBe('Bob')
   })
@@ -654,8 +681,8 @@ describe('buildResultGridRowData — duplicated row draft placement', () => {
     drafts.set('__insert__1', { id: 2, name: 'Bob copy 1' })
     drafts.set('__insert__2', { id: 2, name: 'Bob copy 2' })
     const anchors = new Map([
-      ['__insert__1', { afterRowId: '2' }],
-      ['__insert__2', { afterRowId: '2' }],
+      ['__insert__1', { afterRowId: sourceIds[1] }],
+      ['__insert__2', { afterRowId: sourceIds[1] }],
     ])
 
     const rows = buildResultGridRowData({
@@ -665,13 +692,13 @@ describe('buildResultGridRowData — duplicated row draft placement', () => {
       insertDraftAnchors: anchors,
     })
 
-    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '__insert__1', '__insert__2', '3'])
+    expect(rows.map(row => row.__ag_rowId)).toEqual([sourceIds[0], sourceIds[1], '__insert__1', '__insert__2', sourceIds[2]])
   })
 
   it('appends drafts when the source row is no longer in the result set', () => {
     const drafts = new Map<string, Record<string, unknown>>()
     drafts.set('__insert__1', { id: 99, name: 'Detached' })
-    const anchors = new Map([['__insert__1', { afterRowId: '99' }]])
+    const anchors = new Map([['__insert__1', { afterRowId: 'missing-row' }]])
 
     const rows = buildResultGridRowData({
       result,
@@ -680,7 +707,7 @@ describe('buildResultGridRowData — duplicated row draft placement', () => {
       insertDraftAnchors: anchors,
     })
 
-    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '3', '__insert__1'])
+    expect(rows.map(row => row.__ag_rowId)).toEqual([...sourceIds, '__insert__1'])
   })
 })
 
@@ -738,12 +765,14 @@ describe('buildDuplicateRowDraftValues', () => {
       [1, 'Alice'],
       [2, 'Bob'],
     ])
+    const sourceRows = buildResultGridRowData({ result, primaryKeyColumns: ['id'] })
+    const sourceIds = sourceRows.map(row => row.__ag_rowId as string)
     const drafts = new Map<string, Record<string, unknown>>()
     drafts.set('__insert__1', buildDuplicateRowDraftValues({ id: 2, name: 'Bob' }, [
       makeColumn('id', true, true),
       makeColumn('name'),
     ], 'withoutKeys'))
-    const anchors = new Map([['__insert__1', { afterRowId: '2' }]])
+    const anchors = new Map([['__insert__1', { afterRowId: sourceIds[1] }]])
 
     const rows = buildResultGridRowData({
       result,
@@ -752,7 +781,7 @@ describe('buildDuplicateRowDraftValues', () => {
       insertDraftAnchors: anchors,
     })
 
-    expect(rows.map(row => row.__ag_rowId)).toEqual(['1', '2', '__insert__1'])
+    expect(rows.map(row => row.__ag_rowId)).toEqual([sourceIds[0], sourceIds[1], '__insert__1'])
     expect(rows[2].id).toBeNull()
     expect(rows[2].name).toBe('Bob')
   })

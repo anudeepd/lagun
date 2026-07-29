@@ -24,6 +24,7 @@ export type DuplicateRowMode = 'withKeys' | 'withoutKeys'
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo } from '../../types'
 import { clipboardWrite } from '../../utils/clipboard'
+import { buildResultGridRowId } from '../../utils/rowIdentity'
 
 const darkTheme = themeQuartz.withParams({
   backgroundColor: '#0f172a',
@@ -47,6 +48,19 @@ const COLUMN_WIDTH_SAMPLE_SIZE = 40
 function displayLength(value: unknown): number {
   if (value == null) return 4
   return String(value).length
+}
+
+export function formatResultGridCellValue(value: unknown): string {
+  if (value === null) return 'NULL'
+  if (value === undefined) return ''
+  return String(value)
+}
+
+export function focusTextareaAtEnd(textarea: HTMLTextAreaElement | null): void {
+  if (!textarea) return
+  textarea.focus()
+  const end = textarea.value.length
+  textarea.setSelectionRange(end, end)
 }
 
 function localNow(dataType: string): string {
@@ -136,16 +150,6 @@ interface Props {
   onSortActiveChange?: (active: boolean) => void
 }
 
-export const buildResultGridRowId = (
-  row: Record<string, unknown>,
-  rowIdx: number,
-  keyColumns: string[],
-  includeRowIndexInId = keyColumns.length === 0,
-): string => {
-  const keyValues = keyColumns.map(col => String(row[col] ?? '')).join('\x00')
-  if (includeRowIndexInId) return `${keyValues}\x00${rowIdx}`
-  return keyValues || String(rowIdx)
-}
 
 export const buildResultGridRowData = ({
   result,
@@ -314,10 +318,15 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         sortable: true,
         filter: true,
         hide: hiddenColumns?.has(col) ?? false,
+        valueFormatter: ({ value }: { value: unknown }) => formatResultGridCellValue(value),
         // Reserve fixed room for filter/sort/multi-sort indicators so labels do not disappear behind controls.
         minWidth: Math.ceil(Math.max(120, col.length * 7.5 + 104, Math.min(sampledCellWidth, 36) * 7.2 + 32)),
         cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
-          const base = { fontFamily: 'var(--lagun-data-font)', fontSize: '12px' }
+          const base = {
+            fontFamily: 'var(--lagun-data-font)',
+            fontSize: '12px',
+            ...(params.value === null ? { color: '#64748b', fontStyle: 'italic' } : {}),
+          }
           const rowId = params.data?.__ag_rowId as string | undefined
           if (params.data?.__lagun_insertDraft) {
             return { ...base, backgroundColor: '#064e3b', color: '#bbf7d0' }
@@ -748,11 +757,12 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
               )}
             </div>
             <textarea
+              ref={focusTextareaAtEnd}
+              aria-label={`Edit ${cellEditor.columnName}`}
               className="lagun-data-text min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-data text-xs leading-5 text-slate-100 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               value={cellEditor.value}
               onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
               spellCheck={false}
-              autoFocus
             />
           </div>
         </Modal>

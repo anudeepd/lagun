@@ -6,5 +6,5 @@ interface RefreshIconProps {
 }
 
 export default function RefreshIcon({ refreshing = false, size = 12 }: RefreshIconProps) {
-  return <RefreshCw size={size} />
+  return <RefreshCw size={size} className={refreshing ? 'animate-spin' : undefined} />
 }

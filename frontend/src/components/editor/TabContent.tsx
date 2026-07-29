@@ -9,6 +9,7 @@ import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
 import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './ResultGrid'
+import { buildResultGridRowId } from '../../utils/rowIdentity'
 import ResultToolbar from './ResultToolbar'
 import { Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
@@ -39,15 +40,6 @@ const ImportDialog = lazy(() => import('../table/ImportDialog'))
 const BulkConfirmDialog = lazy(() => import('./BulkConfirmDialog'))
 const BulkResultSummary = lazy(() => import('./BulkResultSummary'))
 
-function buildResultGridRowId(
-  row: Record<string, unknown>,
-  rowIdx: number,
-  keyColumns: string[],
-  includeRowIndexInId = keyColumns.length === 0,
-): string {
-  const keyValues = keyColumns.map(column => String(row[column] ?? '')).join('\x00')
-  return includeRowIndexInId ? `${keyValues}\x00${rowIdx}` : keyValues || String(rowIdx)
-}
 
 const KEY_WORD_WRAP = 'lagun-query-word-wrap'
 const KEY_FILTER_WORD_WRAP = 'lagun-data-filter-word-wrap'
