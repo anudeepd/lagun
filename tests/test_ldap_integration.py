@@ -45,7 +45,7 @@ def test_login_template_uses_nonce_for_inline_assets():
     )
     assert 'id="password"' in template
     assert 'type="password"' in template
-    assert 'class="password-toggle"' not in template
+    assert 'class="password-toggle"' in template
     assert "::-ms-reveal" not in template
     assert "::-moz-reveal" not in template
     assert 'class="feedback-slot" aria-live="polite"' in template
@@ -63,8 +63,10 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert ".submit-label { min-width: 4.75rem; }" in template
     assert "appearance: none;" not in template
     assert "-webkit-appearance: none;" not in template
-    assert 'class="password-field"' not in template
-    assert "padding-right: 2.75rem;" not in template
+    assert 'class="password-field"' in template
+    assert "padding-inline-end: 3rem;" in template
+    assert "password.type = showing ? 'text' : 'password';" in template
+    assert "password.focus();" in template
     assert 'tabindex="-1"' not in template
     assert '<span class="submit-label" aria-live="polite">Sign in</span>' in template
     assert "submitLabel.textContent = 'Signing in';" in template
