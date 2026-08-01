@@ -60,7 +60,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.70", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.71", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 

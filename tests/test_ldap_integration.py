@@ -43,11 +43,11 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert (
         '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">' in template
     )
-    assert 'class="password-toggle"' in template
-    assert "password.type = visible ? 'text' : 'password';" in template
-    assert 'input[type="password"]::-ms-reveal' in template
-    assert 'input[type="password"]::-webkit-textfield-decoration-container' in template
-    assert 'input[type="password"]::-moz-reveal' in template
+    assert 'id="password"' in template
+    assert 'type="password"' in template
+    assert 'class="password-toggle"' not in template
+    assert "::-ms-reveal" not in template
+    assert "::-moz-reveal" not in template
     assert 'class="feedback-slot" aria-live="polite"' in template
     assert "sessionStorage.setItem(usernameStorageKey, username.value);" in template
     assert "document.getElementById('login-error') && savedUsername" in template
@@ -57,14 +57,14 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert "bottom: calc(100% + 0.75rem)" in template
     assert "Secured by" in template
     assert "security-lock" in template
-    assert "max-width: 380px;" in template
+    assert "max-width: 400px;" in template
     assert "min-height: 40px;" in template
     assert "line-height: 1.25rem;" in template
     assert ".submit-label { min-width: 4.75rem; }" in template
-    assert "appearance: none;" in template
-    assert "-webkit-appearance: none;" in template
-    assert ".password-field input" in template
-    assert "padding-right: 2.75rem;" in template
+    assert "appearance: none;" not in template
+    assert "-webkit-appearance: none;" not in template
+    assert 'class="password-field"' not in template
+    assert "padding-right: 2.75rem;" not in template
     assert 'tabindex="-1"' not in template
     assert '<span class="submit-label" aria-live="polite">Sign in</span>' in template
     assert "submitLabel.textContent = 'Signing in';" in template
@@ -72,7 +72,8 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert "event.preventDefault();" in template
     assert "requestAnimationFrame(function() {" in template
     assert "HTMLFormElement.prototype.submit.call(loginForm);" in template
-    assert "::-ms-reveal" in template
-    assert "::-webkit-textfield-decoration-container" in template
+    assert "::-ms-reveal" not in template
+    assert "::-webkit-credentials-auto-fill-button" not in template
+    assert "::-webkit-textfield-decoration-container" not in template
     assert "@-moz-document" not in template
     assert 'style="' not in template
