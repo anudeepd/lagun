@@ -53,6 +53,15 @@ pip install 'lagun[ldap]'
 lagun serve --ldap-config /path/to/ldapgate.yaml
 ```
 
+For login bursts across at least 200 active users, size LDAPGate's bounded
+connection pool and deadline in `/path/to/ldapgate.yaml`:
+
+```yaml
+ldap:
+  timeout: 30
+  pool_size: 16
+```
+
 ### Shared connections and audit log
 
 For LDAP deployments, an administrator can provide connections centrally and
