@@ -15,7 +15,7 @@ import { exitTransition, surfaceTransition } from '../../motion/tokens'
 const MIN_SIDEBAR = 160
 const MAX_SIDEBAR = 520
 
-export default function AppLayout() {
+export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () => void } = {}) {
   const { tabs, activeTabId } = useTabStore()
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem('lagun-sidebar-width')
@@ -100,7 +100,7 @@ export default function AppLayout() {
             <Command size={18} />
           </button>
         </div>
-        <TabBar />
+        <TabBar onOpenAdmin={navigateToAdmin} />
         <main id="main-content" tabIndex={-1} className="relative flex-1 overflow-hidden min-h-0 focus:outline-none">
           {tabs.length === 0 ? (
             <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex h-full flex-col items-center justify-center gap-4 text-slate-500">

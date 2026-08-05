@@ -27,9 +27,12 @@ async def test_server_config_exposes_ldap_idle_timeout(monkeypatch):
     monkeypatch.setenv("LAGUN_LDAP_CONFIG", "/etc/lagun/ldap.yaml")
     monkeypatch.setenv("LAGUN_LDAP_IDLE_TIMEOUT", "900")
 
-    assert await get_server_config() == {
+    assert await get_server_config(
+        types.SimpleNamespace(state=types.SimpleNamespace(user=None))
+    ) == {
         "ldap_enabled": True,
         "ldap_idle_timeout": 900,
+        "is_admin": False,
     }
 
 

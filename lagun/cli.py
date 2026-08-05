@@ -49,6 +49,12 @@ def _configure_logging(log_file: Path | None) -> None:
     help="Path to ldapgate YAML config to enable LDAP authentication.",
 )
 @click.option(
+    "--admin-user",
+    "admin_users",
+    multiple=True,
+    help="LDAP username allowed to use the admin console. Repeat for multiple users.",
+)
+@click.option(
     "--connections-config",
     default=None,
     type=click.Path(exists=True, dir_okay=False, resolve_path=True),
@@ -66,6 +72,7 @@ def serve(
     open_browser: bool,
     reload: bool,
     ldap_config: str | None,
+    admin_users: tuple[str, ...],
     connections_config: str | None,
     log_file: Path | None,
 ):
@@ -80,9 +87,11 @@ def serve(
     if ldap_config:
         os.environ["LAGUN_LDAP_CONFIG"] = ldap_config
         click.echo(f"LDAP authentication enabled ({ldap_config})")
+    if admin_users:
+        os.environ["LAGUN_ADMIN_USERS"] = ",".join(admin_users)
+        click.echo(f"Admin console enabled for {len(admin_users)} LDAP user(s)")
     if connections_config:
         os.environ["LAGUN_CONNECTIONS_CONFIG"] = connections_config
-
     click.echo(f"Starting Lagun at {url}")
 
     if open_browser:

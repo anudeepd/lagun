@@ -14,6 +14,7 @@ class QueryRequest(BaseModel):
         max_length=128,
         pattern=r"^[A-Za-z0-9._:-]+$",
     )
+    tab_id: Optional[str] = Field(None, min_length=1, max_length=128)
 
 
 class QueryTimings(BaseModel):
@@ -44,6 +45,7 @@ class ScriptQueryRequest(BaseModel):
     sql: Optional[str] = None
     statements: Optional[list[str]] = None
     mode: Literal["transaction"] = "transaction"
+    tab_id: Optional[str] = Field(None, min_length=1, max_length=128)
 
 
 class ScriptQueryError(BaseModel):

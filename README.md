@@ -104,6 +104,38 @@ with `trusted_proxies` configured so LDAPGate can honor `X-Forwarded-Proto`.
 
 When LDAP is enabled, a logout button appears in the top-right corner of the tab bar.
 
+### Admin console
+
+LDAP administrators can open `/admin` to inspect saved connection metadata,
+review recent API activity, monitor live workspaces, and manage the LDAP
+allowlist without restarting Lagun. Enable the screen with an explicit
+administrator allowlist:
+
+```bash
+lagun serve \
+  --ldap-config /etc/lagun/ldap.yaml \
+  --admin-user alice \
+  --admin-user bob \
+  --connections-config /etc/lagun/connections.yaml
+```
+
+`LAGUN_ADMIN_USERS=alice,bob` is equivalent to repeating `--admin-user`.
+Administrator access is LDAP-only and separate from `connections.yaml`
+`allowed_users`; connection inventory never returns stored database passwords.
+Access policy remains owned by LDAPGate and the server-managed connections file.
+The Users & policy view atomically updates `ldap.allowed_users`, creates a
+mode-restricted backup, revokes removed users' active LDAP sessions, and applies
+changes to new logins immediately. It requires `ldap.allowed_users` to be an
+explicit YAML list; group-only LDAP policy must be changed in its source
+configuration instead.
+
+The admin console also includes a live workspace view: authenticated browser
+clients publish tab identity heartbeats, and active normal or bulk executions
+are shown with session, database, tab, state, duration, and the complete SQL
+text. Presence is process-local and expires after 45 seconds without a
+heartbeat. Query and API audit records preserve complete JSON request bodies;
+expand each event in the console to inspect its full scrollable payload.
+
 See the [ldapgate README](https://github.com/anudeepd/ldapgate) for config file documentation.
 
 ## Concurrent Deployments

@@ -3,9 +3,13 @@ import { persist } from 'zustand/middleware'
 import type { DataTabState, Tab } from '../types'
 
 function uuid() {
-  return crypto.randomUUID?.() ??
-    '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
-      (+c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16))
+  const cryptoApi = globalThis.crypto
+  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID()
+  if (cryptoApi?.getRandomValues) {
+    return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
+      (+c ^ cryptoApi.getRandomValues!(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16))
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
 function newId() { return `tab-${uuid()}` }

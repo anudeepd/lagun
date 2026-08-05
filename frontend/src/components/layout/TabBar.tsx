@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
-import { X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
+import { Shield, X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { useTabStore } from '../../store/tabStore'
 import { useSessionStore } from '../../store/sessionStore'
@@ -19,10 +19,11 @@ interface ContextMenuState {
   y: number
 }
 
-export default function TabBar() {
+export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {}) {
   const { tabs, activeTabId, setActiveTab, closeTab, openQueryTab, closeAllTabs, moveTab, renameTab } = useTabStore()
   const { activeSessionId } = useSessionStore()
   const ldapEnabled = useServerConfigStore(s => s.ldapEnabled)
+  const isAdmin = useServerConfigStore(s => s.isAdmin)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
   const [closeTargetId, setCloseTargetId] = useState<string | null>(null)
@@ -251,6 +252,18 @@ export default function TabBar() {
           >
             <PanelLeftClose size={12} />
             <span className="hidden sm:inline">Close All</span>
+          </button>
+        )}
+        {ldapEnabled && isAdmin && (
+          <button
+            type="button"
+            onClick={() => onOpenAdmin?.()}
+            title="Admin console"
+            aria-label="Admin console"
+            className="flex h-full items-center gap-1 px-3 text-xs text-slate-500 hover:bg-surface-800 hover:text-brand-300 transition-colors whitespace-nowrap border-l border-surface-800"
+          >
+            <Shield size={12} />
+            <span className="hidden sm:inline">Admin</span>
           </button>
         )}
       </div>

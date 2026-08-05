@@ -11,7 +11,7 @@ describe('TabBar', () => {
     cleanup()
     useTabStore.setState({ tabs: [], activeTabId: null })
     useSessionStore.setState({ activeSessionId: null })
-    useServerConfigStore.setState({ ldapEnabled: false })
+    useServerConfigStore.setState({ ldapEnabled: false, isAdmin: false })
   })
 
   it('prevents the right-button press from selecting tab text', () => {

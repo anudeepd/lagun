@@ -6,6 +6,7 @@ import decimal
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +42,12 @@ router = APIRouter(tags=["query"])
 class _ActiveQuery:
     thread_id: int | None
     owner_username: str | None
+    execution_id: str | None = None
+    started_at: str = ""
+    started_epoch: float = 0
+    database: str | None = None
+    tab_id: str | None = None
+    sql: str = ""
 
 
 # Maps session_id to MySQL thread IDs and their LDAP owners. A None owner is the
@@ -53,6 +60,7 @@ _cancelled_query_executions: set[tuple[str, str]] = set()
 _active_queries_lock = asyncio.Lock()
 _active_script_queries: dict[str, dict[str, int | None]] = {}
 _active_script_queries_lock = asyncio.Lock()
+_active_script_details: dict[tuple[str, str], dict[str, Any]] = {}
 _JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991
 _BULK_MAX_STATEMENTS = int(os.getenv("LAGUN_BULK_MAX_STATEMENTS", "3000"))
 _BULK_MAX_BODY_BYTES = int(os.getenv("LAGUN_BULK_MAX_BODY_BYTES", str(2 * 1024 * 1024)))
@@ -425,16 +433,24 @@ async def _begin_query_execution(
     session_id: str,
     execution_id: str | None,
     owner_username: str | None,
-) -> tuple[str, str] | None:
-    if execution_id is None:
-        return None
-    key = (session_id, execution_id)
+    *,
+    database: str | None = None,
+    tab_id: str | None = None,
+    sql: str = "",
+) -> tuple[str, str]:
+    tracking_id = execution_id or f"auto-{uuid.uuid4().hex}"
+    key = (session_id, tracking_id)
     async with _active_queries_lock:
         if key in _active_query_executions:
             raise HTTPException(409, "Query execution ID is already active")
         _active_query_executions[key] = _ActiveQuery(
             thread_id=None,
             owner_username=owner_username,
+            execution_id=execution_id,
+            started_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            started_epoch=time.time(),
+            tab_id=tab_id,
+            sql=sql,
         )
         _cancelled_query_executions.discard(key)
     return key
@@ -449,10 +465,10 @@ async def _register_query_thread(
     async with _active_queries_lock:
         _active_queries.setdefault(session_id, {})[thread_id] = owner_username
         if execution_key is not None:
-            _active_query_executions[execution_key] = _ActiveQuery(
-                thread_id=thread_id,
-                owner_username=owner_username,
-            )
+            active = _active_query_executions.get(execution_key)
+            if active is not None:
+                active.thread_id = thread_id
+                active.owner_username = owner_username
             return execution_key in _cancelled_query_executions
     return False
 
@@ -474,6 +490,7 @@ async def _finish_query_execution(
     async with _active_queries_lock:
         if thread_id is not None:
             queries = _active_queries.get(session_id)
+
             if queries is not None:
                 queries.pop(thread_id, None)
                 if not queries:
@@ -481,6 +498,62 @@ async def _finish_query_execution(
         if execution_key is not None:
             _active_query_executions.pop(execution_key, None)
             _cancelled_query_executions.discard(execution_key)
+
+
+async def list_active_queries() -> list[dict[str, Any]]:
+    """Return live normal and bulk executions for the admin workspace view."""
+    async with _active_queries_lock:
+        normal = [
+            {
+                "session_id": session_id,
+                "execution_id": active.execution_id or key[1],
+                "username": active.owner_username or "local",
+                "database": active.database,
+                "tab_id": active.tab_id,
+                "sql": active.sql,
+                "started_at": active.started_at,
+                "elapsed_ms": round(
+                    max(0, time.time() - active.started_epoch) * 1000, 2
+                ),
+                "state": "running" if active.thread_id is not None else "queued",
+                "kind": "query",
+            }
+            for (session_id, key), active in _active_query_executions.items()
+        ]
+    async with _active_script_queries_lock:
+        scripts = [
+            {
+                "session_id": session_id,
+                "execution_id": execution_id,
+                "username": details.get("username") or "local",
+                "database": details.get("database"),
+                "tab_id": details.get("tab_id"),
+                "sql": details.get("sql", ""),
+                "started_at": details.get("started_at", ""),
+                "elapsed_ms": round(
+                    max(0, time.time() - details.get("started_epoch", time.time()))
+                    * 1000,
+                    2,
+                ),
+                "state": "running" if thread_id is not None else "queued",
+                "kind": "bulk",
+            }
+            for session_id, executions in _active_script_queries.items()
+            for execution_id, thread_id in executions.items()
+            for details in [_active_script_details.get((session_id, execution_id), {})]
+        ]
+    rows = normal + scripts
+    for row in rows:
+        session = await get_session(row["session_id"])
+        if session:
+            row.update(
+                {
+                    "session_name": session.name,
+                    "host": session.host,
+                    "port": session.port,
+                }
+            )
+    return rows
 
 
 async def _kill_query_threads(session_id: str, thread_ids: list[int]) -> None:
@@ -520,6 +593,9 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
         session_id,
         req.execution_id,
         owner_username,
+        database=req.database,
+        tab_id=req.tab_id,
+        sql=req.sql,
     )
     thread_id: int | None = None
     pool_wait_ms = 0.0
@@ -734,7 +810,9 @@ async def validate_script_query(session_id: str, req: ScriptQueryRequest):
 
 
 @router.post("/sessions/{session_id}/query/script", response_model=ScriptQueryResult)
-async def execute_script_query(session_id: str, req: ScriptQueryRequest):
+async def execute_script_query(
+    session_id: str, req: ScriptQueryRequest, request: Request
+):
     pool, _ = await _get_pool_or_404(session_id)
     t0 = time.monotonic()
 
@@ -780,6 +858,14 @@ async def execute_script_query(session_id: str, req: ScriptQueryRequest):
                 ),
             )
         _active_script_queries.setdefault(session_id, {})[req.execution_id] = None
+        _active_script_details[(session_id, req.execution_id)] = {
+            "username": request_username(request),
+            "database": req.database,
+            "tab_id": req.tab_id,
+            "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "started_epoch": time.time(),
+            "sql": req.sql or "; ".join(req.statements or []),
+        }
 
     thread_id = None
     statements_executed = 0
@@ -857,6 +943,7 @@ async def execute_script_query(session_id: str, req: ScriptQueryRequest):
                             active.pop(req.execution_id, None)
                             if not active:
                                 del _active_script_queries[session_id]
+                        _active_script_details.pop((session_id, req.execution_id), None)
 
         return ScriptQueryResult(
             ok=True,
@@ -899,6 +986,14 @@ async def execute_script_query(session_id: str, req: ScriptQueryRequest):
                 fix,
             ),
         )
+    finally:
+        async with _active_script_queries_lock:
+            active = _active_script_queries.get(session_id)
+            if active:
+                active.pop(req.execution_id, None)
+                if not active:
+                    del _active_script_queries[session_id]
+            _active_script_details.pop((session_id, req.execution_id), None)
 
 
 @router.delete("/sessions/{session_id}/query/script/{execution_id}")

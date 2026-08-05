@@ -1,8 +1,7 @@
 import { redirectToLdapLogin } from '../utils/authRedirect'
-import type { QueryResult } from '../types'
+import type { AdminActivityFilters, AdminActivityResponse, AdminConnectionsResponse, AdminOverview, AdminRetention, AdminUsersResponse, PresenceUpdate, QueryResult } from '../types'
 
 const BASE = '/api/v1'
-
 function formatApiError(status: number, payload: unknown): string {
   if (payload && typeof payload === 'object' && 'detail' in payload) {
     const detail = (payload as { detail: unknown }).detail
@@ -112,10 +111,11 @@ export const api = {
     limit?: number,
     signal?: AbortSignal,
     executionId?: string,
+    tabId?: string,
   ) =>
     request<QueryResult>(`/sessions/${sessionId}/query`, {
       method: 'POST',
-      body: JSON.stringify({ sql, database, limit, execution_id: executionId }),
+      body: JSON.stringify({ sql, database, limit, execution_id: executionId, tab_id: tabId }),
       signal,
     }),
   killQuery: (sessionId: string) =>
@@ -126,7 +126,7 @@ export const api = {
       { method: 'DELETE' },
     ),
   validateScriptQuery: (sessionId: string, payload: {
-    execution_id: string; sql: string; database?: string; mode?: 'transaction'
+    execution_id: string; sql: string; database?: string; mode?: 'transaction'; tab_id?: string
   }, signal?: AbortSignal) =>
     request<import('../types').ScriptQueryValidationResult>(`/sessions/${sessionId}/query/script/validate`, {
       method: 'POST',
@@ -134,7 +134,7 @@ export const api = {
       signal,
     }),
   executeScriptQuery: (sessionId: string, payload: {
-    execution_id: string; sql: string; database?: string; mode?: 'transaction'
+    execution_id: string; sql: string; database?: string; mode?: 'transaction'; tab_id?: string
   }, signal?: AbortSignal) =>
     request<import('../types').ScriptQueryResult>(`/sessions/${sessionId}/query/script`, {
       method: 'POST',
@@ -269,5 +269,42 @@ export const api = {
     return res.json()
   },
 
-  getServerConfig: () => request<{ ldap_enabled: boolean; ldap_idle_timeout: number }>('/config/server'),
+  getServerConfig: () => request<{ ldap_enabled: boolean; ldap_idle_timeout: number; is_admin: boolean }>('/config/server'),
+  getAdminOverview: () => request<AdminOverview>('/admin/overview'),
+  getAdminConnections: () => request<AdminConnectionsResponse>('/admin/connections'),
+  getAdminUsers: () => request<AdminUsersResponse>('/admin/users'),
+  addAdminUser: (username: string, expectedFingerprint?: string) =>
+    request<{ ok: boolean; username: string; fingerprint: string }>('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ username, expected_fingerprint: expectedFingerprint }),
+    }),
+  removeAdminUser: (username: string, expectedFingerprint?: string) =>
+    request<{ ok: boolean; username: string; fingerprint: string; revoked_sessions: number }>(
+      `/admin/users/${encodeURIComponent(username)}`,
+      {
+        method: 'DELETE',
+        body: JSON.stringify({ expected_fingerprint: expectedFingerprint }),
+      },
+    ),
+  getAdminQueries: () => request<import('../types').AdminQueriesResponse>('/admin/queries'),
+  getAdminPresence: () => request<import('../types').AdminPresenceResponse>('/admin/presence'),
+  getAdminActivity: (filters: AdminActivityFilters = {}) => {
+    const params = new URLSearchParams({ limit: '100' })
+    if (filters.username?.trim()) params.set('username', filters.username.trim())
+    if (filters.path?.trim()) params.set('path', filters.path.trim())
+    if (filters.since) params.set('since', filters.since)
+    if (filters.statusCode) params.set('status_code', String(filters.statusCode))
+    return request<AdminActivityResponse>(`/admin/activity?${params.toString()}`)
+  },
+  getAdminRetention: (olderThanDays = 30) =>
+    request<AdminRetention>(`/admin/retention?older_than_days=${olderThanDays}`),
+  purgeAdminRetention: (olderThanDays: number) =>
+    request<{ deleted: number; older_than_days: number }>('/admin/retention/purge', {
+      method: 'POST',
+      body: JSON.stringify({ older_than_days: olderThanDays, confirmation: 'PURGE' }),
+    }),
+  reportPresence: (payload: PresenceUpdate) =>
+    request<{ ok: boolean }>('/presence', { method: 'POST', body: JSON.stringify(payload) }),
+  deletePresence: (clientId: string) =>
+    request<{ ok: boolean }>(`/presence/${encodeURIComponent(clientId)}`, { method: 'DELETE' }),
 }

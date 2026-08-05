@@ -150,6 +150,91 @@ async def list_sessions(owner_username: str | None = None) -> list[SessionRead]:
     return [_row_to_model(r) for r in rows]
 
 
+async def list_admin_connections() -> list[dict]:
+    """Return connection metadata for authorized administrators, never secrets."""
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT
+                s.id,
+                s.name,
+                s.host,
+                s.port,
+                s.username,
+                s.default_db,
+                s.query_limit,
+                s.ssl_enabled,
+                s.created_at,
+                s.updated_at,
+                s.selected_databases,
+                s.managed,
+                s.is_default,
+                s.owner_username,
+                s.config_key,
+                (
+                    SELECT COUNT(*)
+                    FROM shared_session_access a
+                    WHERE a.session_id = s.id
+                ) AS shared_user_count
+            FROM sessions s
+            ORDER BY s.managed DESC, s.is_default DESC, s.name
+            """
+        ) as cur:
+            rows = await cur.fetchall()
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "host": row["host"],
+            "port": row["port"],
+            "username": row["username"],
+            "default_db": row["default_db"],
+            "query_limit": row["query_limit"],
+            "ssl_enabled": bool(row["ssl_enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "selected_databases": json.loads(row["selected_databases"])
+            if row["selected_databases"]
+            else [],
+            "managed": bool(row["managed"]),
+            "is_default": bool(row["is_default"]),
+            "owner_username": row["owner_username"],
+            "config_key": row["config_key"],
+            "shared_user_count": int(row["shared_user_count"]),
+        }
+        for row in rows
+    ]
+
+
+async def audit_summary(since: str | None = None) -> dict[str, int]:
+    clauses: list[str] = []
+    values: list[object] = []
+    if since:
+        clauses.append("occurred_at >= ?")
+        values.append(since)
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    async with _connect() as db:
+        async with db.execute(
+            f"SELECT COUNT(*), COUNT(DISTINCT username) FROM audit_events{where}",
+            values,
+        ) as cur:
+            count, users = await cur.fetchone()
+    return {"event_count": int(count), "user_count": int(users)}
+
+
+async def count_audit_events_before(older_than_days: int) -> int:
+    from datetime import timedelta
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+    async with _connect() as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE occurred_at < ?", (cutoff,)
+        ) as cur:
+            (count,) = await cur.fetchone()
+    return int(count)
+
+
 async def list_sessions_for_user(username: str) -> list[SessionRead]:
     async with _connect() as db:
         db.row_factory = aiosqlite.Row
@@ -315,7 +400,11 @@ async def record_audit_event(
 
 
 async def list_audit_events(
-    username: str | None = None, since: str | None = None, limit: int = 100
+    username: str | None = None,
+    since: str | None = None,
+    limit: int = 100,
+    path: str | None = None,
+    status_code: int | None = None,
 ) -> list[dict]:
     clauses: list[str] = []
     values: list[object] = []
@@ -325,6 +414,12 @@ async def list_audit_events(
     if since:
         clauses.append("occurred_at >= ?")
         values.append(since)
+    if path:
+        clauses.append("path LIKE ?")
+        values.append(f"%{path}%")
+    if status_code is not None:
+        clauses.append("status_code = ?")
+        values.append(status_code)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     async with _connect() as db:
         db.row_factory = aiosqlite.Row

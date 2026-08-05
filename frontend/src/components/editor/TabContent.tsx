@@ -543,7 +543,7 @@ function QueryTab({ tab }: Props) {
         const start = Date.now()
         const validation = await api.validateScriptQuery(
           tab.sessionId,
-          { execution_id: executionId, sql: toRun, database: tab.database },
+          { execution_id: executionId, sql: toRun, database: tab.database, tab_id: tab.id },
           controller.signal,
         )
 
@@ -583,7 +583,7 @@ function QueryTab({ tab }: Props) {
         }
 
         // INSERT-only: execute without confirmation
-        await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, controller.signal, start, newResults, validation.operation_counts)
+        await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, tab.id, controller.signal, start, newResults, validation.operation_counts)
         return
       }
 
@@ -593,7 +593,7 @@ function QueryTab({ tab }: Props) {
         const start = Date.now()
         let r: QueryResult
         try {
-          r = await api.executeQuery(tab.sessionId, stmt, tab.database, limit, controller.signal)
+          r = await api.executeQuery(tab.sessionId, stmt, tab.database, limit, controller.signal, `${executionId}-${statementIdx}`, tab.id)
         } catch (e) {
           if ((e as Error).name === 'AbortError') {
             try { addEntry({ sql: stmt, sessionId: tab.sessionId, database: tab.database, execTimeMs: Date.now() - start, cancelled: true }) } catch { /* ignore localStorage errors */ }
@@ -631,6 +631,7 @@ function QueryTab({ tab }: Props) {
     statements: string[],
     database: string | undefined,
     sessionId: string,
+    tabId: string,
     signal: AbortSignal,
     start: number,
     newResults: ExecutedQueryResult[],
@@ -640,7 +641,7 @@ function QueryTab({ tab }: Props) {
     try {
       scriptResult = await api.executeScriptQuery(
         sessionId,
-        { execution_id: executionId, sql: toRun, database },
+        { execution_id: executionId, sql: toRun, database, tab_id: tabId },
         signal,
       )
     } catch (e) {
@@ -720,7 +721,7 @@ function QueryTab({ tab }: Props) {
       activeScriptExecutionRef.current = executionId
       const start = Date.now()
       const statements = splitStatements(toRun)
-      await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, controller.signal, start, newResults, bulkConfirm.validation.operation_counts)
+      await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, tab.id, controller.signal, start, newResults, bulkConfirm.validation.operation_counts)
     } finally {
       abortControllerRef.current = null
       activeScriptExecutionRef.current = null
@@ -1015,8 +1016,8 @@ function TableTab({ tab, active = true }: Props) {
       ) return
       if (cols.length === 0) throw new Error('Could not load table columns.')
       setColumns(cols)
-
       const selectSql = buildTableDataSelectSql(tab.database, tab.table, cols, effectiveSearch, effectiveWhere)
+
       const response = await api.executeQuery(
         tab.sessionId,
         selectSql,
@@ -1024,6 +1025,7 @@ function TableTab({ tab, active = true }: Props) {
         effectiveLimit,
         controller.signal,
         executionId,
+        tab.id,
       )
       if (
         loadAbortRef.current !== controller

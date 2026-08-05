@@ -169,3 +169,133 @@ export interface Tab {
   dataState?: DataTabState
   dirty?: boolean
 }
+
+
+export interface AdminOverview {
+  connection_count: number
+  managed_connection_count: number
+  private_connection_count: number
+  audit_event_count: number
+  audit_user_count: number
+  live_user_count: number
+  active_query_count: number
+  window_hours: number
+  observed_at: number
+}
+
+export interface AdminConnection {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  default_db: string | null
+  query_limit: number
+  ssl_enabled: boolean
+  created_at: string
+  updated_at: string
+  selected_databases: string[]
+  managed: boolean
+  is_default: boolean
+  owner_username: string | null
+  config_key: string | null
+  shared_user_count: number
+}
+
+export interface AdminConnectionsResponse {
+  items: AdminConnection[]
+  observed_at: number
+}
+
+export interface AdminUser {
+  username: string
+  active_clients: number
+  active_tabs: number
+  policy_state: 'allowed' | 'observed'
+}
+
+export interface AdminUsersResponse {
+  items: AdminUser[]
+  fingerprint: string
+  observed_at: number
+}
+export interface AdminQuery {
+  session_id: string
+  execution_id: string
+  username: string
+  session_name?: string
+  host?: string
+  port?: number
+  database: string | null
+  tab_id: string | null
+  sql: string
+  started_at: string
+  elapsed_ms: number
+  state: 'queued' | 'running'
+  kind: 'query' | 'bulk'
+}
+
+export interface AdminQueriesResponse {
+  items: AdminQuery[]
+  observed_at: number
+}
+
+export interface PresenceTab {
+  id: string
+  type: string
+  label: string
+  session_id: string
+  database: string | null
+  table: string | null
+}
+
+export interface AdminPresence {
+  username: string
+  client_id: string
+  active_tab_id: string | null
+  tabs: PresenceTab[]
+  seen_at: string
+  age_seconds: number
+}
+
+export interface AdminPresenceResponse {
+  items: AdminPresence[]
+  stale_after_seconds: number
+  observed_at: number
+}
+
+export interface PresenceUpdate {
+  client_id: string
+  active_tab_id: string | null
+  tabs: PresenceTab[]
+}
+
+export interface AdminActivityEvent {
+  occurred_at: string
+  username: string
+  method: string
+  path: string
+  session_id: string | null
+  details: string | null
+  status_code: number
+  duration_ms: number
+}
+
+export interface AdminActivityFilters {
+  username?: string
+  path?: string
+  since?: string
+  statusCode?: number
+}
+
+export interface AdminActivityResponse {
+  items: AdminActivityEvent[]
+  observed_at: number
+}
+
+export interface AdminRetention {
+  older_than_days: number
+  minimum_age_days: number
+  eligible_count: number
+  observed_at: number
+}

@@ -8,11 +8,12 @@ import tempfile
 from datetime import datetime, timezone
 
 from cryptography.fernet import InvalidToken
-from fastapi import APIRouter, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
+from lagun.auth import is_admin_user, ldap_enabled
 from lagun.db import session_store
 from lagun.db.crypto import (
     decrypt_password,
@@ -27,15 +28,17 @@ _EXPORT_VERSION = 1
 
 
 @router.get("/config/server")
-async def get_server_config():
-    ldap_enabled = bool(os.getenv("LAGUN_LDAP_CONFIG"))
+async def get_server_config(request: Request):
+    ldap_is_enabled = ldap_enabled()
+    username = getattr(request.state, "user", None)
     try:
         idle_timeout = int(os.getenv("LAGUN_LDAP_IDLE_TIMEOUT", "0"))
     except ValueError:
         idle_timeout = 0
     return {
-        "ldap_enabled": ldap_enabled,
-        "ldap_idle_timeout": max(0, idle_timeout) if ldap_enabled else 0,
+        "ldap_enabled": ldap_is_enabled,
+        "ldap_idle_timeout": max(0, idle_timeout) if ldap_is_enabled else 0,
+        "is_admin": bool(ldap_is_enabled and is_admin_user(username)),
     }
 
 

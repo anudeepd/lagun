@@ -1,7 +1,6 @@
 """FastAPI application factory."""
 
 import os
-import json
 import logging
 import re
 import time
@@ -18,10 +17,20 @@ from fastapi.responses import FileResponse, JSONResponse
 from lagun.db.session_store import init_db
 from lagun.db import session_store
 from lagun.db.connections_config import sync_connections_config
-from lagun.auth import ldap_enabled
 from lagun.db.pool import DatabaseCapacityError, DatabaseConnectionError
-from lagun.api import sessions, query, schema, table_ops, export, import_data, config
-
+from lagun.auth import ldap_enabled
+from lagun.api import (
+    sessions,
+    query,
+    schema,
+    table_ops,
+    export,
+    import_data,
+    config,
+    admin,
+    presence,
+)
+from lagun.ldap_policy import configure_live_policy
 
 if _log_file := os.getenv("LAGUN_LOG_FILE"):
     logging.basicConfig(
@@ -60,23 +69,15 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.75", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.76", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
 def _audit_details(body: bytes) -> str | None:
-    """Keep useful request details while never persisting submitted passwords."""
-    if not body or len(body) > 32_000:
+    """Keep complete JSON request details for operator review."""
+    if not body:
         return None
-    try:
-        data = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    if isinstance(data, dict):
-        for key in list(data):
-            if "password" in key.lower():
-                data[key] = "[redacted]"
-    return json.dumps(data, ensure_ascii=False)[:16_000]
+    return body.decode("utf-8", errors="replace")
 
 
 @app.middleware("http")
@@ -111,16 +112,18 @@ async def ldap_connection_access_and_audit(request: Request, call_next):
     else:
         response = await call_next(request)
     duration = round((time.monotonic() - started) * 1000, 2)
-    if username and request.url.path.startswith("/api/v1/"):
+    if (
+        username
+        and request.url.path.startswith("/api/v1/")
+        and not request.url.path.startswith("/api/v1/presence")
+    ):
         try:
-            content_length = request.headers.get("content-length")
-            details = None
-            if content_length:
-                try:
-                    if int(content_length) <= 32_000:
-                        details = _audit_details(await request.body())
-                except ValueError:
-                    pass
+            content_type = request.headers.get("content-type", "")
+            details = (
+                _audit_details(await request.body())
+                if content_type.startswith("application/json")
+                else None
+            )
             await session_store.record_audit_event(
                 username=username,
                 method=request.method,
@@ -181,6 +184,8 @@ app.include_router(table_ops.router, prefix=prefix)
 app.include_router(export.router, prefix=prefix)
 app.include_router(import_data.router, prefix=prefix)
 app.include_router(config.router, prefix=prefix)
+app.include_router(admin.router, prefix=prefix)
+app.include_router(presence.router, prefix=prefix)
 
 
 # Static file serving (pre-built frontend)
@@ -249,7 +254,10 @@ if _ldap_config_path:
     os.environ["LAGUN_LDAP_IDLE_TIMEOUT"] = str(
         getattr(getattr(_ldap_config, "proxy", None), "idle_timeout", 0) or 0
     )
-    add_ldap_auth(app, _ldap_config, template_path=str(_login_template))
+    _ldap_session_manager = add_ldap_auth(
+        app, _ldap_config, template_path=str(_login_template)
+    )
+    configure_live_policy(_ldap_config, _ldap_session_manager)
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
