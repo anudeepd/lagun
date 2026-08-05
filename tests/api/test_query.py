@@ -453,6 +453,38 @@ async def test_row_update(client, session_id, test_db):
     assert r3.json()["rows"][0][0] == 31
 
 
+async def test_row_update_display_sql_allows_semicolon_value(
+    client, session_id, test_db
+):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "sql": "SELECT id FROM users WHERE name = 'Alice'",
+            "database": test_db,
+        },
+    )
+    alice_id = r.json()["rows"][0][0]
+    value = "something;something;something:something;"
+
+    r2 = await client.post(
+        f"/api/v1/sessions/{session_id}/row-update",
+        json={
+            "database": test_db,
+            "table": "users",
+            "primary_key": {"id": alice_id},
+            "updates": {"name": value},
+        },
+    )
+
+    assert r2.status_code == 200
+    data = r2.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+    assert data["sql_executed"] == (
+        f"UPDATE `{test_db}`.`users` SET `name` = '{value}' WHERE `id` = {alice_id}"
+    )
+
+
 async def test_row_update_zero_affected(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/row-update",

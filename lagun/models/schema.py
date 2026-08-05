@@ -66,6 +66,7 @@ class AddColumnRequest(BaseModel):
     type: str
     nullable: bool = True
     default: Optional[str] = None
+    default_is_literal: bool = False
     comment: Optional[str] = None
 
 
@@ -74,4 +75,5 @@ class ModifyColumnRequest(BaseModel):
     type: str  # required — the current column type must always be provided
     nullable: Optional[bool] = None
     default: Optional[str] = None
+    default_is_literal: bool = False
     comment: Optional[str] = None

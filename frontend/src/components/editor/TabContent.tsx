@@ -227,6 +227,37 @@ function quoteDataTabIdent(identifier: string): string {
   return `\`${identifier.replace(/`/g, '``')}\``
 }
 
+const NUMERIC_DATA_TYPES = new Set([
+  'tinyint',
+  'smallint',
+  'mediumint',
+  'int',
+  'integer',
+  'bigint',
+  'decimal',
+  'numeric',
+  'float',
+  'double',
+  'real',
+  'bit',
+])
+
+export function normalizeTableCellValue(
+  column: ColumnInfo | undefined,
+  value: unknown,
+): { value: unknown; error: string | null } {
+  const isEmptyNumeric = column
+    && NUMERIC_DATA_TYPES.has(column.data_type.toLowerCase())
+    && typeof value === 'string'
+    && value.trim() === ''
+  if (!isEmptyNumeric) return { value, error: null }
+  if (column.is_nullable) return { value: null, error: null }
+  return {
+    value,
+    error: `${column.name} cannot be empty. Enter a numeric value.`,
+  }
+}
+
 export const buildTableDataSelectSql = (
   database: string,
   table: string,
@@ -1161,13 +1192,21 @@ function TableTab({ tab, active = true }: Props) {
   const handleCellEdit = useCallback((params: { column: string; newValue: unknown; oldValue: unknown; data: Record<string, unknown> }) => {
     if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     if (initialLoading || refreshing) return
+    const columnInfo = columns.find(column => column.name === params.column)
+    const normalized = normalizeTableCellValue(columnInfo, params.newValue)
+    if (normalized.error) {
+      setStatusMsg(`✗ ${normalized.error}`)
+      setTimeout(() => setStatusMsg(null), 4000)
+      return
+    }
+    const newValue = normalized.value
     const rowId = params.data.__ag_rowId as string
 
     if (params.data.__lagun_insertDraft) {
       setInsertDrafts(prev => {
         const next = new Map(prev)
         const draft = { ...(next.get(rowId) ?? {}) }
-        draft[params.column] = params.newValue
+        draft[params.column] = newValue
         next.set(rowId, draft)
         insertDraftsRef.current = next
         return next
@@ -1181,11 +1220,11 @@ function TableTab({ tab, active = true }: Props) {
       if (!existing) {
         // First edit on this row: reconstruct original by substituting oldValue for the edited cell
         const original: Record<string, unknown> = { ...params.data, [params.column]: params.oldValue }
-        next.set(rowId, { original, changes: { [params.column]: params.newValue } })
+        next.set(rowId, { original, changes: { [params.column]: newValue } })
       } else {
-        const newChanges = { ...existing.changes, [params.column]: params.newValue }
+        const newChanges = { ...existing.changes, [params.column]: newValue }
         // If value reverted to original, drop that key
-        if (params.newValue === existing.original[params.column]) {
+        if (newValue === existing.original[params.column]) {
           delete newChanges[params.column]
         }
         if (Object.keys(newChanges).length === 0) {
@@ -1197,7 +1236,7 @@ function TableTab({ tab, active = true }: Props) {
       pendingChangesRef.current = next
       return next
     })
-  }, [tab.database, tab.table, rowKeyColumns, initialLoading, refreshing])
+  }, [columns, tab.database, tab.table, rowKeyColumns, initialLoading, refreshing])
 
   const handleDuplicateRow = useCallback((row: Record<string, unknown>, mode: DuplicateRowMode) => {
     const draftId = `__insert__${Date.now()}_${Math.random().toString(36).slice(2)}`
@@ -1242,7 +1281,35 @@ function TableTab({ tab, active = true }: Props) {
     const currentPending = pendingChangesRef.current
     const currentDrafts = insertDraftsRef.current
     if (!tab.database || !tab.table || (currentPending.size === 0 && currentDrafts.size === 0)) return
-    for (const [, { original, changes }] of currentPending) {
+
+    const normalizeChangeMap = (values: Record<string, unknown>) => {
+      const normalizedValues: Record<string, unknown> = {}
+      for (const [columnName, value] of Object.entries(values)) {
+        const normalized = normalizeTableCellValue(columns.find(column => column.name === columnName), value)
+        if (normalized.error) {
+          setStatusMsg(`✗ ${normalized.error}`)
+          setTimeout(() => setStatusMsg(null), 4000)
+          return null
+        }
+        normalizedValues[columnName] = normalized.value
+      }
+      return normalizedValues
+    }
+
+    const normalizedPending = new Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>()
+    for (const [rowId, edit] of currentPending) {
+      const changes = normalizeChangeMap(edit.changes)
+      if (!changes) return
+      normalizedPending.set(rowId, { ...edit, changes })
+    }
+    const normalizedDrafts = new Map<string, Record<string, unknown>>()
+    for (const [draftId, values] of currentDrafts) {
+      const normalizedValues = normalizeChangeMap(values)
+      if (!normalizedValues) return
+      normalizedDrafts.set(draftId, normalizedValues)
+    }
+
+    for (const [, { original, changes }] of normalizedPending) {
       const primary_key: Record<string, unknown> = {}
       rowKeyColumns.forEach(pk => { primary_key[pk] = original[pk] })
       const start = Date.now()
@@ -1273,7 +1340,7 @@ function TableTab({ tab, active = true }: Props) {
         return
       }
     }
-    for (const [, values] of currentDrafts) {
+    for (const [, values] of normalizedDrafts) {
       const start = Date.now()
       const r = await api.rowInsert(tab.sessionId, {
         database: tab.database,
@@ -1299,13 +1366,13 @@ function TableTab({ tab, active = true }: Props) {
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
-    if (currentDrafts.size > 0) {
-      setStatusMsg(`✓ Inserted ${currentDrafts.size} row${currentDrafts.size !== 1 ? 's' : ''}`)
+    if (normalizedDrafts.size > 0) {
+      setStatusMsg(`✓ Inserted ${normalizedDrafts.size} row${normalizedDrafts.size !== 1 ? 's' : ''}`)
       setTimeout(() => setStatusMsg(null), 4000)
     }
 
     // Optimistically apply changes to local result state
-    if (currentPending.size > 0) {
+    if (normalizedPending.size > 0) {
       setResult(prev => {
         if (!prev) return prev
         const keyCols = rowKeyColumns.length > 0 ? rowKeyColumns : prev.columns
@@ -1313,7 +1380,7 @@ function TableTab({ tab, active = true }: Props) {
           const rowObj: Record<string, unknown> = {}
           prev.columns.forEach((col, colIdx) => { rowObj[col] = row[colIdx] })
           const rowId = buildResultGridRowId(rowObj, rowIdx, keyCols, pkColumns.length === 0)
-          const edit = currentPending.get(rowId)
+          const edit = normalizedPending.get(rowId)
           if (!edit) return row
           const updatedRow = [...row]
           for (const [col, newValue] of Object.entries(edit.changes)) {

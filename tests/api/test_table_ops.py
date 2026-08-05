@@ -174,6 +174,56 @@ async def test_add_column(client, session_id, test_db):
     assert "email" in col_names
 
 
+async def test_add_column_with_expression_default(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/columns",
+        json={
+            "name": "created_at",
+            "type": "TIMESTAMP",
+            "nullable": False,
+            "default": "CURRENT_TIMESTAMP",
+        },
+    )
+    assert r.status_code == 201
+    assert "DEFAULT CURRENT_TIMESTAMP" in r.json()["sql"]
+    assert "DEFAULT 'CURRENT_TIMESTAMP'" not in r.json()["sql"]
+
+    r2 = await client.get(
+        f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/columns"
+    )
+    created_at = next(c for c in r2.json() if c["name"] == "created_at")
+    assert created_at["column_default"].upper().startswith("CURRENT_TIMESTAMP")
+
+
+async def test_add_column_with_literal_reserved_default(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/columns",
+        json={
+            "name": "status_label",
+            "type": "VARCHAR(64)",
+            "nullable": True,
+            "default": "CURRENT_TIMESTAMP",
+            "default_is_literal": True,
+        },
+    )
+    assert r.status_code == 201
+    assert "DEFAULT 'CURRENT_TIMESTAMP'" in r.json()["sql"]
+
+
+async def test_add_column_with_function_defaults(client, session_id, test_db):
+    cases = [
+        ("created_on", "DATE", "CURRENT_DATE", "DEFAULT (CURRENT_DATE)"),
+        ("created_time", "TIME", "CURRENT_TIME", "DEFAULT (CURRENT_TIME)"),
+    ]
+    for name, col_type, default, sql_fragment in cases:
+        r = await client.post(
+            f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/columns",
+            json={"name": name, "type": col_type, "nullable": True, "default": default},
+        )
+        assert r.status_code == 201, r.text
+        assert sql_fragment in r.json()["sql"]
+
+
 async def test_modify_column(client, session_id, test_db):
     r = await client.put(
         f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/columns/age",

@@ -5,7 +5,7 @@ import type { ColumnInfo, QueryResult, Tab } from '../../types'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import TabContent, { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, shouldDebounceDataSearch, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import TabContent, { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, normalizeTableCellValue, shouldDebounceDataSearch, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
 // ── Helper: filterDeletedRows ──────────────────────────────────────────
 // Standalone replica of the optimistic delete logic from `handleDeleteRows`.
@@ -82,6 +82,29 @@ function makeColumn(name: string, isPrimaryKey = false, isAutoIncrement = false,
     ...overrides,
   }
 }
+
+describe('normalizeTableCellValue', () => {
+  it('converts blank nullable numeric values to NULL', () => {
+    const column = makeColumn('price', false, false, { data_type: 'decimal', is_nullable: true })
+
+    expect(normalizeTableCellValue(column, '  ')).toEqual({ value: null, error: null })
+  })
+
+  it('rejects blank non-nullable numeric values before request', () => {
+    const column = makeColumn('price', false, false, { data_type: 'decimal', is_nullable: false })
+
+    expect(normalizeTableCellValue(column, '')).toEqual({
+      value: '',
+      error: 'price cannot be empty. Enter a numeric value.',
+    })
+  })
+
+  it('preserves blank text values', () => {
+    const column = makeColumn('name')
+
+    expect(normalizeTableCellValue(column, '')).toEqual({ value: '', error: null })
+  })
+})
 
 // ── Tests: filterDeletedRows ────────────────────────────────────────────
 

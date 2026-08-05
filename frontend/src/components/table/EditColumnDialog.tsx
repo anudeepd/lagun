@@ -4,6 +4,7 @@ import Button from '../ui/Button'
 import Input from '../ui/Input'
 import Select from '../ui/Select'
 import { api } from '../../api/client'
+import { showToast } from '../../utils/toast'
 import type { ColumnInfo } from '../../types'
 
 const COMMON_TYPES = [
@@ -17,6 +18,76 @@ const COMMON_TYPES = [
   '__custom__',
 ]
 
+const DEFAULT_FUNCTION_MODES = [
+  'CURRENT_TIMESTAMP',
+  'CURRENT_TIMESTAMP(3)',
+  'CURRENT_TIMESTAMP(6)',
+  'CURRENT_DATE',
+  'CURRENT_TIME',
+  'UUID()',
+  'RAND()',
+] as const
+
+type DefaultExpression = typeof DEFAULT_FUNCTION_MODES[number]
+type DefaultMode = 'none' | 'null' | 'literal' | DefaultExpression
+
+const DEFAULT_MODE_OPTIONS: Array<{ value: DefaultMode; label: string }> = [
+  { value: 'none', label: 'None' },
+  { value: 'null', label: 'NULL' },
+  { value: 'literal', label: 'Literal' },
+  ...DEFAULT_FUNCTION_MODES.map(value => ({ value, label: value })),
+]
+
+function parseDefaultValue(value: string | null): { mode: DefaultMode; literal: string } {
+  if (value == null) return { mode: 'none', literal: '' }
+  const unwrapped = value.trim().replace(/^\((.*)\)$/, '$1').toUpperCase()
+  const canonical = unwrapped.replace(
+    /^(CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|LOCALTIME|LOCALTIMESTAMP)\(\)$/,
+    '$1',
+  )
+  const normalized: string = {
+    'CURDATE()': 'CURRENT_DATE',
+    'CURTIME()': 'CURRENT_TIME',
+    'LOCALTIMESTAMP': 'CURRENT_TIMESTAMP',
+  }[canonical] ?? canonical
+  if ((DEFAULT_FUNCTION_MODES as readonly string[]).includes(normalized)) {
+    return { mode: normalized as DefaultExpression, literal: '' }
+  }
+  return { mode: 'literal', literal: value }
+}
+
+const NUMERIC_TYPES: Record<string, true> = {
+  TINYINT: true, SMALLINT: true, MEDIUMINT: true, INT: true, INTEGER: true, BIGINT: true,
+  DECIMAL: true, NUMERIC: true, FLOAT: true, DOUBLE: true, REAL: true, BIT: true,
+}
+
+function columnTypeParts(type: string): { base: string; precision: string | null } {
+  const match = type.trim().toUpperCase().match(/^([A-Z]+)(?:\((\d+)(?:,\s*\d+)?\))?/)
+  return { base: match?.[1] ?? '', precision: match?.[2] ?? null }
+}
+
+function defaultModeError(mode: DefaultMode, type: string, nullable: boolean): string | null {
+  if (mode === 'none' || mode === 'literal') return null
+  if (mode === 'null') return nullable ? null : 'NULL default requires Nullable.'
+
+  const { base, precision } = columnTypeParts(type)
+  if (mode.startsWith('CURRENT_TIMESTAMP')) {
+    const expressionPrecision = mode.match(/\((\d+)\)$/)?.[1] ?? '0'
+    return (base === 'TIMESTAMP' || base === 'DATETIME') && precision === expressionPrecision
+      ? null
+      : 'CURRENT_TIMESTAMP defaults require TIMESTAMP or DATETIME with matching precision.'
+  }
+  if (mode === 'CURRENT_DATE') return base === 'DATE' ? null : 'CURRENT_DATE default requires DATE.'
+  if (mode === 'CURRENT_TIME') return base === 'TIME' ? null : 'CURRENT_TIME default requires TIME.'
+  if (mode === 'UUID()') {
+    return base === 'CHAR' || base === 'VARCHAR' || base === 'UUID'
+      ? null
+      : 'UUID() default requires CHAR, VARCHAR, or UUID.'
+  }
+  if (mode === 'RAND()') return NUMERIC_TYPES[base] ? null : 'RAND() default requires a numeric column.'
+  return 'Unsupported default expression.'
+}
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -25,7 +96,7 @@ interface Props {
   table: string
   mode: 'add' | 'modify'
   column?: ColumnInfo
-  onSaved: () => void
+  onSaved: () => void | Promise<void>
 }
 
 export default function EditColumnDialog({
@@ -36,6 +107,7 @@ export default function EditColumnDialog({
   const [customType, setCustomType] = useState('')
   const [nullable, setNullable] = useState(true)
   const [defaultVal, setDefaultVal] = useState('')
+  const [defaultMode, setDefaultMode] = useState<DefaultMode>('none')
   const [comment, setComment] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -48,13 +120,16 @@ export default function EditColumnDialog({
       setTypeSelect(knownType)
       setCustomType(knownType === '__custom__' ? column.column_type : '')
       setNullable(column.is_nullable)
-      setDefaultVal(column.column_default ?? '')
+      const parsedDefault = parseDefaultValue(column.column_default)
+      setDefaultMode(parsedDefault.mode)
+      setDefaultVal(parsedDefault.literal)
       setComment(column.comment ?? '')
     } else {
       setName('')
       setTypeSelect('VARCHAR(255)')
       setCustomType('')
       setNullable(true)
+      setDefaultMode('none')
       setDefaultVal('')
       setComment('')
     }
@@ -66,14 +141,26 @@ export default function EditColumnDialog({
   const handleSave = async () => {
     if (!name.trim()) { setError('Column name is required.'); return }
     if (!effectiveType.trim()) { setError('Column type is required.'); return }
-    setSaving(true)
+    const modeError = defaultModeError(defaultMode, effectiveType, nullable)
+    if (modeError) {
+      setError(modeError)
+      return
+    }
     setError(null)
     try {
+      const defaultValue = defaultMode === 'none'
+        ? null
+        : defaultMode === 'null'
+          ? 'NULL'
+          : defaultMode === 'literal'
+            ? defaultVal
+            : defaultMode
       const payload = {
         name: name.trim(),
         type: effectiveType.trim(),
         nullable,
-        default: defaultVal || null,
+        default: defaultValue,
+        ...(defaultMode === 'literal' ? { default_is_literal: true } : {}),
         comment: comment || undefined,
       }
       if (mode === 'add') {
@@ -81,7 +168,22 @@ export default function EditColumnDialog({
       } else {
         await api.modifyColumn(sessionId, database, table, column!.name, payload)
       }
-      onSaved()
+
+      let refreshError: unknown
+      try {
+        await onSaved()
+      } catch (e) {
+        refreshError = e
+      }
+      const message = mode === 'add'
+        ? `Column ${payload.name} added.`
+        : `Column ${payload.name} updated.`
+      showToast(
+        refreshError
+          ? `${message} Schema refresh failed: ${String(refreshError)}`
+          : message,
+        refreshError ? 'error' : 'success',
+      )
       onClose()
     } catch (e) {
       setError(String(e))
@@ -134,12 +236,30 @@ export default function EditColumnDialog({
           />
         )}
 
-        <Input
-          label="Default Value"
-          value={defaultVal}
-          onChange={e => setDefaultVal(e.target.value)}
-          placeholder="(none)"
-        />
+        <Select
+          label="Default"
+          value={defaultMode}
+          onChange={e => setDefaultMode(e.target.value as DefaultMode)}
+        >
+          {DEFAULT_MODE_OPTIONS.map(option => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </Select>
+
+        {defaultMode === 'literal' && (
+          <Input
+            label="Literal Value"
+            value={defaultVal}
+            onChange={e => setDefaultVal(e.target.value)}
+            placeholder="e.g. pending"
+          />
+        )}
+
+        {defaultMode !== 'none' && defaultMode !== 'literal' && (
+          <p className="text-[11px] text-slate-500">
+            Expression defaults require compatible column types. UUID() and RAND() may be blocked by statement-based replication.
+          </p>
+        )}
 
         <Input
           label="Comment"

@@ -298,7 +298,7 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
           table={table}
           mode="modify"
           column={editCol}
-          onSaved={() => { reload(); setEditCol(null) }}
+          onSaved={async () => { await reload(); setEditCol(null) }}
         />
       )}
 

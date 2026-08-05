@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from lagun.auth import request_username
 from lagun.db.pool import DatabaseCapacityError, DatabaseConnectionError, get_pool
 from lagun.db.session_store import get_session
-from lagun.db.utils import quote_ident, escape_string_literal
+from lagun.db.utils import quote_ident, escape_value
 from lagun.api.sql_script import SqlScriptError, split_sql_script
 from lagun.models.query import (
     QueryRequest,
@@ -996,7 +996,7 @@ def _display_value(value: Any) -> str:
         return "1" if value else "0"
     if isinstance(value, (int, float, decimal.Decimal)) and not isinstance(value, bool):
         return str(value)
-    return f"'{escape_string_literal(str(value))}'"
+    return escape_value(str(value))
 
 
 @router.post("/sessions/{session_id}/cell-update", response_model=CellUpdateResult)
@@ -1041,6 +1041,7 @@ async def row_update(session_id: str, req: RowUpdateRequest):
         pk_clauses, pk_values = _build_pk_where(req.primary_key)
         sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
         params = list(req.updates.values()) + pk_values
+        display_sql = sql
         display_sql = _display_sql(sql, params)
 
         async with pool.acquire() as conn:

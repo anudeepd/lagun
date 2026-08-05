@@ -217,14 +217,14 @@ export const api = {
 
   // Column ops
   addColumn: (sessionId: string, db: string, table: string, data: {
-    name: string; type: string; nullable?: boolean; default?: string | null; comment?: string
+    name: string; type: string; nullable?: boolean; default?: string | null; default_is_literal?: boolean; comment?: string
   }) =>
     request<{ ok: boolean; sql: string }>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/columns`,
       { method: 'POST', body: JSON.stringify(data) }
     ),
   modifyColumn: (sessionId: string, db: string, table: string, column: string, data: {
-    name?: string; type?: string; nullable?: boolean; default?: string | null; comment?: string
+    name?: string; type?: string; nullable?: boolean; default?: string | null; default_is_literal?: boolean; comment?: string
   }) =>
     request<{ ok: boolean; sql: string }>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/columns/${column}`,

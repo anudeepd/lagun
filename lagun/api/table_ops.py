@@ -12,6 +12,7 @@ from lagun.db.utils import (
     validate_index_type,
     validate_col_type,
     escape_string_literal,
+    format_default_clause,
 )
 from lagun.models.schema import (
     CreateTableRequest,
@@ -45,11 +46,7 @@ async def create_table(session_id: str, db: str, req: CreateTableRequest):
         col_type = validate_col_type(col.type)
         nullable = "" if col.nullable else " NOT NULL"
         auto_inc = " AUTO_INCREMENT" if col.auto_increment else ""
-        default = (
-            f" DEFAULT '{escape_string_literal(col.default)}'"
-            if col.default is not None
-            else ""
-        )
+        default = format_default_clause(col.default)
         comment = (
             f" COMMENT '{escape_string_literal(col.comment)}'" if col.comment else ""
         )
@@ -180,11 +177,7 @@ async def add_column(session_id: str, db: str, table: str, req: AddColumnRequest
     col_q = quote_ident(req.name)
     col_type = validate_col_type(req.type)
     nullable = "" if req.nullable else " NOT NULL"
-    default = (
-        f" DEFAULT '{escape_string_literal(req.default)}'"
-        if req.default is not None
-        else ""
-    )
+    default = format_default_clause(req.default, literal=req.default_is_literal)
     comment = f" COMMENT '{escape_string_literal(req.comment)}'" if req.comment else ""
     sql = (
         f"ALTER TABLE {quote_ident(db)}.{quote_ident(table)} "
@@ -209,11 +202,7 @@ async def modify_column(
         nullable = " NOT NULL"
     else:
         nullable = ""
-    default = (
-        f" DEFAULT '{escape_string_literal(req.default)}'"
-        if req.default is not None
-        else ""
-    )
+    default = format_default_clause(req.default, literal=req.default_is_literal)
     comment = f" COMMENT '{escape_string_literal(req.comment)}'" if req.comment else ""
 
     if req.name and req.name != column:

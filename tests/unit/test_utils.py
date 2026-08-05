@@ -11,6 +11,7 @@ from lagun.db.utils import (
     validate_col_type,
     escape_value,
     escape_string_literal,
+    format_default_clause,
     SYSTEM_DBS,
 )
 
@@ -202,6 +203,40 @@ def test_escape_string_literal_rejects_semicolon():
 def test_escape_string_literal_rejects_double_dash():
     with pytest.raises(ValueError):
         escape_string_literal("-- comment")
+
+
+def test_format_default_clause_preserves_temporal_expression():
+    assert format_default_clause("CURRENT_TIMESTAMP") == " DEFAULT CURRENT_TIMESTAMP"
+    assert (
+        format_default_clause("CURRENT_TIMESTAMP(6)") == " DEFAULT CURRENT_TIMESTAMP(6)"
+    )
+
+
+def test_format_default_clause_quotes_string_literal():
+    assert format_default_clause("pending") == " DEFAULT 'pending'"
+
+
+def test_format_default_clause_forces_literal_mode():
+    assert format_default_clause("NULL", literal=True) == " DEFAULT 'NULL'"
+    assert (
+        format_default_clause("CURRENT_TIMESTAMP", literal=True)
+        == " DEFAULT 'CURRENT_TIMESTAMP'"
+    )
+
+
+def test_format_default_clause_preserves_null():
+    assert format_default_clause("NULL") == " DEFAULT NULL"
+
+
+def test_format_default_clause_parenthesizes_supported_expressions():
+    assert format_default_clause("CURRENT_DATE") == " DEFAULT (CURRENT_DATE)"
+    assert format_default_clause("CURRENT_TIME") == " DEFAULT (CURRENT_TIME)"
+    assert format_default_clause("UUID()") == " DEFAULT (UUID())"
+    assert format_default_clause("RAND()") == " DEFAULT (RAND())"
+
+
+def test_format_default_clause_quotes_unallowlisted_functions():
+    assert format_default_clause("NOW()") == " DEFAULT 'NOW()'"
 
 
 # ---------------------------------------------------------------------------

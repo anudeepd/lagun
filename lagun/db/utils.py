@@ -112,3 +112,31 @@ def escape_string_literal(val: str) -> str:
     if any(c in val for c in (";",)) or "--" in val or "/*" in val:
         raise ValueError(f"Value contains disallowed characters: {val!r}")
     return val.replace("'", "''")
+
+
+_DEFAULT_EXPRESSION_RE = re.compile(
+    r"^(?:(?:CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|LOCALTIME|"
+    r"LOCALTIMESTAMP)(?:\((?:[0-6])?\))?|(?:UUID|RAND)\(\))$",
+    re.IGNORECASE,
+)
+_DEFAULT_TIMESTAMP_RE = re.compile(
+    r"^CURRENT_TIMESTAMP(?:\((?:[0-6])?\))?$",
+    re.IGNORECASE,
+)
+
+
+def format_default_clause(value: str | None, *, literal: bool = False) -> str:
+    """Format a safe MySQL/MariaDB column DEFAULT clause."""
+    if value is None:
+        return ""
+    stripped = value.strip()
+    if literal:
+        return f" DEFAULT '{escape_string_literal(value)}'"
+    if stripped.upper() == "NULL":
+        return f" DEFAULT {stripped}"
+    if _DEFAULT_EXPRESSION_RE.fullmatch(stripped):
+        expression = (
+            stripped if _DEFAULT_TIMESTAMP_RE.fullmatch(stripped) else f"({stripped})"
+        )
+        return f" DEFAULT {expression}"
+    return f" DEFAULT '{escape_string_literal(value)}'"

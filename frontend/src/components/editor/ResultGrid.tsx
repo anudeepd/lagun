@@ -8,6 +8,7 @@ import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import { AnimatePresence } from 'motion/react'
 
+import QueryErrorState from './QueryErrorState'
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
   getFilteredData: () => { columns: string[], rows: unknown[][] }
@@ -681,11 +682,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }, [cellEditor, onCellEdit])
 
   if (result.error) {
-    return (
-      <div className="p-4 bg-red-950/50 border border-red-800 rounded m-3">
-        <p className="text-xs font-mono text-red-300">{result.error}</p>
-      </div>
-    )
+    return <QueryErrorState error={result.error} />
   }
 
   return (
