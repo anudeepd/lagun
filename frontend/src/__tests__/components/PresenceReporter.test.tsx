@@ -49,4 +49,46 @@ describe('PresenceReporter', () => {
     }))
     expect(JSON.stringify(vi.mocked(api.reportPresence).mock.calls[0][0])).not.toContain('secret_column')
   })
+
+  it('publishes applied live table search and browsing context', async () => {
+    useTabStore.setState({
+      tabs: [{
+        id: 'table-1',
+        type: 'table',
+        label: 'orders',
+        sessionId: 'session-1',
+        database: 'analytics',
+        table: 'orders',
+        dataState: {
+          view: 'data',
+          globalSearch: 'alice@example.test',
+          whereFilter: 'draft_filter = true',
+          appliedWhere: "status = 'open' AND total >= 250",
+          limit: 250,
+        },
+      }],
+      activeTabId: 'table-1',
+      pendingSqls: {},
+    })
+
+    render(<PresenceReporter />)
+
+    await waitFor(() => expect(api.reportPresence).toHaveBeenCalled())
+    expect(api.reportPresence).toHaveBeenCalledWith(expect.objectContaining({
+      active_tab_id: 'table-1',
+      tabs: [{
+        id: 'table-1',
+        type: 'table',
+        label: 'orders',
+        session_id: 'session-1',
+        database: 'analytics',
+        table: 'orders',
+        view: 'data',
+        global_search: 'alice@example.test',
+        where_filter: "status = 'open' AND total >= 250",
+        row_limit: 250,
+      }],
+    }))
+    expect(JSON.stringify(vi.mocked(api.reportPresence).mock.calls[0][0])).not.toContain('draft_filter')
+  })
 })

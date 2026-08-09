@@ -131,10 +131,18 @@ configuration instead.
 
 The admin console also includes a live workspace view: authenticated browser
 clients publish tab identity heartbeats, and active normal or bulk executions
-are shown with session, database, tab, state, duration, and the complete SQL
-text. Presence is process-local and expires after 45 seconds without a
-heartbeat. Query and API audit records preserve complete JSON request bodies;
-expand each event in the console to inspect its full scrollable payload.
+are shown with session, database, tab, state, duration, and complete SQL. Live
+table tabs also report the current schema/data view, database, table, row limit,
+partial all-column search, and applied `WHERE` clause; un-applied filter drafts
+are not reported. Presence is process-local and expires after 45 seconds
+without a heartbeat.
+
+Query and API audit records preserve raw request targets, including query
+parameters, and complete JSON request bodies. The audit form supports
+case-insensitive partial matching across user, method, path, SQL, filters, and
+raw JSON; Enter applies the current filters. Read-only admin polling is omitted
+so user database activity remains visible. Expanded bodies wrap and scroll
+vertically in the console.
 
 See the [ldapgate README](https://github.com/anudeepd/ldapgate) for config file documentation.
 

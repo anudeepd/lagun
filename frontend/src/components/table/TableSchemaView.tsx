@@ -178,9 +178,9 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
             </Button>
           </div>
         </div>
-        <div className="border border-surface-700 rounded-md overflow-hidden">
+        <div className="max-h-[50vh] overflow-auto border border-surface-700 rounded-md">
           <table className="w-full text-xs">
-            <thead className="bg-surface-800 text-slate-400">
+            <thead className="sticky top-0 z-10 bg-surface-800 text-slate-400">
               <tr>
                 {['Name', 'Type', 'Nullable', 'Default', 'Key', 'Extra', 'Comment', ''].map(h => (
                   <th key={h} className="text-left px-2 py-1.5 font-medium">{h}</th>
@@ -233,9 +233,9 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
             <Plus size={11} /> Add Index
           </Button>
         </div>
-        <div className="border border-surface-700 rounded-md overflow-hidden">
+        <div className="max-h-[32vh] overflow-auto border border-surface-700 rounded-md">
           <table className="w-full text-xs">
-            <thead className="bg-surface-800 text-slate-400">
+            <thead className="sticky top-0 z-10 bg-surface-800 text-slate-400">
               <tr>
                 {['Name', 'Columns', 'Unique', 'Type', ''].map(h => (
                   <th key={h} className="text-left px-2 py-1.5 font-medium">{h}</th>

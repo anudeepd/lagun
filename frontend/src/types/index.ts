@@ -242,11 +242,15 @@ export interface AdminQueriesResponse {
 
 export interface PresenceTab {
   id: string
-  type: string
+  type: TabType
   label: string
   session_id: string
   database: string | null
   table: string | null
+  view?: 'schema' | 'data' | null
+  global_search?: string | null
+  where_filter?: string | null
+  row_limit?: number | null
 }
 
 export interface AdminPresence {
@@ -286,6 +290,7 @@ export interface AdminActivityFilters {
   path?: string
   since?: string
   statusCode?: number
+  search?: string
 }
 
 export interface AdminActivityResponse {

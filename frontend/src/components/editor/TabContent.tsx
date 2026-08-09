@@ -1171,16 +1171,22 @@ function TableTab({ tab, active = true }: Props) {
   const appliedWhereRef = useRef(appliedWhere)
   appliedWhereRef.current = appliedWhere
   const previousGlobalSearchRef = useRef(globalSearch)
+  const globalSearchTimerRef = useRef<number | null>(null)
 
   // Debounced global search — re-queries server on every keystroke pause
   useEffect(() => {
     const previousSearch = previousGlobalSearchRef.current
     previousGlobalSearchRef.current = globalSearch
     if (!shouldDebounceDataSearch(previousSearch, globalSearch, view)) return
-    const timer = setTimeout(() => {
+    const timer = window.setTimeout(() => {
+      globalSearchTimerRef.current = null
       loadDataRef.current(undefined, globalSearch, appliedWhereRef.current)
     }, 400)
-    return () => clearTimeout(timer)
+    globalSearchTimerRef.current = timer
+    return () => {
+      window.clearTimeout(timer)
+      if (globalSearchTimerRef.current === timer) globalSearchTimerRef.current = null
+    }
   }, [globalSearch, view])
 
   // Load user-defined functions for autocomplete in the filter bar
@@ -1629,6 +1635,15 @@ function TableTab({ tab, active = true }: Props) {
               value={globalSearch}
               onChange={e => setGlobalSearch(e.target.value)}
               onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (globalSearchTimerRef.current !== null) {
+                    window.clearTimeout(globalSearchTimerRef.current)
+                    globalSearchTimerRef.current = null
+                  }
+                  loadDataRef.current(undefined, globalSearch, appliedWhereRef.current)
+                  return
+                }
                 if (e.key !== 'Escape') return
                 e.preventDefault()
                 if (globalSearch) handleClearSearch()

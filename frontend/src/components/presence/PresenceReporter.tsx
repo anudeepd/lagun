@@ -4,6 +4,15 @@ import { useTabStore } from '../../store/tabStore'
 import type { PresenceUpdate } from '../../types'
 
 const CLIENT_ID_KEY = 'lagun-presence-client-id'
+const MAX_GLOBAL_SEARCH_LENGTH = 1000
+const MAX_WHERE_FILTER_LENGTH = 32_000
+
+function presenceText(value: string | undefined, maxLength: number): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return trimmed.length > maxLength ? trimmed.slice(0, maxLength) : trimmed
+}
+
 
 function getClientId(): string {
   try {
@@ -31,6 +40,12 @@ export default function PresenceReporter() {
       session_id: tab.sessionId,
       database: tab.database ?? null,
       table: tab.table ?? null,
+      ...(tab.type === 'table' ? {
+        view: tab.dataState?.view ?? 'schema',
+        global_search: presenceText(tab.dataState?.globalSearch, MAX_GLOBAL_SEARCH_LENGTH),
+        where_filter: presenceText(tab.dataState?.appliedWhere, MAX_WHERE_FILTER_LENGTH),
+        row_limit: tab.dataState?.limit ?? 1000,
+      } : {}),
     })),
   }), [activeTabId, clientId, tabs])
 

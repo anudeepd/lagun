@@ -493,7 +493,7 @@ describe('data tab search loading', () => {
     expect(shouldDebounceDataSearch('', 'alice', 'schema')).toBe(false)
   })
 
-  it('reuses cached columns and cancels an active scan before the latest search', async () => {
+  it('reuses cached columns and Enter runs the latest partial search', async () => {
     const columns = [makeColumn('id', true), makeColumn('name')]
     useSchemaStore.setState({
       columns: { 'session-1/db/users': columns },
@@ -526,6 +526,10 @@ describe('data tab search loading', () => {
 
     fireEvent.change(screen.getByPlaceholderText('Search all columns…'), {
       target: { value: 'alice' },
+    })
+    fireEvent.keyDown(screen.getByPlaceholderText('Search all columns…'), {
+      key: 'Enter',
+      code: 'Enter',
     })
 
     await waitFor(() => expect(executeQuery).toHaveBeenCalledTimes(2), {

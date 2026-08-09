@@ -399,27 +399,44 @@ async def record_audit_event(
         await db.commit()
 
 
+def _audit_contains_pattern(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 async def list_audit_events(
     username: str | None = None,
     since: str | None = None,
     limit: int = 100,
     path: str | None = None,
     status_code: int | None = None,
+    search: str | None = None,
 ) -> list[dict]:
     clauses: list[str] = []
     values: list[object] = []
     if username:
-        clauses.append("username = ?")
-        values.append(username)
+        clauses.append("LOWER(username) LIKE LOWER(?) ESCAPE '\\'")
+        values.append(_audit_contains_pattern(username))
     if since:
         clauses.append("occurred_at >= ?")
         values.append(since)
     if path:
-        clauses.append("path LIKE ?")
-        values.append(f"%{path}%")
+        clauses.append("LOWER(path) LIKE LOWER(?) ESCAPE '\\'")
+        values.append(_audit_contains_pattern(path))
     if status_code is not None:
         clauses.append("status_code = ?")
         values.append(status_code)
+    if search:
+        pattern = _audit_contains_pattern(search)
+        clauses.append(
+            "("
+            "LOWER(username) LIKE LOWER(?) ESCAPE '\\' OR "
+            "LOWER(method) LIKE LOWER(?) ESCAPE '\\' OR "
+            "LOWER(path) LIKE LOWER(?) ESCAPE '\\' OR "
+            "LOWER(COALESCE(details, '')) LIKE LOWER(?) ESCAPE '\\'"
+            ")"
+        )
+        values.extend([pattern] * 4)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     async with _connect() as db:
         db.row_factory = aiosqlite.Row

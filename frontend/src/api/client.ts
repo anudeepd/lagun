@@ -292,6 +292,7 @@ export const api = {
     const params = new URLSearchParams({ limit: '100' })
     if (filters.username?.trim()) params.set('username', filters.username.trim())
     if (filters.path?.trim()) params.set('path', filters.path.trim())
+    if (filters.search?.trim()) params.set('search', filters.search.trim())
     if (filters.since) params.set('since', filters.since)
     if (filters.statusCode) params.set('status_code', String(filters.statusCode))
     return request<AdminActivityResponse>(`/admin/activity?${params.toString()}`)

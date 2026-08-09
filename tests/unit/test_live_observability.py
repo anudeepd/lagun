@@ -1,7 +1,10 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI, Request
+from httpx import ASGITransport, AsyncClient
 
+from lagun import main as lagun_main
 from lagun.api import presence, query
 from lagun.api.presence import PresenceUpdate
 from lagun.main import _audit_details
@@ -19,6 +22,55 @@ def test_request_details_preserve_complete_json_body():
     ).encode()
 
     assert _audit_details(body) == body.decode()
+
+
+@pytest.mark.asyncio
+async def test_audit_middleware_preserves_body_query_target_and_ignores_admin_polls(
+    monkeypatch,
+):
+    events = []
+
+    async def record_event(**event):
+        events.append(event)
+
+    monkeypatch.setattr(lagun_main, "ldap_enabled", lambda: True)
+    monkeypatch.setattr(lagun_main.session_store, "record_audit_event", record_event)
+
+    audit_app = FastAPI()
+    audit_app.middleware("http")(lagun_main.ldap_connection_access_and_audit)
+
+    @audit_app.middleware("http")
+    async def authenticate(request: Request, call_next):
+        request.state.user = "alice"
+        return await call_next(request)
+
+    @audit_app.get("/api/v1/admin/activity")
+    async def admin_activity():
+        return {"items": []}
+
+    @audit_app.post("/api/v1/echo")
+    async def echo(request: Request):
+        return await request.json()
+
+    body = b'{"sql":"SELECT * FROM users WHERE active = 1","filters":{"team":"ops"}}'
+    async with AsyncClient(
+        transport=ASGITransport(app=audit_app), base_url="http://test"
+    ) as client:
+        poll_response = await client.get("/api/v1/admin/activity?limit=100")
+        response = await client.post(
+            "/api/v1/echo?view=raw%20rows",
+            content=body,
+            headers={"content-type": "application/json"},
+        )
+
+    assert poll_response.status_code == 200
+    assert response.status_code == 200
+    assert response.json()["filters"] == {"team": "ops"}
+    assert len(events) == 1
+    assert events[0]["username"] == "alice"
+    assert events[0]["method"] == "POST"
+    assert events[0]["path"] == "/api/v1/echo?view=raw%20rows"
+    assert events[0]["details"] == body.decode()
 
 
 @pytest.mark.asyncio
@@ -43,6 +95,10 @@ async def test_presence_reports_open_tabs_and_expires_stale_clients(monkeypatch)
                 "session_id": "session-1",
                 "database": "analytics",
                 "table": "orders",
+                "view": "data",
+                "global_search": "open orders",
+                "where_filter": "status = 'open' AND total >= 250",
+                "row_limit": 250,
             },
         ],
     )
@@ -54,6 +110,11 @@ async def test_presence_reports_open_tabs_and_expires_stale_clients(monkeypatch)
     assert rows[0]["username"] == "alice"
     assert rows[0]["active_tab_id"] == "tab-2"
     assert [tab["label"] for tab in rows[0]["tabs"]] == ["Query — reporting", "orders"]
+    table_tab = rows[0]["tabs"][1]
+    assert table_tab["view"] == "data"
+    assert table_tab["global_search"] == "open orders"
+    assert table_tab["where_filter"] == "status = 'open' AND total >= 250"
+    assert table_tab["row_limit"] == 250
 
     presence._records[("alice", "client-1")].seen_epoch = 0
     assert await presence.list_presence() == []

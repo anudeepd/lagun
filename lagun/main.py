@@ -69,7 +69,7 @@ APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
-app = FastAPI(title="Lagun API", version="0.1.76", lifespan=lifespan)
+app = FastAPI(title="Lagun API", version="0.1.77", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 
@@ -78,6 +78,24 @@ def _audit_details(body: bytes) -> str | None:
     if not body:
         return None
     return body.decode("utf-8", errors="replace")
+
+
+def _audit_target(request: Request) -> str:
+    """Preserve the raw request target, including encoded query parameters."""
+    query = request.url.query
+    return f"{request.url.path}?{query}" if query else request.url.path
+
+
+def _should_audit_request(request: Request, username: str | None) -> bool:
+    if (
+        not username
+        or not request.url.path.startswith("/api/v1/")
+        or request.url.path.startswith("/api/v1/presence")
+    ):
+        return False
+    # Read-only admin polling would otherwise fill the audit window with the
+    # console observing itself. Admin mutations remain auditable.
+    return request.method != "GET" or not request.url.path.startswith("/api/v1/admin/")
 
 
 @app.middleware("http")
@@ -91,6 +109,19 @@ async def ldap_connection_access_and_audit(request: Request, call_next):
         else None
     )
     started = time.monotonic()
+    should_audit = _should_audit_request(request, username)
+    details = None
+    if should_audit and request.headers.get("content-type", "").startswith(
+        "application/json"
+    ):
+        try:
+            # Read before dispatch. Starlette caches this body for the endpoint;
+            # reading it after dispatch fails once the endpoint consumes the stream.
+            details = _audit_details(await request.body())
+        except Exception:
+            # Activity logging must never make a database action fail.
+            details = None
+
     if username and request.url.path in {
         "/api/v1/config/export",
         "/api/v1/config/import",
@@ -112,22 +143,12 @@ async def ldap_connection_access_and_audit(request: Request, call_next):
     else:
         response = await call_next(request)
     duration = round((time.monotonic() - started) * 1000, 2)
-    if (
-        username
-        and request.url.path.startswith("/api/v1/")
-        and not request.url.path.startswith("/api/v1/presence")
-    ):
+    if should_audit:
         try:
-            content_type = request.headers.get("content-type", "")
-            details = (
-                _audit_details(await request.body())
-                if content_type.startswith("application/json")
-                else None
-            )
             await session_store.record_audit_event(
                 username=username,
                 method=request.method,
-                path=request.url.path,
+                path=_audit_target(request),
                 session_id=session_id,
                 details=details,
                 status_code=response.status_code,

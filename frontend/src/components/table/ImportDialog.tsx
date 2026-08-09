@@ -351,9 +351,9 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             </ol>
           </div>
         ) : preview ? (
-          <div className="overflow-x-auto max-h-48 border border-surface-700 rounded">
+          <div className="overflow-auto max-h-48 border border-surface-700 rounded">
             <table className="text-xs w-full">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="bg-surface-800">
                   {preview.columns.map((col, i) => (
                     <th key={i} className="px-2 py-1 text-left text-slate-300 font-medium whitespace-nowrap border-b border-surface-700">

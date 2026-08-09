@@ -1,4 +1,5 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../../api/client'
 import AdminConsole from '../../components/admin/AdminConsole'
@@ -78,7 +79,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  cleanup()
+  localStorage.removeItem('lagun-admin-view')
   vi.clearAllMocks()
 })
 
@@ -92,31 +93,64 @@ describe('AdminConsole', () => {
     expect(screen.getByText('2 users')).toBeInTheDocument()
     expect(screen.getByText('Connection profiles')).toBeInTheDocument()
   })
+  it('keeps admin data in vertical scroll regions without horizontal overflow', async () => {
+    render(<AdminConsole />)
+    await screen.findByRole('heading', { name: 'Workspace overview' })
 
-  it('applies activity filters through the admin API', async () => {
+    const expectVerticalTable = (name: string) => {
+      const table = screen.getByRole('table', { name })
+      expect(table).toHaveClass('table-fixed')
+      expect(table.parentElement).toHaveClass('overflow-y-auto', 'overflow-x-hidden')
+    }
+
+    expectVerticalTable('Connection posture preview')
+    fireEvent.click(screen.getByRole('button', { name: 'Users (1)' }))
+    expectVerticalTable('LDAP access policy and live workspace activity')
+    fireEvent.click(screen.getByRole('button', { name: 'Connections (1)' }))
+    expectVerticalTable('Saved connection inventory and active users')
+    fireEvent.click(screen.getByRole('button', { name: 'Query & API audit' }))
+    expectVerticalTable('Lagun API audit events with raw request targets and bodies')
+  })
+  it('restores selected admin view after remount', async () => {
+    render(<AdminConsole />)
+    await screen.findByRole('heading', { name: 'Workspace overview' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retention' }))
+    expect(await screen.findByRole('heading', { name: 'Audit retention' })).toBeInTheDocument()
+    expect(localStorage.getItem('lagun-admin-view')).toBe('retention')
+
+    cleanup()
+    render(<AdminConsole />)
+    expect(await screen.findByRole('heading', { name: 'Audit retention' })).toBeInTheDocument()
+  })
+
+  it('applies partial activity filters when Enter is pressed', async () => {
     render(<AdminConsole />)
     await screen.findByRole('heading', { name: 'Workspace overview' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Query & API audit' }))
-    fireEvent.change(screen.getByLabelText('User'), { target: { value: 'alice' } })
+    fireEvent.change(screen.getByLabelText('User contains'), { target: { value: 'ali' } })
     fireEvent.change(screen.getByLabelText('Path contains'), { target: { value: '/query' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    const partialMatch = screen.getByLabelText('Partial match')
+    fireEvent.change(partialMatch, { target: { value: 'customer_email' } })
+    fireEvent.keyDown(partialMatch, { key: 'Enter', code: 'Enter' })
 
     await waitFor(() => expect(api.getAdminActivity).toHaveBeenCalledWith({
-      username: 'alice',
+      username: 'ali',
       path: '/query',
+      search: 'customer_email',
       since: '',
       statusCode: undefined,
     }))
   })
-  it('shows complete audit request bodies in a scrollable detail panel', async () => {
-    const payload = '{"sql":"SELECT * FROM users WHERE email=\'alice@example.test\'","password":"secret"}'
+  it('shows raw query targets and complete request bodies', async () => {
+    const payload = '{"sql":"SELECT * FROM users WHERE email=\'alice@example.test\'","filters":{"active":true}}'
     vi.mocked(api.getAdminActivity).mockResolvedValueOnce({
       items: [{
         occurred_at: '2026-08-05T00:00:00Z',
         username: 'alice',
         method: 'POST',
-        path: '/api/v1/sessions/session-1/query',
+        path: '/api/v1/sessions/session-1/query?view=raw%20rows',
         session_id: 'session-1',
         details: payload,
         status_code: 200,
@@ -127,9 +161,10 @@ describe('AdminConsole', () => {
     render(<AdminConsole />)
     await screen.findByRole('heading', { name: 'Workspace overview' })
     fireEvent.click(screen.getByRole('button', { name: 'Query & API audit' }))
-    fireEvent.click(await screen.findByText('Show full request details'))
+    expect(await screen.findByText('POST /api/v1/sessions/session-1/query?view=raw%20rows')).toBeInTheDocument()
+    fireEvent.click(screen.getByText(/Show raw request body/))
 
-    expect(screen.getByText(payload)).toBeInTheDocument()
+    expect(screen.getByLabelText('Raw request body for POST /api/v1/sessions/session-1/query?view=raw%20rows')).toHaveTextContent(payload)
   })
 
 
@@ -146,6 +181,17 @@ describe('AdminConsole', () => {
           session_id: 'session-1',
           database: 'analytics',
           table: null,
+        }, {
+          id: 'tab-2',
+          type: 'table',
+          label: 'orders',
+          session_id: 'session-1',
+          database: 'analytics',
+          table: 'orders',
+          view: 'data',
+          global_search: 'alice@example.test',
+          where_filter: "status = 'open' AND total >= 250",
+          row_limit: 250,
         }],
         seen_at: '2026-08-05T00:00:00Z',
         age_seconds: 2,
@@ -176,8 +222,11 @@ describe('AdminConsole', () => {
     expect(await screen.findByRole('heading', { name: 'Live workspace' })).toBeInTheDocument()
     expect(screen.getByText('Query — analytics')).toBeInTheDocument()
     expect(screen.getByText(/SELECT \* FROM orders/)).toBeInTheDocument()
+    expect(screen.getByText(/Data view · up to 250 rows/)).toBeInTheDocument()
+    expect(screen.getByText('alice@example.test')).toBeInTheDocument()
+    expect(screen.getByText("status = 'open' AND total >= 250")).toBeInTheDocument()
   })
-  it('collapses oversized live sessions and SQL by default', async () => {
+  it('previews oversized live sessions and SQL by default', async () => {
     const longSql = `SELECT * FROM orders WHERE customer = 'alice@example.test' ${'AND status = "open" '.repeat(20)}`
     vi.mocked(api.getAdminPresence).mockResolvedValueOnce({
       items: [{
@@ -218,14 +267,19 @@ describe('AdminConsole', () => {
     await screen.findByRole('heading', { name: 'Workspace overview' })
     fireEvent.click(screen.getByRole('button', { name: /Live workspace/ }))
 
-    const sessionDetails = screen.getByText('5 tabs').closest('details')
+    const liveTabs = screen.getByRole('list', { name: 'session-1 tabs' })
+    expect(within(liveTabs).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(liveTabs).queryByText('Query 5')).not.toBeInTheDocument()
+    const showAllTabs = screen.getByRole('button', { name: 'Show all 5 tabs' })
+    expect(showAllTabs).toHaveAttribute('aria-expanded', 'false')
     const sqlDetails = screen.getByText(/Show full SQL/).closest('details')
-    expect(sessionDetails?.open).toBe(false)
     expect(sqlDetails?.open).toBe(false)
 
-    fireEvent.click(screen.getByText('5 tabs'))
+    fireEvent.click(showAllTabs)
     fireEvent.click(screen.getByText(/Show full SQL/))
-    expect(sessionDetails?.open).toBe(true)
+    expect(within(liveTabs).getAllByRole('listitem')).toHaveLength(5)
+    expect(within(liveTabs).getByText('Query 5')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Show fewer tabs' })).toHaveAttribute('aria-expanded', 'true')
     expect(sqlDetails?.open).toBe(true)
   })
   it('filters sessions, tabs, and queries when selecting a user', async () => {
@@ -312,7 +366,7 @@ describe('AdminConsole', () => {
     expect(screen.queryByText('SELECT * FROM orders')).not.toBeInTheDocument()
   })
   it('shows active users and tabs beside their connection metadata', async () => {
-    vi.mocked(api.getAdminPresence).mockResolvedValueOnce({
+    vi.mocked(api.getAdminPresence).mockResolvedValue({
       items: [{
         username: 'alice',
         client_id: 'client-alice',
@@ -321,6 +375,36 @@ describe('AdminConsole', () => {
           id: 'tab-reporting',
           type: 'query',
           label: 'Reporting query',
+          session_id: 'db-1',
+          database: 'app',
+          table: null,
+        }, {
+          id: 'tab-schema',
+          type: 'table',
+          label: 'Schema browser',
+          session_id: 'db-1',
+          database: 'app',
+          table: 'users',
+          view: 'schema',
+        }, {
+          id: 'tab-audit',
+          type: 'query',
+          label: 'Audit query',
+          session_id: 'db-1',
+          database: 'app',
+          table: null,
+        }, {
+          id: 'tab-data',
+          type: 'table',
+          label: 'Data browser',
+          session_id: 'db-1',
+          database: 'app',
+          table: 'orders',
+          view: 'data',
+        }, {
+          id: 'tab-jobs',
+          type: 'query',
+          label: 'Recent jobs',
           session_id: 'db-1',
           database: 'app',
           table: null,
@@ -338,7 +422,20 @@ describe('AdminConsole', () => {
     expect(await screen.findByRole('heading', { name: 'Connection inventory' })).toBeInTheDocument()
     expect(screen.getByText('Production')).toBeInTheDocument()
     expect(screen.getByText('alice')).toBeInTheDocument()
-    expect(screen.getByText('Reporting query')).toBeInTheDocument()
+    const aliceTabs = screen.getByRole('list', { name: 'alice tabs' })
+    expect(within(aliceTabs).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(aliceTabs).getByText('Reporting query')).toBeInTheDocument()
+    expect(within(aliceTabs).getByText('Schema browser')).toBeInTheDocument()
+    expect(within(aliceTabs).queryByText('Recent jobs')).not.toBeInTheDocument()
+    const showAllTabs = screen.getByRole('button', { name: 'Show all 5 tabs' })
+    expect(showAllTabs).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(showAllTabs)
+    expect(within(aliceTabs).getAllByRole('listitem')).toHaveLength(5)
+    expect(within(aliceTabs).getByText('Recent jobs')).toBeInTheDocument()
+    const showFewerTabs = screen.getByRole('button', { name: 'Show fewer tabs' })
+    expect(showFewerTabs).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(showFewerTabs)
+    expect(within(aliceTabs).getAllByRole('listitem')).toHaveLength(4)
   })
 
 
@@ -353,6 +450,23 @@ describe('AdminConsole', () => {
 
     await waitFor(() => expect(api.purgeAdminRetention).toHaveBeenCalledWith(30))
     expect(await screen.findByRole('status')).toHaveTextContent('Purged 3 audit events.')
+  })
+  it('allows replacing retention days with a multi-digit value', async () => {
+    render(<AdminConsole />)
+    await screen.findByRole('heading', { name: 'Workspace overview' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retention' }))
+    const input = await screen.findByLabelText('Delete events older than') as HTMLInputElement
+    const user = userEvent.setup()
+
+    await user.clear(input)
+    await user.type(input, '7')
+    await user.clear(input)
+    await user.type(input, '30')
+
+    expect(input).toHaveValue(30)
+    fireEvent.blur(input)
+    expect(input).toHaveValue(30)
   })
   it('dismisses success notices after five seconds', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })

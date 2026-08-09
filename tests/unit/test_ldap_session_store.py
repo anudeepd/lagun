@@ -121,15 +121,24 @@ connections:
 async def test_audit_events_can_be_filtered_and_purged(keep_event_loop_awake):
     await session_store.init_db()
     await session_store.record_audit_event(
-        username="alice",
+        username="Alice.Smith",
         method="POST",
-        path="/api/v1/sessions/id/query",
+        path="/api/v1/sessions/id/query?source=table%20browser",
         session_id="id",
-        details="SELECT 1",
+        details="SELECT * FROM orders WHERE discount_label = '10%'",
         status_code=200,
         duration_ms=2.5,
     )
-    assert (await session_store.list_audit_events("alice"))[0]["details"] == "SELECT 1"
+    assert (await session_store.list_audit_events(username="ice.s"))[0][
+        "username"
+    ] == "Alice.Smith"
+    assert (await session_store.list_audit_events(path="ID/QUERY"))[0][
+        "session_id"
+    ] == "id"
+    assert (await session_store.list_audit_events(search="select * from ORDERS"))[0][
+        "details"
+    ].startswith("SELECT")
+    assert len(await session_store.list_audit_events(search="10%")) == 1
     assert await session_store.purge_audit_events(0) == 1
 
 

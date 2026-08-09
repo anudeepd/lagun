@@ -201,6 +201,7 @@ async def get_activity(
     username: str | None = None,
     path: str | None = None,
     since: str | None = None,
+    search: str | None = None,
     status_code: int | None = Query(default=None, ge=100, le=599),
     limit: int = Query(default=100, ge=1, le=500),
 ):
@@ -210,6 +211,7 @@ async def get_activity(
             username=username.strip() if username else None,
             since=since,
             path=path.strip() if path else None,
+            search=search.strip() if search else None,
             status_code=status_code,
             limit=limit,
         ),

@@ -22,6 +22,10 @@ class PresenceTab(BaseModel):
     session_id: str = Field(min_length=1, max_length=128)
     database: str | None = Field(default=None, max_length=128)
     table: str | None = Field(default=None, max_length=128)
+    view: str | None = Field(default=None, max_length=32)
+    global_search: str | None = Field(default=None, max_length=1000)
+    where_filter: str | None = Field(default=None, max_length=32000)
+    row_limit: int | None = Field(default=None, ge=1, le=100000)
 
 
 class PresenceUpdate(BaseModel):
@@ -56,7 +60,7 @@ async def update_presence(payload: PresenceUpdate, request: Request):
         username=username,
         client_id=payload.client_id,
         active_tab_id=payload.active_tab_id,
-        tabs=[tab.model_dump() for tab in payload.tabs],
+        tabs=[tab.model_dump(exclude_none=True) for tab in payload.tabs],
         seen_epoch=now,
         seen_at=datetime.now(timezone.utc).isoformat(),
     )

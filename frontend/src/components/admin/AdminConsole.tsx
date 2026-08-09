@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Activity, ArrowLeft, CircleStop, Database, PanelsTopLeft, RefreshCw, Shield, Terminal, UserRound, Users, X } from 'lucide-react'
 import * as m from 'motion/react-m'
 import { AnimatePresence } from 'motion/react'
@@ -9,11 +9,26 @@ import { surfaceTransition } from '../../motion/tokens'
 
 type View = 'overview' | 'connections' | 'activity' | 'retention' | 'live' | 'users'
 type AdminError = Error & { status?: number }
+const ADMIN_VIEW_STORAGE_KEY = 'lagun-admin-view'
+
+function isAdminView(value: string | null): value is View {
+  return value === 'overview' || value === 'connections' || value === 'activity' || value === 'retention' || value === 'live' || value === 'users'
+}
+
+function readStoredAdminView(): View {
+  try {
+    const stored = localStorage.getItem(ADMIN_VIEW_STORAGE_KEY)
+    return isAdminView(stored) ? stored : 'overview'
+  } catch {
+    return 'overview'
+  }
+}
 const DEFAULT_RETENTION_DAYS = 30
 const REFRESH_INTERVAL_MS = 15_000
 const NOTICE_TIMEOUT_MS = 5_000
 const LIVE_QUERY_COLLAPSE_THRESHOLD = 240
-const LIVE_SESSION_COLLAPSE_THRESHOLD = 4
+const LIVE_SESSION_TAB_PREVIEW_LIMIT = 4
+const CONNECTION_TAB_PREVIEW_LIMIT = 4
 
 function age(timestamp: number): string {
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp))
@@ -51,7 +66,15 @@ function requestError(cause: unknown): AdminError {
 }
 
 export default function AdminConsole({ onClose }: { onClose?: () => void }) {
-  const [view, setView] = useState<View>('overview')
+  const [view, setView] = useState<View>(readStoredAdminView)
+  const selectView = useCallback((nextView: View) => {
+    setView(nextView)
+    try {
+      localStorage.setItem(ADMIN_VIEW_STORAGE_KEY, nextView)
+    } catch {
+      // localStorage unavailable
+    }
+  }, [])
   const [overview, setOverview] = useState<AdminOverview>(emptyOverview)
   const [connections, setConnections] = useState<AdminConnection[]>([])
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -217,7 +240,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
         <nav className="hidden w-56 shrink-0 border-r border-surface-800 bg-surface-900 p-3 sm:block" aria-label="Admin views">
           <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-widest text-slate-600">Control plane</p>
           {views.map(([key, Icon, label]) => (
-            <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => setView(key)} className={`lagun-interactive mb-1 flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-slate-500 hover:bg-surface-800 hover:text-slate-300'}`}>
+            <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => selectView(key)} className={`lagun-interactive mb-1 flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-slate-500 hover:bg-surface-800 hover:text-slate-300'}`}>
               <Icon className="h-3.5 w-3.5" /> {label}
             </button>
           ))}
@@ -226,16 +249,16 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
 
         <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6" aria-live="polite">
           <div className="mx-auto max-w-6xl">
-            <div className="mb-4 flex gap-1 overflow-x-auto sm:hidden" role="tablist" aria-label="Admin views">
+            <div className="mb-4 flex flex-wrap gap-1 sm:hidden" role="tablist" aria-label="Admin views">
               {views.map(([key, , label]) => (
-                <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => setView(key)} className={`min-h-10 whitespace-nowrap rounded-md px-3 py-1.5 text-xs transition-colors ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-slate-500 hover:bg-surface-800'}`}>{label}</button>
+                <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => selectView(key)} className={`min-h-10 rounded-md px-3 py-1.5 text-xs transition-colors ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-slate-500 hover:bg-surface-800'}`}>{label}</button>
               ))}
             </div>
             {notice && <div className="mb-3 flex items-center gap-2 rounded-md border border-green-900/50 bg-green-950/30 px-3 py-2 text-xs text-green-300" role="status"><Shield className="h-3.5 w-3.5" /> {notice}</div>}
             {error && <div className="mb-3 flex items-center gap-2 rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-300" role="alert"><X className="h-3.5 w-3.5" /> {error.message}</div>}
             <AnimatePresence mode="wait" initial={false}>
               <m.div key={view} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={surfaceTransition}>
-                {view === 'overview' && <OverviewPanel overview={overview} connections={connections} onViewConnections={() => setView('connections')} onViewLive={() => setView('live')} />}
+                {view === 'overview' && <OverviewPanel overview={overview} connections={connections} onViewConnections={() => selectView('connections')} onViewLive={() => selectView('live')} />}
                 {view === 'live' && <LiveWorkspacePanel presence={presence} queries={queries} connections={connections} />}
                 {view === 'connections' && <ConnectionsPanel connections={connections} presence={presence} />}
                 {view === 'users' && <UsersPanel users={users} onAdd={addUser} onRequestRemove={setConfirmRemoveUser} busyUsername={userAction} />}
@@ -320,10 +343,10 @@ function UsersPanel({
         <p className="mt-2 text-[11px] text-slate-600">User must also exist in LDAP. Existing sessions are not changed when access is added.</p>
       </form>
 
-      <div className="overflow-x-auto rounded-lg border border-surface-800 bg-surface-900">
-        <table className="w-full min-w-[650px] text-left text-xs">
+      <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
+        <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">LDAP access policy and live workspace activity</caption>
-          <thead className="border-b border-surface-800 text-[10px] uppercase tracking-wider text-slate-600">
+          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600">
             <tr>
               <th scope="col" className="px-4 py-2">User</th>
               <th scope="col" className="px-4 py-2">Policy</th>
@@ -335,7 +358,7 @@ function UsersPanel({
           <tbody>
             {users.map(user => (
               <tr key={user.username} className="border-b border-surface-800/70 last:border-0">
-                <td className="px-4 py-3 font-medium text-slate-200">{user.username}</td>
+                <td className="break-words px-4 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
                 <td className="px-4 py-3">
                   <span className={`rounded-full px-2 py-1 text-[10px] ${user.policy_state === 'allowed' ? 'bg-green-950/40 text-green-300' : 'bg-slate-800 text-slate-500'}`}>
                     {user.policy_state === 'allowed' ? 'Allowed' : 'Observed only'}
@@ -393,14 +416,14 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
           </article>
         ))}
       </div>
-      <div className="mt-4 overflow-x-auto rounded-lg border border-surface-800 bg-surface-900">
+      <div className="relative mt-4 max-h-[24rem] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <div className="flex items-center justify-between gap-3 border-b border-surface-800 px-4 py-3">
           <div><h3 className="text-sm font-semibold">Connection posture</h3><p className="mt-1 text-xs text-slate-600">Managed profiles are read-only here; edit connections.yaml and restart Lagun.</p></div>
           <button type="button" onClick={onViewConnections} className="min-h-9 shrink-0 rounded border border-surface-700 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-surface-800">View all</button>
         </div>
-        <table className="w-full min-w-[620px] text-left text-xs">
+        <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Connection posture preview</caption>
-          <thead className="border-b border-surface-800 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-4 py-2">Connection</th><th scope="col" className="px-4 py-2">Type</th><th scope="col" className="px-4 py-2">Access</th><th scope="col" className="px-4 py-2">Scope</th></tr></thead>
+        <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-4 py-2">Connection</th><th scope="col" className="px-4 py-2">Type</th><th scope="col" className="px-4 py-2">Access</th><th scope="col" className="px-4 py-2">Scope</th></tr></thead>
           <tbody>
             {connections.slice(0, 5).map(connection => <ConnectionRow key={connection.id} connection={connection} />)}
             {connections.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-slate-600">No saved connections.</td></tr>}
@@ -414,16 +437,17 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
 function ConnectionRow({ connection }: { connection: AdminConnection }) {
   return (
     <tr className="border-b border-surface-800/70 last:border-0">
-      <td className="px-4 py-3"><div className="font-medium text-slate-200">{connection.name}</div><div className="mt-1 font-mono text-[10px] text-slate-600">{connection.host}:{connection.port}</div></td>
-      <td className="px-4 py-3">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
+      <td className="break-words px-4 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
+      <td className="break-words px-4 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
 
-      <td className="px-4 py-3 text-slate-400">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
-      <td className="px-4 py-3 text-slate-500">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
+      <td className="break-words px-4 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
+      <td className="break-words px-4 py-3 text-slate-500 [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
     </tr>
   )
 }
 function LiveWorkspacePanel({ presence, queries, connections }: { presence: AdminPresence[]; queries: AdminQuery[]; connections: AdminConnection[] }) {
   const [selectedUser, setSelectedUser] = useState<string | null>(null)
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set())
   const liveUsers = Array.from(new Set([...presence.map(item => item.username), ...queries.map(item => item.username)])).sort()
   const activeUser = selectedUser && liveUsers.includes(selectedUser) ? selectedUser : liveUsers[0] || null
   const selectedPresence = activeUser ? presence.filter(item => item.username === activeUser) : []
@@ -481,7 +505,7 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                   className={`w-full px-4 py-3 text-left transition-colors ${activeUser === username ? 'bg-brand-500/10 text-brand-200' : 'text-slate-400 hover:bg-surface-800/60 hover:text-slate-200'}`}
                 >
                   <span className="flex items-center justify-between gap-2">
-                    <strong className="truncate text-sm">{username}</strong>
+                    <strong className="break-words text-sm [overflow-wrap:anywhere]">{username}</strong>
                     {userQueries > 0 && <span className="rounded-full bg-amber-950/50 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">{userQueries} running</span>}
                   </span>
                   <span className="mt-1 block text-[10px] text-slate-600">{userSessions} session{userSessions === 1 ? '' : 's'} · {userTabs} tab{userTabs === 1 ? '' : 's'}</span>
@@ -501,21 +525,40 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
             <div className="divide-y divide-surface-800/70">
               {[...sessionTabs.entries()].map(([sessionId, tabs]) => {
                 const connection = connections.find(item => item.id === sessionId)
+                const isExpanded = expandedSessions.has(sessionId)
+                const visibleTabs = isExpanded ? tabs : tabs.slice(0, LIVE_SESSION_TAB_PREVIEW_LIMIT)
                 return (
-                  <details key={sessionId} open={tabs.length <= LIVE_SESSION_COLLAPSE_THRESHOLD} className="border-b border-surface-800/70 last:border-0">
-                    <summary className="cursor-pointer list-none px-4 py-3 hover:bg-surface-800/40 [&::-webkit-details-marker]:hidden">
-                      <div className="flex items-start justify-between gap-3">
+                  <div key={sessionId} className="border-b border-surface-800/70 last:border-0">
+                    <div className="px-4 py-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <strong className="block truncate text-sm text-slate-200">{connection?.name || sessionId}</strong>
-                          <p className="mt-1 truncate font-mono text-[10px] text-slate-600">{connection ? `${connection.host}:${connection.port} · ${connection.username}` : sessionId}</p>
+                          <strong className="block break-words text-sm text-slate-200 [overflow-wrap:anywhere]">{connection?.name || sessionId}</strong>
+                          <p className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection ? `${connection.host}:${connection.port} · ${connection.username}` : sessionId}</p>
                         </div>
                         <span className="shrink-0 font-mono text-[10px] text-slate-600">{tabs.length} tab{tabs.length === 1 ? '' : 's'}</span>
                       </div>
-                    </summary>
-                    <ul className="grid gap-1.5 px-4 pb-3">
-                      {tabs.map(tab => <li key={`${sessionId}-${tab.id}`} className="rounded border border-surface-800 bg-surface-950/50 px-2.5 py-2 text-[11px] text-slate-400"><div className="flex items-center gap-1.5"><PanelsTopLeft className="h-3 w-3 text-slate-600" /><span className="truncate">{tab.label}</span>{selectedPresence.some(item => item.active_tab_id === tab.id) && <span className="ml-auto text-[9px] uppercase tracking-wider text-brand-300">active</span>}</div><div className="mt-1 truncate font-mono text-[10px] text-slate-600">{tab.database || connection?.default_db || 'No database'}{tab.table ? ` · ${tab.table}` : ''}</div></li>)}
+                    </div>
+                    <ul className="grid gap-1.5 px-4 pb-3" aria-label={`${connection?.name || sessionId} tabs`}>
+                      {visibleTabs.map(tab => <LivePresenceTab key={`${sessionId}-${tab.id}`} tab={tab} active={selectedPresence.some(item => item.active_tab_id === tab.id)} defaultDatabase={connection?.default_db} />)}
                     </ul>
-                  </details>
+                    {tabs.length > LIVE_SESSION_TAB_PREVIEW_LIMIT && (
+                      <div className="px-4 pb-3">
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          onClick={() => setExpandedSessions(current => {
+                            const next = new Set(current)
+                            if (next.has(sessionId)) next.delete(sessionId)
+                            else next.add(sessionId)
+                            return next
+                          })}
+                          className="inline-flex min-h-8 items-center rounded px-1.5 text-[10px] text-brand-300 hover:bg-surface-800 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                        >
+                          {isExpanded ? 'Show fewer tabs' : `Show all ${tabs.length} tabs`}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )
               })}
               {activeUser && sessionTabs.size === 0 && <p className="px-4 py-10 text-center text-xs text-slate-600">No open tabs currently reported.</p>}
@@ -534,19 +577,19 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                 const isLargeQuery = sql.length > LIVE_QUERY_COLLAPSE_THRESHOLD
                 return (
                   <article key={`${item.session_id}-${item.execution_id}`} className="px-4 py-3">
-                    <div className="flex items-center justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><span className={`h-2 w-2 rounded-full ${item.state === 'running' ? 'bg-amber-400' : 'bg-slate-500'}`} aria-hidden="true" /><span className="text-[10px] text-slate-600">{item.kind} · {item.state}</span></div><span className="shrink-0 font-mono text-[10px] text-slate-500">{formatDuration(item.elapsed_ms)}</span></div>
+                    <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><span className={`h-2 w-2 shrink-0 rounded-full ${item.state === 'running' ? 'bg-amber-400' : 'bg-slate-500'}`} aria-hidden="true" /><span className="break-words text-[10px] text-slate-600 [overflow-wrap:anywhere]">{item.kind} · {item.state}</span></div><span className="shrink-0 font-mono text-[10px] text-slate-500">{formatDuration(item.elapsed_ms)}</span></div>
                     {isLargeQuery ? (
                       <>
                         <p className="mt-2 line-clamp-2 rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-500">{sql.slice(0, 200)}…</p>
                         <details className="mt-2">
                           <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200">Show full SQL ({sql.length} characters)</summary>
-                          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-400">{sql}</pre>
+                          <pre className="mt-2 max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-400 [overflow-wrap:anywhere]">{sql}</pre>
                         </details>
                       </>
                     ) : (
-                      <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-400">{sql}</pre>
+                      <pre className="mt-2 max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-400 [overflow-wrap:anywhere]">{sql}</pre>
                     )}
-                    <p className="mt-1 truncate text-[10px] text-slate-600">{item.session_name || item.session_id}{item.database ? ` · ${item.database}` : ''}{item.tab_id ? ` · tab ${item.tab_id}` : ''}</p>
+                    <p className="mt-1 break-words text-[10px] text-slate-600 [overflow-wrap:anywhere]">{item.session_name || item.session_id}{item.database ? ` · ${item.database}` : ''}{item.tab_id ? ` · tab ${item.tab_id}` : ''}</p>
                   </article>
                 )
               })}
@@ -560,18 +603,39 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
   )
 }
 
+function LivePresenceTab({ tab, active, defaultDatabase }: { tab: AdminPresence['tabs'][number]; active: boolean; defaultDatabase?: string | null }) {
+  const isTable = tab.type === 'table'
+  const viewLabel = tab.view === 'data'
+    ? `Data view · up to ${(tab.row_limit ?? 1000).toLocaleString()} rows`
+    : 'Schema view'
+
+  return (
+    <li className="min-w-0 rounded border border-surface-800 bg-surface-950/50 px-2.5 py-2 text-[11px] text-slate-400">
+      <div className="flex min-w-0 items-start gap-1.5"><PanelsTopLeft className="mt-0.5 h-3 w-3 shrink-0 text-slate-600" /><span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{tab.label}</span>{active && <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-brand-300">active</span>}</div>
+      <div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{tab.database || defaultDatabase || 'No database'}{tab.table ? ` · ${tab.table}` : ''}{isTable ? ` · ${viewLabel}` : ''}</div>
+      {isTable && (tab.global_search || tab.where_filter) && (
+        <div className="mt-2 grid min-w-0 gap-1.5 border-t border-surface-800/80 pt-2">
+          {tab.global_search && <div className="min-w-0"><span className="text-[9px] font-semibold uppercase tracking-wider text-brand-400">Partial match</span><code className="ml-2 break-words font-mono text-[10px] text-slate-300 [overflow-wrap:anywhere]">{tab.global_search}</code></div>}
+          {tab.where_filter && <div className="min-w-0"><span className="text-[9px] font-semibold uppercase tracking-wider text-brand-400">WHERE</span><code className="mt-1 block max-h-28 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-1.5 font-mono text-[10px] leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{tab.where_filter}</code></div>}
+        </div>
+      )}
+    </li>
+  )
+}
+
 function LiveMetric({ icon: Icon, label, value }: { icon: typeof Users; label: string; value: number }) {
   return <article className="flex items-center gap-3 rounded-lg border border-surface-800 bg-surface-900 p-4"><Icon className="h-4 w-4 text-brand-400" /><div><div className="font-mono text-xl font-semibold tabular-nums text-slate-100">{value}</div><div className="text-[11px] text-slate-600">{label}</div></div></article>
 }
 
 function ConnectionsPanel({ connections, presence }: { connections: AdminConnection[]; presence: AdminPresence[] }) {
+  const [expandedTabLists, setExpandedTabLists] = useState<Set<string>>(new Set())
   return (
     <section aria-labelledby="connections-title">
       <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-slate-500">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner.</p></div>
-      <div className="overflow-x-auto rounded-lg border border-surface-800 bg-surface-900">
-        <table className="w-full min-w-[1120px] text-left text-xs">
+      <div id="connection-inventory-table" className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
+        <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Saved connection inventory and active users</caption>
-          <thead className="border-b border-surface-800 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Owner / access</th><th scope="col" className="px-3 py-2">Database identity</th><th scope="col" className="px-3 py-2">Scope</th><th scope="col" className="px-3 py-2">Connected users / tabs</th><th scope="col" className="px-3 py-2">Updated</th></tr></thead>
+          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Owner / access</th><th scope="col" className="px-3 py-2">Database identity</th><th scope="col" className="px-3 py-2">Scope</th><th scope="col" className="px-3 py-2">Connected users / tabs</th><th scope="col" className="px-3 py-2">Updated</th></tr></thead>
           <tbody>
             {connections.map(connection => {
               const activeUsers = new Map<string, string[]>()
@@ -581,12 +645,45 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
               })
               return (
                 <tr key={connection.id} className="border-b border-surface-800/70 last:border-0">
-                  <td className="px-3 py-3"><div className="font-medium text-slate-200">{connection.name}{connection.is_default && <span className="ml-2 rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 font-mono text-[10px] text-slate-600">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
-                  <td className="px-3 py-3"><div className={connection.managed ? 'text-brand-300' : 'text-slate-400'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 text-[11px] text-slate-600">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
-                  <td className="px-3 py-3 font-mono text-[11px] text-slate-400">{connection.username}</td>
-                  <td className="px-3 py-3 text-slate-400">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
-                  <td className="px-3 py-3">{activeUsers.size ? <div className="grid gap-1.5">{[...activeUsers.entries()].map(([username, labels]) => <div key={username}><div className="font-medium text-slate-300">{username} <span className="font-mono text-[10px] text-slate-600">· {labels.length} tab{labels.length === 1 ? '' : 's'}</span></div><div className="truncate text-[10px] text-slate-600" title={labels.join(' · ')}>{labels.join(' · ')}</div></div>)}</div> : <span className="text-slate-600">No active users</span>}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-slate-500">{formatDate(connection.updated_at)}</td>
+                  <td className="break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
+                  <td className="break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-slate-600 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
+                  <td className="break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
+                  <td className="break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
+                  <td className="px-3 py-3 align-top">
+                    {activeUsers.size ? (
+                      <div className="grid min-w-0 gap-2">
+                        {[...activeUsers.entries()].map(([username, labels]) => {
+                          const tabListKey = `${connection.id}:${username}`
+                          const isExpanded = expandedTabLists.has(tabListKey)
+                          const visibleLabels = isExpanded ? labels : labels.slice(0, CONNECTION_TAB_PREVIEW_LIMIT)
+                          return (
+                            <div key={username} className="min-w-0">
+                              <div className="font-medium text-slate-300">{username} <span className="font-mono text-[10px] text-slate-600">· {labels.length} tab{labels.length === 1 ? '' : 's'}</span></div>
+                              <ul className="mt-1 grid min-w-0 gap-0.5 pl-2" aria-label={`${username} tabs`}>
+                                {visibleLabels.map((label, index) => <li key={`${username}-${index}`} className="break-words text-[10px] leading-relaxed text-slate-600 [overflow-wrap:anywhere]">{label}</li>)}
+                              </ul>
+                              {labels.length > CONNECTION_TAB_PREVIEW_LIMIT && (
+                                <button
+                                  type="button"
+                                  aria-expanded={isExpanded}
+                                  onClick={() => setExpandedTabLists(current => {
+                                    const next = new Set(current)
+                                    if (next.has(tabListKey)) next.delete(tabListKey)
+                                    else next.add(tabListKey)
+                                    return next
+                                  })}
+                                  className="mt-1 inline-flex min-h-8 items-center rounded px-1.5 text-[10px] text-brand-300 hover:bg-surface-800 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                >
+                                  {isExpanded ? 'Show fewer tabs' : `Show all ${labels.length} tabs`}
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : <span className="text-slate-600">No active users</span>}
+                  </td>
+                  <td className="break-words px-3 py-3 text-slate-500 [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
                 </tr>
               )
             })}
@@ -601,24 +698,33 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
 function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEvent[]; filters: AdminActivityFilters; onApply: (filters: AdminActivityFilters) => void }) {
   const [username, setUsername] = useState(filters.username || '')
   const [path, setPath] = useState(filters.path || '')
+  const [search, setSearch] = useState(filters.search || '')
   const [since, setSince] = useState(filters.since || '')
   const [statusCode, setStatusCode] = useState(filters.statusCode ? String(filters.statusCode) : '')
 
   useEffect(() => {
     setUsername(filters.username || '')
     setPath(filters.path || '')
+    setSearch(filters.search || '')
     setSince(filters.since || '')
     setStatusCode(filters.statusCode ? String(filters.statusCode) : '')
   }, [filters])
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    onApply({ username, path, since, statusCode: statusCode ? Number(statusCode) : undefined })
+    onApply({ username, path, search, since, statusCode: statusCode ? Number(statusCode) : undefined })
+  }
+
+  const submitOnEnter = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== 'Enter' || !(event.target instanceof HTMLInputElement)) return
+    event.preventDefault()
+    event.currentTarget.requestSubmit()
   }
 
   const clear = () => {
     setUsername('')
     setPath('')
+    setSearch('')
     setSince('')
     setStatusCode('')
     onApply({})
@@ -626,25 +732,48 @@ function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEven
 
   return (
     <section aria-labelledby="activity-title">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Audit trail</p><h2 id="activity-title" className="text-xl font-semibold tracking-tight">Query &amp; API audit</h2><p className="mt-1 text-sm leading-relaxed text-slate-500">See every request body exactly as received. Expand details to inspect complete query text and API payloads.</p></div>
-      <form onSubmit={submit} className="mb-4 grid gap-2 rounded-lg border border-surface-800 bg-surface-900 p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1.4fr_0.8fr_0.7fr_auto] lg:items-end">
-        <FilterInput id="admin-activity-user" label="User" value={username} onChange={setUsername} placeholder="All users" />
+      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Audit trail</p><h2 id="activity-title" className="text-xl font-semibold tracking-tight">Query &amp; API audit</h2><p className="mt-1 text-sm leading-relaxed text-slate-500">Request targets include query parameters. Search performs a case-insensitive partial match across user, method, path, SQL, filters, and raw JSON. Press Enter to apply.</p></div>
+      <form onSubmit={submit} onKeyDown={submitOnEnter} className="mb-4 grid gap-2 rounded-lg border border-surface-800 bg-surface-900 p-3 sm:grid-cols-2 xl:grid-cols-[0.9fr_1.15fr_1.4fr_0.8fr_0.6fr_auto] xl:items-end">
+        <FilterInput id="admin-activity-user" label="User contains" value={username} onChange={setUsername} placeholder="ali" />
         <FilterInput id="admin-activity-path" label="Path contains" value={path} onChange={setPath} placeholder="/sessions" />
+        <FilterInput id="admin-activity-search" label="Partial match" value={search} onChange={setSearch} placeholder="SQL, filters, path, user…" />
         <FilterInput id="admin-activity-since" label="Since" value={since} onChange={setSince} type="date" />
         <FilterInput id="admin-activity-status" label="Status" value={statusCode} onChange={setStatusCode} placeholder="Any" inputMode="numeric" />
-        <div className="flex gap-2"><button type="submit" className="min-h-10 rounded border border-brand-700/60 px-3 py-2 text-xs text-brand-300 hover:bg-brand-950/40">Apply</button><button type="button" onClick={clear} className="min-h-10 rounded border border-surface-700 px-3 py-2 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200">Clear</button></div>
+        <div className="flex gap-2"><button type="submit" className="min-h-10 rounded border border-brand-700/60 px-3 py-2 text-xs text-brand-300 hover:bg-brand-950/40">Search</button><button type="button" onClick={clear} className="min-h-10 rounded border border-surface-700 px-3 py-2 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200">Clear</button></div>
       </form>
-      <div className="overflow-x-auto rounded-lg border border-surface-800 bg-surface-900">
-        <table className="w-full min-w-[980px] text-left text-xs">
-          <caption className="sr-only">Lagun API audit events</caption>
-          <thead className="border-b border-surface-800 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-3 py-2">When</th><th scope="col" className="px-3 py-2">Actor</th><th scope="col" className="px-3 py-2">Request</th><th scope="col" className="px-3 py-2">Status</th><th scope="col" className="px-3 py-2 text-right">Duration</th></tr></thead>
-          <tbody>
-            {events.map(event => <tr key={`${event.occurred_at}-${event.path}-${event.duration_ms}`} className="border-b border-surface-800/70 last:border-0"><td className="whitespace-nowrap px-3 py-3 text-slate-500">{formatDate(event.occurred_at)}</td><td className="px-3 py-3 font-medium text-slate-200">{event.username}</td><td className="px-3 py-3 align-top"><div className="font-mono text-[11px] text-slate-300">{event.method} {event.path}</div>{event.details && <details className="mt-2"><summary className="cursor-pointer text-[11px] text-brand-300">Show full request details</summary><pre className="mt-2 max-h-[70vh] max-w-[min(70vw,64rem)] overflow-auto whitespace-pre rounded bg-surface-950 p-2 font-mono text-[10px] leading-relaxed text-slate-400">{event.details}</pre></details>}</td><td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-emerald-950/40 text-emerald-300'}`}>{event.status_code}</span></td><td className="whitespace-nowrap px-3 py-3 text-right font-mono text-[10px] text-slate-500">{event.duration_ms} ms</td></tr>)}
-            {events.length === 0 && <tr><td colSpan={5} className="px-3 py-12 text-center text-slate-600">No matching audit events.</td></tr>}
+      <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
+        <table className="block w-full table-fixed text-left text-xs lg:table">
+          <caption className="sr-only">Lagun API audit events with raw request targets and bodies</caption>
+          <colgroup className="hidden lg:table-column-group"><col className="w-36" /><col className="w-28" /><col /><col className="w-20" /><col className="w-24" /></colgroup>
+          <thead className="hidden sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600 lg:table-header-group"><tr><th scope="col" className="px-3 py-2">When</th><th scope="col" className="px-3 py-2">Actor</th><th scope="col" className="px-3 py-2">Request</th><th scope="col" className="px-3 py-2">Status</th><th scope="col" className="px-3 py-2 text-right">Duration</th></tr></thead>
+          <tbody className="block lg:table-row-group">
+            {events.map(event => <ActivityEventRow key={`${event.occurred_at}-${event.path}-${event.duration_ms}`} event={event} />)}
+            {events.length === 0 && <tr className="block lg:table-row"><td colSpan={5} className="block px-3 py-12 text-center text-slate-600 lg:table-cell">No matching audit events.</td></tr>}
           </tbody>
         </table>
       </div>
     </section>
+  )
+}
+
+function ActivityEventRow({ event }: { event: AdminActivityEvent }) {
+  return (
+    <tr className="block border-b border-surface-800/70 px-3 py-3 last:border-0 lg:table-row lg:px-0 lg:py-0">
+      <td className="flex justify-between gap-3 py-1 text-slate-500 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">When</span><span>{formatDate(event.occurred_at)}</span></td>
+      <td className="flex min-w-0 justify-between gap-3 py-1 font-medium text-slate-200 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] font-normal uppercase tracking-wider text-slate-600 lg:hidden">Actor</span><span className="break-words [overflow-wrap:anywhere]">{event.username}</span></td>
+      <td className="min-w-0 py-2 align-top lg:px-3 lg:py-3">
+        <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">Request</span>
+        <div className="break-words font-mono text-[11px] leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{event.method} {event.path}</div>
+        {event.details && (
+          <details className="mt-2 min-w-0">
+            <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">Show raw request body ({event.details.length} characters)</summary>
+            <pre tabIndex={0} aria-label={`Raw request body for ${event.method} ${event.path}`} className="mt-2 max-h-[60vh] w-full min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[10px] leading-relaxed text-slate-400 [overflow-wrap:anywhere] lg:max-h-[32rem]">{event.details}</pre>
+          </details>
+        )}
+      </td>
+      <td className="flex justify-between gap-3 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">Status</span><span className={`rounded-full px-2 py-1 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-emerald-950/40 text-emerald-300'}`}>{event.status_code}</span></td>
+      <td className="flex justify-between gap-3 py-1 font-mono text-[10px] text-slate-500 lg:table-cell lg:px-3 lg:py-3 lg:text-right lg:align-top"><span className="font-sans uppercase tracking-wider text-slate-600 lg:hidden">Duration</span><span>{event.duration_ms} ms</span></td>
+    </tr>
   )
 }
 
@@ -653,13 +782,50 @@ function FilterInput({ id, label, value, onChange, placeholder, type = 'search',
 }
 
 function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: { retention: AdminRetention | null; days: number; onDaysChange: (days: number) => void; onRefresh: () => void; onPurge: () => void }) {
+  const minimumAge = retention?.minimum_age_days ?? 7
+  const [draftDays, setDraftDays] = useState(String(days))
+
+  useEffect(() => {
+    setDraftDays(String(days))
+  }, [days])
+
+  const commitDays = () => {
+    const parsedDays = Number.parseInt(draftDays, 10)
+    const nextDays = Number.isFinite(parsedDays)
+      ? Math.max(minimumAge, Math.min(3650, parsedDays))
+      : minimumAge
+    setDraftDays(String(nextDays))
+    if (nextDays !== days) onDaysChange(nextDays)
+  }
+
   return (
     <section aria-labelledby="retention-title" className="max-w-2xl">
       <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Lifecycle</p><h2 id="retention-title" className="text-xl font-semibold tracking-tight">Audit retention</h2><p className="mt-1 text-sm leading-relaxed text-slate-500">Remove old API audit events from Lagun's local SQLite store. Connection profiles and encrypted credentials are not affected.</p></div>
       <div className="rounded-lg border border-surface-800 bg-surface-900 p-4 sm:p-5">
         <label htmlFor="admin-retention-days" className="text-xs font-medium text-slate-300">Delete events older than</label>
-        <div className="mt-2 flex flex-wrap items-center gap-2"><input id="admin-retention-days" type="number" min={retention?.minimum_age_days ?? 7} max={3650} value={days} onChange={event => onDaysChange(Math.max(retention?.minimum_age_days ?? 7, Math.min(3650, Number(event.target.value) || retention?.minimum_age_days || 7)))} className="min-h-10 w-28 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-sm text-slate-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30" /><span className="text-xs text-slate-500">days</span><button type="button" onClick={onRefresh} className="ml-auto min-h-10 rounded border border-surface-700 px-3 py-2 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200">Check eligibility</button></div>
-        <dl className="mt-5 grid gap-3 border-t border-surface-800 pt-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-600">Eligible events</dt><dd className="mt-1 font-mono text-lg text-slate-200">{retention?.eligible_count ?? '—'}</dd></div><div><dt className="text-slate-600">Minimum age</dt><dd className="mt-1 font-mono text-lg text-slate-200">{retention?.minimum_age_days ?? 7} days</dd></div><div><dt className="text-slate-600">Scope</dt><dd className="mt-1 text-slate-400">Audit events only</dd></div></dl>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            id="admin-retention-days"
+            type="number"
+            min={minimumAge}
+            max={3650}
+            value={draftDays}
+            onChange={event => {
+              if (/^\d*$/.test(event.target.value)) setDraftDays(event.target.value)
+            }}
+            onBlur={commitDays}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitDays()
+              }
+            }}
+            className="min-h-10 w-28 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-sm text-slate-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"
+          />
+          <span className="text-xs text-slate-500">days</span>
+          <button type="button" onClick={onRefresh} className="ml-auto min-h-10 rounded border border-surface-700 px-3 py-2 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200">Check eligibility</button>
+        </div>
+        <dl className="mt-5 grid gap-3 border-t border-surface-800 pt-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-600">Eligible events</dt><dd className="mt-1 font-mono text-lg text-slate-200">{retention?.eligible_count ?? '—'}</dd></div><div><dt className="text-slate-600">Minimum age</dt><dd className="mt-1 font-mono text-lg text-slate-200">{minimumAge} days</dd></div><div><dt className="text-slate-600">Scope</dt><dd className="mt-1 text-slate-400">Audit events only</dd></div></dl>
         <button type="button" disabled={!retention?.eligible_count} onClick={onPurge} className="mt-5 min-h-10 rounded border border-red-900/60 px-3 py-2 text-xs text-red-300 hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-40">Review purge</button>
       </div>
     </section>
