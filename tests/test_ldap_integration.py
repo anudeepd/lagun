@@ -49,7 +49,7 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert 'id="password"' in template
     assert 'type="password"' in template
     assert 'class="password-toggle"' in template
-    assert "::-ms-reveal" not in template
+    assert 'input[type="password"]::-ms-reveal' in template
     assert "::-moz-reveal" not in template
     assert 'class="feedback-slot" aria-live="polite"' in template
     assert "sessionStorage.setItem(usernameStorageKey, username.value);" in template
@@ -77,7 +77,7 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert "event.preventDefault();" in template
     assert "requestAnimationFrame(function() {" in template
     assert "HTMLFormElement.prototype.submit.call(loginForm);" in template
-    assert "::-ms-reveal" not in template
+    assert 'input[type="password"]::-ms-reveal' in template
     assert "::-webkit-credentials-auto-fill-button" not in template
     assert "::-webkit-textfield-decoration-container" not in template
     assert "@-moz-document" not in template
