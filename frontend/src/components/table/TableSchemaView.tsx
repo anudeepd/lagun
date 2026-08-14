@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, Code2, Key } from 'lucide-react'
 import SyntaxHighlighter from 'react-syntax-highlighter'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
@@ -19,6 +19,8 @@ interface Props {
   sessionId: string
   database: string
   table: string
+  /** Increment to force a refetch (e.g. when the schema view becomes active again). */
+  refreshTrigger?: number
 }
 
 function fmtBytes(bytes: number | null) {
@@ -28,7 +30,7 @@ function fmtBytes(bytes: number | null) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function TableSchemaView({ sessionId, database, table }: Props) {
+export default function TableSchemaView({ sessionId, database, table, refreshTrigger = 0 }: Props) {
   const { columns: colCache, loadColumns, invalidateTable } = useSchemaStore()
   const colKey = `${sessionId}/${database}/${table}`
   const cachedCols = colCache[colKey]
@@ -108,6 +110,16 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
     return () => controller.abort()
   }, [sessionId, database, table, reload])
 
+  // Re-fetch when the parent bumps `refreshTrigger` (i.e. when switching back
+  // to the Schema tab) so the row count isn't stale. Initial mount is handled
+  // by the effect above; this ref guard skips that first run.
+  const lastRefreshTriggerRef = useRef(refreshTrigger)
+  useEffect(() => {
+    if (refreshTrigger === lastRefreshTriggerRef.current) return
+    lastRefreshTriggerRef.current = refreshTrigger
+    reload()
+  }, [refreshTrigger, reload])
+
   const handleTruncate = async () => {
     try {
       await api.truncateTable(sessionId, database, table)
@@ -180,24 +192,39 @@ export default function TableSchemaView({ sessionId, database, table }: Props) {
         </div>
         <div className="max-h-[50vh] overflow-auto border border-surface-700 rounded-md">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 z-10 bg-surface-800 text-slate-400">
+            <thead className="sticky top-0 z-20 bg-surface-800 text-slate-400">
               <tr>
-                {['Name', 'Type', 'Nullable', 'Default', 'Key', 'Extra', 'Comment', ''].map(h => (
-                  <th key={h} className="text-left px-2 py-1.5 font-medium">{h}</th>
-                ))}
+                <th key="#" className="sticky left-0 z-20 bg-surface-800 w-10 text-right px-2 py-1.5 font-medium">#</th>
+                <th className="sticky left-10 z-10 bg-surface-800 text-left px-2 py-1.5 font-medium min-w-[10rem]">Name</th>
+                <th className="text-left px-2 py-1.5 font-medium min-w-[8rem]">Type</th>
+                <th className="text-left px-2 py-1.5 font-medium min-w-[5rem]">Nullable</th>
+                <th className="text-left px-2 py-1.5 font-medium min-w-[8rem]">Default</th>
+                <th className="text-left px-2 py-1.5 font-medium min-w-[4rem]">Key</th>
+                <th className="text-left px-2 py-1.5 font-medium min-w-[6rem]">Extra</th>
+                <th className="text-left px-2 py-1.5 font-medium min-w-[10rem]">Comment</th>
+                <th className="sticky right-0 z-20 bg-surface-800 text-left px-2 py-1.5 font-medium w-16" />
               </tr>
             </thead>
             <tbody>
-              {columns.map(col => (
-                <tr key={col.name} className="border-t border-surface-700 hover:bg-surface-800/50">
-                  <td className="px-2 py-1.5 font-mono text-slate-200">{col.name}</td>
-                  <td className="px-2 py-1.5 text-slate-300">{col.column_type}</td>
-                  <td className="px-2 py-1.5 text-slate-400">{col.is_nullable ? 'YES' : 'NO'}</td>
-                  <td className="px-2 py-1.5 text-slate-400 font-mono">{col.column_default ?? <span className="italic text-slate-600">NULL</span>}</td>
-                  <td className="px-2 py-1.5 text-slate-400">{col.is_primary_key ? 'PRI' : ''}</td>
-                  <td className="px-2 py-1.5 text-slate-400">{col.extra}</td>
-                  <td className="px-2 py-1.5 text-slate-500 italic">{col.comment}</td>
-                  <td className="px-2 py-1.5">
+              {columns.map((col, idx) => (
+                <tr key={col.name} className="border-t border-surface-700 hover:bg-surface-800/50 group">
+                  <td className="sticky left-0 z-[1] bg-surface-900 group-hover:bg-surface-800/50 w-10 text-right px-2 py-1.5 text-slate-500 tabular-nums">{idx + 1}</td>
+                  <td className="sticky left-10 z-[1] bg-surface-900 group-hover:bg-surface-800/50 min-w-[10rem] px-2 py-1.5 font-mono text-slate-200">
+                    <span className="block truncate max-w-[12rem]" title={col.name}>{col.name}</span>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-300 min-w-[8rem]">
+                    <span className="block truncate max-w-[12rem]" title={col.column_type}>{col.column_type}</span>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-400 min-w-[5rem]">{col.is_nullable ? 'YES' : 'NO'}</td>
+                  <td className="px-2 py-1.5 text-slate-400 font-mono min-w-[8rem]">
+                    <span className="block truncate max-w-[12rem]" title={col.column_default ?? 'NULL'}>{col.column_default ?? <span className="italic text-slate-600">NULL</span>}</span>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-400 min-w-[4rem]">{col.is_primary_key ? 'PRI' : ''}</td>
+                  <td className="px-2 py-1.5 text-slate-400 min-w-[6rem]">{col.extra}</td>
+                  <td className="px-2 py-1.5 text-slate-500 italic min-w-[10rem]">
+                    <span className="block truncate max-w-[16rem]" title={col.comment}>{col.comment}</span>
+                  </td>
+                  <td className="sticky right-0 z-[1] bg-surface-900 group-hover:bg-surface-800/50 w-16 px-2 py-1.5">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => setEditCol(col)}

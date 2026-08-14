@@ -610,6 +610,15 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
         if await _is_query_cancelled(execution_key):
             raise _QueryCancelled
         pool, session = await _get_pool_or_404(session_id)
+        if (
+            req.database
+            and session.selected_databases
+            and req.database not in session.selected_databases
+        ):
+            raise HTTPException(
+                403,
+                f"Database '{req.database}' is not in this connection's allowed databases.",
+            )
         sql = req.sql.strip().rstrip(";").strip()
         limit = req.limit or session.query_limit
 

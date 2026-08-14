@@ -25,16 +25,18 @@ from lagun.models.schema import (
 router = APIRouter(tags=["table_ops"])
 
 
-async def _pool(session_id: str):
+async def _pool(session_id: str, db: str | None = None):
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
+    if db and s.selected_databases and db not in s.selected_databases:
+        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
     return await get_pool(session_id)
 
 
 @router.post("/sessions/{session_id}/databases/{db}/tables", status_code=201)
 async def create_table(session_id: str, db: str, req: CreateTableRequest):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     db_q = quote_ident(db)
     tbl_q = quote_ident(req.name)
 
@@ -76,7 +78,7 @@ async def create_table(session_id: str, db: str, req: CreateTableRequest):
 
 @router.delete("/sessions/{session_id}/databases/{db}/tables/{table}")
 async def drop_table(session_id: str, db: str, table: str):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     sql = f"DROP TABLE {quote_ident(db)}.{quote_ident(table)}"
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -86,7 +88,7 @@ async def drop_table(session_id: str, db: str, table: str):
 
 @router.post("/sessions/{session_id}/databases/{db}/tables/{table}/truncate")
 async def truncate_table(session_id: str, db: str, table: str):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     sql = f"TRUNCATE TABLE {quote_ident(db)}.{quote_ident(table)}"
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -98,7 +100,7 @@ async def truncate_table(session_id: str, db: str, table: str):
     "/sessions/{session_id}/databases/{db}/tables/{table}/indexes", status_code=201
 )
 async def create_index(session_id: str, db: str, table: str, req: CreateIndexRequest):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     unique = "UNIQUE " if req.unique else ""
     cols = ", ".join(quote_ident(c) for c in req.columns)
     idx_q = quote_ident(req.name)
@@ -115,7 +117,7 @@ async def create_index(session_id: str, db: str, table: str, req: CreateIndexReq
     "/sessions/{session_id}/databases/{db}/tables/{table}/indexes/{index_name}"
 )
 async def drop_index(session_id: str, db: str, table: str, index_name: str):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     sql = f"DROP INDEX {quote_ident(index_name)} ON {quote_ident(db)}.{quote_ident(table)}"
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -131,7 +133,7 @@ async def set_primary_key(
 ):
     if not req.columns:
         raise HTTPException(400, "At least one column is required for primary key")
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     db_q = quote_ident(db)
     tbl_q = quote_ident(table)
     cols = ", ".join(quote_ident(c) for c in req.columns)
@@ -161,7 +163,7 @@ async def set_primary_key(
 
 @router.delete("/sessions/{session_id}/databases/{db}/tables/{table}/primary-key")
 async def drop_primary_key(session_id: str, db: str, table: str):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     sql = f"ALTER TABLE {quote_ident(db)}.{quote_ident(table)} DROP PRIMARY KEY"
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -173,7 +175,7 @@ async def drop_primary_key(session_id: str, db: str, table: str):
     "/sessions/{session_id}/databases/{db}/tables/{table}/columns", status_code=201
 )
 async def add_column(session_id: str, db: str, table: str, req: AddColumnRequest):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     col_q = quote_ident(req.name)
     col_type = validate_col_type(req.type)
     nullable = "" if req.nullable else " NOT NULL"
@@ -193,7 +195,7 @@ async def add_column(session_id: str, db: str, table: str, req: AddColumnRequest
 async def modify_column(
     session_id: str, db: str, table: str, column: str, req: ModifyColumnRequest
 ):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     new_name = req.name or column
     col_type = validate_col_type(req.type)
     if req.nullable is True:
@@ -225,7 +227,7 @@ async def modify_column(
 
 @router.delete("/sessions/{session_id}/databases/{db}/tables/{table}/columns/{column}")
 async def drop_column(session_id: str, db: str, table: str, column: str):
-    pool = await _pool(session_id)
+    pool = await _pool(session_id, db)
     sql = (
         f"ALTER TABLE {quote_ident(db)}.{quote_ident(table)} "
         f"DROP COLUMN {quote_ident(column)}"

@@ -34,6 +34,13 @@
   background: var(--lagun-surface);
 }
 
+/* While a data-tab search/refresh is running, Lagun renders its own
+   "Searching…" overlay. Hide AG Grid's built-in "No Rows To Show" overlay
+   so the two never visually overlap. */
+.lagun-grid-searching .ag-overlay-no-rows-center {
+  display: none !important;
+}
+
 @keyframes lagun-refresh-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

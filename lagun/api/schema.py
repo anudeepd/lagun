@@ -1,6 +1,9 @@
 """Schema browser API endpoints."""
 
-from fastapi import APIRouter, HTTPException
+import logging
+import time
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, SYSTEM_DBS
@@ -8,12 +11,59 @@ from lagun.models.schema import ColumnInfo, IndexInfo, TableInfo
 
 router = APIRouter(tags=["schema"])
 
+logger = logging.getLogger(__name__)
+
+_ANALYZE_SIZE_LIMIT_BYTES = 1 << 30  # 1 GiB
+_ANALYZE_THROTTLE_SECONDS = 60.0
+_last_analyze: dict[tuple[str, str], float] = {}
+
+
+def invalidate_analyze_cache(session_id: str | None = None) -> None:
+    """Clear ANALYZE throttle entries. Pass session_id to clear one session; None to clear all."""
+    if session_id is None:
+        _last_analyze.clear()
+    else:
+        keys_to_remove = [k for k in _last_analyze if k[0] == session_id]
+        for k in keys_to_remove:
+            del _last_analyze[k]
+
 
 async def _get_pool_or_404(session_id: str):
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
     return await get_pool(session_id)
+
+
+async def _analyze_tables_background(
+    session_id: str, db: str, targets: list[tuple[str, int]]
+) -> None:
+    """Run ANALYZE TABLE for small tables in the background.
+
+    Errors are logged, never raised. Tables at or above the size limit keep
+    whatever stats InnoDB has cached; only small tables get a stats refresh.
+    """
+    try:
+        qualified = []
+        for name, data_length in targets:
+            if data_length >= _ANALYZE_SIZE_LIMIT_BYTES:
+                continue
+            try:
+                qualified.append(f"{quote_ident(db)}.{quote_ident(name)}")
+            except ValueError:
+                continue
+        if not qualified:
+            return
+        pool = await get_pool(session_id)
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(f"ANALYZE TABLE {', '.join(qualified)}")
+    except Exception:
+        logger.warning(
+            "background ANALYZE TABLE failed for database %r; using cached stats",
+            db,
+            exc_info=True,
+        )
 
 
 @router.get("/sessions/{session_id}/databases")
@@ -27,10 +77,26 @@ async def list_databases(session_id: str) -> list[str]:
 
 
 @router.get("/sessions/{session_id}/databases/{db}/tables")
-async def list_tables(session_id: str, db: str) -> list[TableInfo]:
-    pool = await _get_pool_or_404(session_id)
+async def list_tables(
+    session_id: str, db: str, background_tasks: BackgroundTasks
+) -> list[TableInfo]:
+    s = await get_session(session_id)
+    if not s:
+        raise HTTPException(404, "Session not found")
+    if s.selected_databases and db not in s.selected_databases:
+        raise HTTPException(
+            403,
+            f"Database '{db}' is not in this connection's allowed databases.",
+        )
+    pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # information_schema.TABLES.TABLE_ROWS is a sampling-based InnoDB
+            # estimate that lags behind reality. ANALYZE TABLE forces a stats
+            # refresh so the schema view doesn't report a stale row count.
+            # (COUNT(*) would be exact but too slow on large tables.)
+            # The ANALYZE is scheduled as a background task below, so this
+            # response returns immediately even for huge tables.
             await cur.execute(
                 """SELECT TABLE_NAME, TABLE_TYPE, ENGINE,
                           TABLE_ROWS, DATA_LENGTH, TABLE_COMMENT
@@ -40,7 +106,7 @@ async def list_tables(session_id: str, db: str) -> list[TableInfo]:
                 (db,),
             )
             rows = await cur.fetchall()
-    return [
+    tables = [
         TableInfo(
             name=r[0],
             table_type=r[1],
@@ -51,11 +117,24 @@ async def list_tables(session_id: str, db: str) -> list[TableInfo]:
         )
         for r in rows
     ]
+    key = (session_id, db)
+    now = time.monotonic()
+    if now - _last_analyze.get(key, float("-inf")) >= _ANALYZE_THROTTLE_SECONDS:
+        _last_analyze[key] = now
+        # Non-data tables (e.g. views) report NULL DATA_LENGTH; skip them.
+        targets = [(r[0], r[4]) for r in rows if r[4] is not None]
+        background_tasks.add_task(_analyze_tables_background, session_id, db, targets)
+    return tables
 
 
 @router.get("/sessions/{session_id}/databases/{db}/tables/{table}/columns")
 async def list_columns(session_id: str, db: str, table: str) -> list[ColumnInfo]:
-    pool = await _get_pool_or_404(session_id)
+    s = await get_session(session_id)
+    if not s:
+        raise HTTPException(404, "Session not found")
+    if s.selected_databases and db not in s.selected_databases:
+        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+    pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -86,7 +165,12 @@ async def list_columns(session_id: str, db: str, table: str) -> list[ColumnInfo]
 
 @router.get("/sessions/{session_id}/databases/{db}/tables/{table}/indexes")
 async def list_indexes(session_id: str, db: str, table: str) -> list[IndexInfo]:
-    pool = await _get_pool_or_404(session_id)
+    s = await get_session(session_id)
+    if not s:
+        raise HTTPException(404, "Session not found")
+    if s.selected_databases and db not in s.selected_databases:
+        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+    pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -115,7 +199,12 @@ async def list_indexes(session_id: str, db: str, table: str) -> list[IndexInfo]:
 
 @router.get("/sessions/{session_id}/databases/{db}/functions")
 async def list_functions(session_id: str, db: str) -> list[str]:
-    pool = await _get_pool_or_404(session_id)
+    s = await get_session(session_id)
+    if not s:
+        raise HTTPException(404, "Session not found")
+    if s.selected_databases and db not in s.selected_databases:
+        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+    pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -131,7 +220,12 @@ async def list_functions(session_id: str, db: str) -> list[str]:
 
 @router.get("/sessions/{session_id}/databases/{db}/tables/{table}/create_sql")
 async def get_create_sql(session_id: str, db: str, table: str) -> dict:
-    pool = await _get_pool_or_404(session_id)
+    s = await get_session(session_id)
+    if not s:
+        raise HTTPException(404, "Session not found")
+    if s.selected_databases and db not in s.selected_databases:
+        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+    pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(

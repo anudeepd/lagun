@@ -6,7 +6,7 @@ import Input from '../ui/Input'
 import RefreshIcon from '../ui/RefreshIcon'
 import { useSessionStore } from '../../store/sessionStore'
 import { api } from '../../api/client'
-import type { Session } from '../../types'
+import type { Session, SessionUpdate } from '../../types'
 
 interface Props {
   open: boolean
@@ -40,6 +40,8 @@ export default function SessionForm({ open, onClose, session }: Props) {
   const [fetchingDbs, setFetchingDbs] = useState(false)
   const [fetchDbError, setFetchDbError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const isManaged = !!session?.managed
+  const managedLock = 'Managed in connections.yaml — ask an admin to change.'
   const nameRef = useRef<HTMLInputElement>(null)
   const usernameRef = useRef<HTMLInputElement>(null)
   const portRef = useRef<HTMLInputElement>(null)
@@ -113,7 +115,13 @@ export default function SessionForm({ open, onClose, session }: Props) {
         selected_databases: selectedDbs,
       }
       if (session) {
-        await updateSession(session.id, data)
+        // Managed sessions lock the connection-identity fields on the backend.
+        // The password input is also disabled when managed (so form.password is
+        // always empty here), so only selected_databases can change.
+        const payload: SessionUpdate = session.managed
+          ? { selected_databases: selectedDbs }
+          : data
+        await updateSession(session.id, payload)
       } else {
         await createSession({ ...data, password: form.password })
       }
@@ -221,21 +229,21 @@ export default function SessionForm({ open, onClose, session }: Props) {
         )}
         {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
 
-        <Input ref={nameRef} label="Connection Name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="My Database" />
+        <Input ref={nameRef} label="Connection Name" value={form.name} onChange={e => set('name', e.target.value)} placeholder="My Database" disabled={isManaged} title={isManaged ? managedLock : undefined} />
         <div className="grid grid-cols-3 gap-2">
           <div className="col-span-2">
-            <Input label="Host" value={form.host} onChange={e => set('host', e.target.value)} placeholder="localhost" />
+            <Input label="Host" value={form.host} onChange={e => set('host', e.target.value)} placeholder="localhost" disabled={isManaged} title={isManaged ? managedLock : undefined} />
           </div>
-          <Input ref={portRef} label="Port" type="number" value={form.port} onChange={e => set('port', e.target.value)} />
+          <Input ref={portRef} label="Port" type="number" value={form.port} onChange={e => set('port', e.target.value)} disabled={isManaged} title={isManaged ? managedLock : undefined} />
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Input ref={usernameRef} label="Username" value={form.username} onChange={e => set('username', e.target.value)} placeholder="root" />
-          <Input label="Password" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder={session ? '(unchanged)' : ''} />
+          <Input ref={usernameRef} label="Username" value={form.username} onChange={e => set('username', e.target.value)} placeholder="root" disabled={isManaged} title={isManaged ? managedLock : undefined} />
+          <Input label="Password" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder={session ? '(unchanged)' : ''} disabled={isManaged} title={isManaged ? managedLock : undefined} />
         </div>
-        <Input label="Default Database (optional)" value={form.default_db} onChange={e => set('default_db', e.target.value)} placeholder="my_db" />
-        <Input ref={queryLimitRef} label="Row Limit" type="number" value={form.query_limit} onChange={e => set('query_limit', e.target.value)} />
-        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-          <input type="checkbox" checked={form.ssl_enabled as boolean} onChange={e => set('ssl_enabled', e.target.checked)} className="rounded" />
+        <Input label="Default Database (optional)" value={form.default_db} onChange={e => set('default_db', e.target.value)} placeholder="my_db" disabled={isManaged} title={isManaged ? managedLock : undefined} />
+        <Input ref={queryLimitRef} label="Row Limit" type="number" value={form.query_limit} onChange={e => set('query_limit', e.target.value)} disabled={isManaged} title={isManaged ? managedLock : undefined} />
+        <label className={`flex items-center gap-2 text-sm text-slate-300 ${isManaged ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+          <input type="checkbox" checked={form.ssl_enabled as boolean} onChange={e => set('ssl_enabled', e.target.checked)} className="rounded" disabled={isManaged} title={isManaged ? managedLock : undefined} />
           Enable SSL
         </label>
 

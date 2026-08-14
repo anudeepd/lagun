@@ -340,7 +340,14 @@ async def delete_session(session_id: str) -> bool:
     async with _connect() as db:
         cur = await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         await db.commit()
-        return cur.rowcount > 0
+        ok = cur.rowcount > 0
+    if ok:
+        # Drop ANALYZE throttle entries cached for this session (schema.py).
+        # Deferred import keeps the schema -> session_store dependency acyclic.
+        from lagun.api.schema import invalidate_analyze_cache
+
+        invalidate_analyze_cache(session_id)
+    return ok
 
 
 async def can_access_session(session_id: str, username: str) -> bool:

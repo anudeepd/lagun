@@ -21,6 +21,30 @@ from lagun.models.session import (
 
 router = APIRouter(tags=["sessions"])
 
+# Fields on managed (connections.yaml) sessions that only an admin may change.
+# Users may only update the selected_databases subset.
+_MANAGED_LOCKED_FIELDS = (
+    "name",
+    "host",
+    "port",
+    "username",
+    "password",
+    "default_db",
+    "query_limit",
+    "ssl_enabled",
+)
+
+# Fields that change the live DB connection. Only updates touching these
+# require tearing down the connection pool so reconnects pick up new credentials.
+_CREDENTIAL_FIELDS = {
+    "host",
+    "port",
+    "username",
+    "password",
+    "default_db",
+    "ssl_enabled",
+}
+
 
 @router.get("/sessions", response_model=list[SessionRead])
 async def list_sessions(request: Request):
@@ -52,10 +76,21 @@ async def update_session(session_id: str, data: SessionUpdate):
     s = await session_store.get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
+    sent_fields = set(data.model_dump(exclude_unset=True))
     if s.managed:
-        raise HTTPException(403, "This server-managed connection cannot be edited")
-    # Invalidate pool so reconnection uses updated credentials
-    await pool_mod.close_pool(session_id)
+        # Only the selected_databases subset is user-editable on managed
+        # sessions; everything else is owned by connections.yaml.
+        for field in _MANAGED_LOCKED_FIELDS:
+            if field in sent_fields:
+                raise HTTPException(
+                    403,
+                    f"Field '{field}' is locked: managed in connections.yaml — ask an admin to change.",
+                )
+    # Invalidate the pool only when a credential-relevant field is actually
+    # changing; no-op and selected_databases-only updates shouldn't force a
+    # needless reconnect.
+    if sent_fields & _CREDENTIAL_FIELDS:
+        await pool_mod.close_pool(session_id)
     return await session_store.update_session(session_id, data)
 
 

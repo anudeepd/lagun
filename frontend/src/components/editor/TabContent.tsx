@@ -907,6 +907,7 @@ function QueryTab({ tab }: Props) {
 function TableTab({ tab, active = true }: Props) {
   const initialDataState = normalizeDataTabState(tab.dataState)
   const [view, setView] = useState<'schema' | 'data'>(initialDataState.view)
+  const [schemaRefreshTrigger, setSchemaRefreshTrigger] = useState(0)
   const [schemaVisited, setSchemaVisited] = useState(initialDataState.view === 'schema')
   const [dataVisited, setDataVisited] = useState(initialDataState.view === 'data')
   const [result, setResult] = useState<QueryResult | null>(null)
@@ -1090,12 +1091,21 @@ function TableTab({ tab, active = true }: Props) {
     }
   }, [tab.id, tab.sessionId, tab.database, tab.table])
 
+  const prevViewRef = useRef<'schema' | 'data'>(view)
+
   useEffect(() => {
+    const prevView = prevViewRef.current
+    prevViewRef.current = view
     if (view === 'data') {
       setDataVisited(true)
       loadDataRef.current()
     } else {
       setSchemaVisited(true)
+      // Only bump the trigger on an actual schema→…→schema switch, not on the
+      // initial mount, so TableSchemaView refetches its (possibly stale) row count.
+      if (prevView !== view) {
+        setSchemaRefreshTrigger(n => n + 1)
+      }
     }
     // result intentionally omitted — adding it would cause infinite reload on every data fetch
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1948,6 +1958,7 @@ function TableTab({ tab, active = true }: Props) {
                 sessionId={tab.sessionId}
                 database={tab.database}
                 table={tab.table}
+                refreshTrigger={schemaRefreshTrigger}
               />
             </Suspense>
           </m.div>
@@ -1970,7 +1981,7 @@ function TableTab({ tab, active = true }: Props) {
             <LoadingState label={initialLoading ? `Loading rows from ${tab.table}…` : 'Searching…'} />
           ) : result ? (
           <Suspense fallback={<LoadingState label="Preparing data grid…" />}>
-            <div className="relative h-full lagun-grid-surface">
+            <div className={`relative h-full lagun-grid-surface${refreshing ? ' lagun-grid-searching' : ''}`}>
             <ResultGrid
                 ref={gridRef}
                 result={result}
