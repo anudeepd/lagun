@@ -11,7 +11,7 @@ import { AnimatePresence } from 'motion/react'
 import QueryErrorState from './QueryErrorState'
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
-  getFilteredData: () => { columns: string[], rows: unknown[][] }
+  getFilteredData: () => ExportOverrideData
   stopEditing: () => void
   deselectAll: () => void
   clearSort: () => void
@@ -23,7 +23,7 @@ export interface InsertDraftAnchor {
 }
 export type DuplicateRowMode = 'withKeys' | 'withoutKeys'
 import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
-import type { QueryResult, ColumnInfo } from '../../types'
+import type { QueryResult, ColumnInfo, ExportOverrideData } from '../../types'
 import { clipboardWrite } from '../../utils/clipboard'
 import { buildResultGridRowId } from '../../utils/rowIdentity'
 
@@ -256,7 +256,11 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       agApiRef.current?.forEachNodeAfterFilterAndSort(node => {
         if (node.data) rows.push(visibleColumns.map(col => node.data[col] ?? null))
       })
-      return { columns: visibleColumns, rows }
+      return {
+        columns: visibleColumns,
+        rows,
+        autoIncrementColumns: (columns ?? []).filter(c => c.is_auto_increment).map(c => c.name),
+      }
     },
     stopEditing: () => { agApiRef.current?.stopEditing() },
     deselectAll: () => { agApiRef.current?.deselectAll() },

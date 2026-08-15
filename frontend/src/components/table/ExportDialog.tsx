@@ -11,6 +11,7 @@ import { showToast } from '../../utils/toast'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+import type { ExportOverrideData } from '../../types'
 
 interface Props {
   open: boolean
@@ -23,7 +24,7 @@ interface Props {
   /** When provided, export only these rows (identified by PK values) */
   pkValues?: Record<string, unknown>[]
   /** When provided, bypass backend and export these pre-fetched (filtered) rows */
-  rowsOverride?: { columns: string[], rows: unknown[][] }
+  rowsOverride?: ExportOverrideData
   /** Human-readable description for rowsOverride rows */
   rowsOverrideLabel?: string
   /** PK column names used for DELETE SQL generation when rowsOverride is set */
@@ -56,12 +57,26 @@ export const buildFrontendContent = (
   format: 'insert' | 'delete' | 'delete+insert' | 'csv',
   database: string,
   table: string,
-  data: { columns: string[], rows: unknown[][] },
+  data: ExportOverrideData,
   pkCols: string[],
   csvOpts: { delimiter: string, quoteChar: string, escapeChar: string, lineTerminator: string, encoding: string },
   insertMode: 'batch' | 'single' = 'batch',
   includeSchema = false,
+  includeAutoIncrement = true,
 ): string => {
+  // Auto-increment columns are excluded from the INSERT column list / VALUES and
+  // the CSV header/rows when the checkbox is unchecked. DELETE WHERE clauses
+  // always reference primary keys against the unfiltered row values regardless
+  // of this setting. When autoIncrementColumns is absent (e.g. raw query
+  // results), no AI filter is applied.
+  const autoInc = new Set(data.autoIncrementColumns ?? [])
+  const filterAi = !includeAutoIncrement && autoInc.size > 0
+  const colIdx = new Map(data.columns.map((c, i) => [c, i]))
+  const outCols = filterAi ? data.columns.filter(c => !autoInc.has(c)) : data.columns
+  const outRows = filterAi
+    ? data.rows.map(row => outCols.map(c => row[colIdx.get(c) ?? -1]))
+    : data.rows
+
   if (format === 'csv') {
     const { delimiter: d, quoteChar: q, escapeChar: e, lineTerminator: nl } = csvOpts
     // CSV formula injection (=, +, -, @ prefix) is intentionally not sanitized —
@@ -89,21 +104,21 @@ export const buildFrontendContent = (
       const inner = hasEscapechar ? s.split(e).join(e + e) : s
       return q + inner.split(q).join(e + q) + q
     }
-    const header = data.columns.map(c => escape(c, true)).join(d)
-    const body = [header, ...data.rows.map(r => r.map(v => escape(v)).join(d))].join(nl)
+    const header = outCols.map(c => escape(c, true)).join(d)
+    const body = [header, ...outRows.map(r => r.map(v => escape(v)).join(d))].join(nl)
     return csvOpts.encoding === 'utf-8-sig' ? '\uFEFF' + body : body
   }
 
   if (format === 'insert') {
     const target = buildQualifiedTableName(database, table, includeSchema)
-    const cols = data.columns.map(quoteIdent).join(', ')
+    const cols = outCols.map(quoteIdent).join(', ')
     if (insertMode === 'single') {
-      return data.rows.map(r => {
+      return outRows.map(r => {
         const vals = `(${r.map(sqlLiteral).join(', ')})`
         return `INSERT INTO ${target} (${cols}) VALUES ${vals};\n`
       }).join('')
     }
-    const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
+    const values = outRows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
     return `INSERT INTO ${target} (${cols}) VALUES\n${values};\n`
   }
 
@@ -121,20 +136,21 @@ export const buildFrontendContent = (
 
   if (format === 'delete') return deleteLines + '\n'
 
-  // delete+insert
-  const cols = data.columns.map(quoteIdent).join(', ')
+  // delete+insert: DELETE WHERE references PK cols against the unfiltered row;
+  // only the INSERT column list / VALUES drop auto-increment columns.
+  const cols = outCols.map(quoteIdent).join(', ')
   if (insertMode === 'single') {
-    return data.rows.map(r => {
+    return data.rows.map((r, rowIdx) => {
       const idx = effectivePks.map(pk => data.columns.indexOf(pk))
       const where = effectivePks
         .map((pk, i) => sqlPredicate(pk, idx[i] >= 0 ? r[idx[i]] : null))
         .join(' AND ')
-      const vals = `(${r.map(sqlLiteral).join(', ')})`
+      const vals = `(${outRows[rowIdx].map(sqlLiteral).join(', ')})`
       return `DELETE FROM ${target} WHERE ${where};\n` +
              `INSERT INTO ${target} (${cols}) VALUES ${vals};\n`
     }).join('')
   }
-  const values = data.rows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
+  const values = outRows.map(r => `(${r.map(sqlLiteral).join(', ')})`).join(',\n')
   return deleteLines + '\n\n' + `INSERT INTO ${target} (${cols}) VALUES\n${values};\n`
 }
 const COPY_LIMIT_BYTES = 16 * 1024 * 1024
@@ -201,6 +217,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const [insertMode, setInsertMode] = useState<'batch' | 'single'>('single')
   const [batchSize, setBatchSize] = useState('500')
   const [includeSchema, setIncludeSchema] = useState(false)
+  const [includeAutoIncrement, setIncludeAutoIncrement] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -225,6 +242,16 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
 
   const effectiveDelimiter = csvDelimiter === 'custom' ? csvDelimiterCustom : csvDelimiter
 
+  // The AI-filter checkbox only affects INSERT/CSV output (DELETE-only has no
+  // column list to filter) and only when the export source carries AI metadata.
+  // With no rowsOverride the backend path applies the filter itself, so the
+  // checkbox stays enabled there.
+  const isDeleteOnly = format === 'delete'
+  const hasAiInfo = rowsOverride
+    ? !!(rowsOverride.autoIncrementColumns?.length)
+    : !customSql
+  const aiCheckboxDisabled = isDeleteOnly || !hasAiInfo
+
   const ensureValidCsvOptions = () => {
     if (format !== 'csv') return
     if (effectiveDelimiter === csvQuotechar || (csvEscapechar && effectiveDelimiter === csvEscapechar)) {
@@ -238,6 +265,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       database,
       ...(customSql ? { sql: customSql } : { table }),
       format,
+      exclude_auto_increment: !includeAutoIncrement,
       batch_size: Number.isNaN(parsedBatchSize) || parsedBatchSize < 1 || parsedBatchSize > 10_000 ? 500 : parsedBatchSize,
       ...(format === 'insert' || format === 'delete+insert' ? { insert_mode: insertMode } : {}),
       ...(format !== 'csv' ? { include_schema: includeSchema } : {}),
@@ -266,7 +294,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     try {
       ensureValidCsvOptions()
       if (rowsOverride) {
-        const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)
+        const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema, includeAutoIncrement)
         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
@@ -302,7 +330,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       ensureValidCsvOptions()
       let text: string
       if (rowsOverride) {
-        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema)
+        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema, includeAutoIncrement)
         if (new Blob([text]).size > COPY_LIMIT_BYTES) {
           throw new Error('Copy is limited to 16 MB. Use Download for large exports.')
         }
@@ -377,6 +405,17 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             <span>Include schema name</span>
           </label>
         )}
+        <label className={`flex items-center gap-2 cursor-pointer ${aiCheckboxDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+          <input
+            type="checkbox"
+            checked={includeAutoIncrement}
+            onChange={e => setIncludeAutoIncrement(e.target.checked)}
+            disabled={aiCheckboxDisabled}
+            className="accent-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="When unchecked, auto-increment columns are excluded from INSERT values and CSV output. DELETE WHERE clauses always reference primary keys (or all columns if no primary key exists) regardless of this setting. Has no effect for DELETE-only exports. Not available for query results or when auto-increment metadata is unavailable."
+          />
+          <span className="text-xs text-slate-300">Include auto-increment columns</span>
+        </label>
         <Input
           label="Batch Size"
           type="number"

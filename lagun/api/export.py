@@ -55,6 +55,28 @@ def _where_value(column: str, value) -> str:
     return f"{quote_ident(column)} = {escape_value(value)}"
 
 
+async def _resolve_ai_columns(pool, database: str, table: str, cols: list[str]) -> set[str]:
+    """Return set of column names that are auto_increment. Raises on lookup failure."""
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                placeholders = ",".join(["%s"] * len(cols))
+                await cur.execute(
+                    f"""SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                       WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
+                       AND EXTRA LIKE '%%auto_increment%%'
+                       AND COLUMN_NAME IN ({placeholders})""",
+                    (database, table, *cols),
+                )
+                return {row[0] for row in await cur.fetchall()}
+    except Exception:
+        log.warning(
+            "Failed to resolve auto-increment columns for %s.%s; export aborted",
+            database, table, exc_info=True,
+        )
+        raise
+
+
 class ExportRequest(BaseModel):
     database: str
     table: Optional[str] = None
@@ -63,6 +85,7 @@ class ExportRequest(BaseModel):
     batch_size: int = Field(default=500, ge=1, le=10_000)
     insert_mode: Literal["batch", "single"] = "single"
     include_schema: bool = False
+    exclude_auto_increment: bool = False
     pk_values: Optional[list[dict[str, object]]] = None
     csv_delimiter: str = ","
     csv_quotechar: str = '"'
@@ -173,7 +196,11 @@ async def _export_response(session_id: str, req: ExportRequest):
                 await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
-                cols_sql = ", ".join(quote_ident(c) for c in cols)
+                cols_filtered = cols
+                if req.exclude_auto_increment and req.table:
+                    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
+                    cols_filtered = [c for c in cols if c not in ai_cols]
+                cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
                 tbl = req.table or "exported_data"
                 tbl_q = _target_table_sql(req.database, tbl, req.include_schema)
                 tbl_label = _target_table_label(req.database, tbl, req.include_schema)
@@ -187,7 +214,8 @@ async def _export_response(session_id: str, req: ExportRequest):
                         if not rows:
                             break
                         for row in rows:
-                            vals = ", ".join(escape_value(v) for v in row)
+                            row_dict = dict(zip(cols, row))
+                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
                             buf.write(
                                 f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
                             )
@@ -206,7 +234,8 @@ async def _export_response(session_id: str, req: ExportRequest):
                                 buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
                             else:
                                 buf.write(",\n")
-                            vals = ", ".join(escape_value(v) for v in row)
+                            row_dict = dict(zip(cols, row))
+                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
                             buf.write(f"({vals})")
                             rows_in_statement += 1
                             if rows_in_statement == req.batch_size:
@@ -276,7 +305,11 @@ async def _export_response(session_id: str, req: ExportRequest):
                 )
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
-                cols_sql = ", ".join(quote_ident(c) for c in cols)
+                cols_filtered = cols
+                if req.exclude_auto_increment and req.table:
+                    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
+                    cols_filtered = [c for c in cols if c not in ai_cols]
+                cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
                 where_cols = pk_cols if pk_cols else cols
 
                 yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE+INSERT ({req.insert_mode})\n\n"
@@ -291,7 +324,7 @@ async def _export_response(session_id: str, req: ExportRequest):
                             where = " AND ".join(
                                 _where_value(c, row_dict[c]) for c in where_cols
                             )
-                            vals = ", ".join(escape_value(v) for v in row)
+                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
                             buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
                             buf.write(
                                 f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
@@ -316,7 +349,8 @@ async def _export_response(session_id: str, req: ExportRequest):
                             buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
                         buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
                         for index, row in enumerate(rows):
-                            vals = ", ".join(escape_value(v) for v in row)
+                            row_dict = dict(zip(cols, row))
+                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
                             buf.write((",\n" if index else "") + f"({vals})")
                         buf.write(";\n")
                         yield buf.getvalue()
@@ -347,18 +381,26 @@ async def _export_response(session_id: str, req: ExportRequest):
                 await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
+                cols_filtered = cols
+                if req.exclude_auto_increment and req.table:
+                    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
+                    cols_filtered = [c for c in cols if c not in ai_cols]
                 if req.csv_encoding == "utf-8-sig":
                     yield b"\xef\xbb\xbf"
 
                 buf = io.StringIO()
                 writer = csv.writer(buf, **writer_kwargs)
-                writer.writerow(cols)
+                writer.writerow(cols_filtered)
                 while True:
                     rows = await cur.fetchmany(fetch_size)
                     if not rows:
                         break
                     for row in rows:
-                        writer.writerow("" if value is None else value for value in row)
+                        row_dict = dict(zip(cols, row))
+                        writer.writerow(
+                            "" if row_dict[c] is None else row_dict[c]
+                            for c in cols_filtered
+                        )
                         if buf.tell() >= _EXPORT_STREAM_CHARS:
                             yield buf.getvalue().encode(byte_enc, errors=enc_errors)
                             buf.seek(0)

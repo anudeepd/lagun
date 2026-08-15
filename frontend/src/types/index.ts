@@ -66,6 +66,14 @@ export interface QueryResult {
   timings?: QueryTimings | null
 }
 
+/** Pre-fetched export data. autoIncrementColumns is absent when unknown
+ *  (e.g. raw query results) — in that case no AI filtering is applied. */
+export interface ExportOverrideData {
+  columns: string[]
+  rows: unknown[][]
+  autoIncrementColumns?: string[]
+}
+
 export interface ScriptQueryError {
   code: string
   problem: string

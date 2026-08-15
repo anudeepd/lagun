@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult } from '../../types'
+import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult, ExportOverrideData } from '../../types'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useQueryLogStore } from '../../store/queryLogStore'
@@ -58,7 +58,7 @@ interface ExecutedQueryResult {
 
 interface QueryExportContext {
   sql: string
-  rowsOverride?: { columns: string[], rows: unknown[][] }
+  rowsOverride?: ExportOverrideData
 }
 
 try {
@@ -185,7 +185,7 @@ export const shouldDebounceDataSearch = (
 export const buildQueryResultExportData = (
   result: QueryResult | undefined,
   grid: Pick<ResultGridHandle, 'isAnyFilterPresent' | 'getFilteredData'> | null,
-): { columns: string[], rows: unknown[][] } | undefined => {
+): ExportOverrideData | undefined => {
   if (!result) return undefined
   if (grid?.isAnyFilterPresent()) {
     return grid.getFilteredData()
@@ -207,20 +207,33 @@ export const buildQueryExportContext = (
 export const buildTableDataExportData = (
   result: QueryResult | null,
   grid: Pick<ResultGridHandle, 'getFilteredData'> | null,
-): { columns: string[], rows: unknown[][] } | undefined => {
+  columnInfos?: ColumnInfo[],
+): ExportOverrideData | undefined => {
   if (!result || result.error) return undefined
-  return grid?.getFilteredData() ?? { columns: result.columns, rows: result.rows }
+  if (grid) return grid.getFilteredData()
+  const autoIncrementColumns = (columnInfos ?? []).filter(c => c.is_auto_increment).map(c => c.name)
+  return autoIncrementColumns.length > 0
+    ? { columns: result.columns, rows: result.rows, autoIncrementColumns }
+    : { columns: result.columns, rows: result.rows }
 }
 
 export const buildSelectedRowsExportData = (
   result: QueryResult | null,
   rows: Record<string, unknown>[],
-): { columns: string[], rows: unknown[][] } | undefined => {
+  columnInfos?: ColumnInfo[],
+): ExportOverrideData | undefined => {
   if (!result || result.error || rows.length === 0) return undefined
-  return {
-    columns: result.columns,
-    rows: rows.map(row => result.columns.map(col => row[col] ?? null)),
-  }
+  const autoIncrementColumns = (columnInfos ?? []).filter(c => c.is_auto_increment).map(c => c.name)
+  return autoIncrementColumns.length > 0
+    ? {
+        columns: result.columns,
+        rows: rows.map(row => result.columns.map(col => row[col] ?? null)),
+        autoIncrementColumns,
+      }
+    : {
+        columns: result.columns,
+        rows: rows.map(row => result.columns.map(col => row[col] ?? null)),
+      }
 }
 
 function quoteDataTabIdent(identifier: string): string {
@@ -316,7 +329,7 @@ const MIN_EDITOR_HEIGHT = 100
 const MAX_EDITOR_HEIGHT_FRACTION = 0.7
 
 interface DataExportContext {
-  rowsOverride?: { columns: string[], rows: unknown[][] }
+  rowsOverride?: ExportOverrideData
   rowsOverrideLabel?: string
 }
 
@@ -1841,13 +1854,13 @@ function TableTab({ tab, active = true }: Props) {
             onClick={() => {
               if (selectedRows.length > 0) {
                 setDataExportContext({
-                  rowsOverride: buildSelectedRowsExportData(result, selectedRows),
+                  rowsOverride: buildSelectedRowsExportData(result, selectedRows, columns),
                   rowsOverrideLabel: 'selected rows',
                 })
                 return
               }
               setDataExportContext({
-                rowsOverride: buildTableDataExportData(result, gridRef.current),
+                rowsOverride: buildTableDataExportData(result, gridRef.current, columns),
               })
             }}
             className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"

@@ -297,6 +297,64 @@ describe('delete+insert format', () => {
   })
 })
 
+describe('auto-increment column filter', () => {
+  const aiData = { columns: ['id', 'name'], rows: [[1, 'A']], autoIncrementColumns: ['id'] }
+  const opts = {
+    delimiter: ',',
+    quoteChar: '"',
+    escapeChar: '"',
+    lineTerminator: '\r\n',
+    encoding: 'utf-8',
+  }
+
+  it('CSV drops the auto-increment column from header and rows', () => {
+    const out = buildFrontendContent('csv', DB, TBL, aiData, PK, opts, 'batch', false, false)
+    expect(out).toBe('"name"\r\nA')
+  })
+
+  it('INSERT single mode — AI column excluded from list and values', () => {
+    const out = buildFrontendContent('insert', DB, TBL, aiData, PK, opts, 'single', false, false)
+    expect(out).toBe("INSERT INTO `tbl` (`name`) VALUES ('A');\n")
+  })
+
+  it('INSERT batch mode — AI column excluded from list and values', () => {
+    const out = buildFrontendContent('insert', DB, TBL, aiData, PK, opts, 'batch', false, false)
+    expect(out).toBe("INSERT INTO `tbl` (`name`) VALUES\n('A');\n")
+  })
+
+  it('DELETE WHERE still references PK from full row data', () => {
+    const out = buildFrontendContent('delete', DB, TBL, aiData, ['id'], opts, 'single', false, false)
+    expect(out).toBe('DELETE FROM `tbl` WHERE `id` = 1;\n')
+  })
+
+  it('DELETE+INSERT single — DELETE uses PK, INSERT drops AI column', () => {
+    const out = buildFrontendContent('delete+insert', DB, TBL, aiData, ['id'], opts, 'single', false, false)
+    expect(out).toBe(
+      'DELETE FROM `tbl` WHERE `id` = 1;\n' +
+      "INSERT INTO `tbl` (`name`) VALUES ('A');\n"
+    )
+  })
+
+  it('DELETE+INSERT batch — DELETE uses PK, INSERT drops AI column', () => {
+    const out = buildFrontendContent('delete+insert', DB, TBL, aiData, ['id'], opts, 'batch', false, false)
+    expect(out).toBe(
+      'DELETE FROM `tbl` WHERE `id` = 1;\n' +
+      '\n' +
+      "INSERT INTO `tbl` (`name`) VALUES\n('A');\n"
+    )
+  })
+
+  it('keeps all columns when checkbox is checked even with AI metadata', () => {
+    const out = buildFrontendContent('insert', DB, TBL, aiData, PK, opts, 'single', false, true)
+    expect(out).toBe("INSERT INTO `tbl` (`id`, `name`) VALUES (1, 'A');\n")
+  })
+
+  it('keeps all columns when no AI metadata is available (query-tab invariant)', () => {
+    const out = buildFrontendContent('insert', DB, TBL, { columns: ['id', 'name'], rows: [[1, 'A']] }, PK, opts, 'single', false, false)
+    expect(out).toBe("INSERT INTO `tbl` (`id`, `name`) VALUES (1, 'A');\n")
+  })
+})
+
 describe('copy response limit', () => {
   it('reads responses below the memory cap', async () => {
     await expect(responseTextWithLimit(new Response('small'), 16)).resolves.toBe('small')

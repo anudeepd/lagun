@@ -415,6 +415,36 @@ describe('table data export metadata', () => {
       rows: [[2, 'Bob']],
     })
   })
+
+  it('carries auto-increment metadata when column info is provided (grid fallback)', () => {
+    const result = makeResult(['id', 'name'], [[1, 'A']])
+    const columnInfos = [makeColumn('id', false, true), makeColumn('name')]
+
+    expect(buildTableDataExportData(result, null, columnInfos)).toEqual({
+      columns: ['id', 'name'],
+      rows: [[1, 'A']],
+      autoIncrementColumns: ['id'],
+    })
+  })
+
+  it('omits auto-increment metadata when column info is unavailable (query-tab invariant)', () => {
+    const result = makeResult(['id', 'name'], [[1, 'A']])
+
+    const out = buildTableDataExportData(result, null)
+    expect(out).toEqual({ columns: ['id', 'name'], rows: [[1, 'A']] })
+    expect(out).not.toHaveProperty('autoIncrementColumns')
+  })
+
+  it('carries auto-increment metadata for selected rows when column info is provided', () => {
+    const result = makeResult(['id', 'name'], [[1, 'A']])
+    const columnInfos = [makeColumn('id', false, true), makeColumn('name')]
+
+    expect(buildSelectedRowsExportData(result, [{ id: 1, name: 'A' }], columnInfos)).toEqual({
+      columns: ['id', 'name'],
+      rows: [[1, 'A']],
+      autoIncrementColumns: ['id'],
+    })
+  })
 })
 
 describe('table data retrieval SQL', () => {
