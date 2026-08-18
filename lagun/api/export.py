@@ -56,7 +56,14 @@ def _where_value(column: str, value) -> str:
 
 
 async def _resolve_ai_columns(pool, database: str, table: str, cols: list[str]) -> set[str]:
-    """Return set of column names that are auto_increment. Raises on lookup failure."""
+    """Return set of column names that are auto_increment. Raises on lookup failure.
+
+    Cost: one extra information_schema round-trip per export call. Acceptable
+    because exports are user-initiated (not per-keystroke), the metadata
+    lookup is cheap, and the result is small. The round-trip is gated by
+    ``exclude_auto_increment`` and an empty ``req.table`` so query-tab
+    exports (which have no fixed table) skip it entirely.
+    """
     try:
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
@@ -75,6 +82,18 @@ async def _resolve_ai_columns(pool, database: str, table: str, cols: list[str]) 
             database, table, exc_info=True,
         )
         raise
+
+
+async def _apply_ai_filter(pool, req, cols: list[str]) -> list[str]:
+    """Drop auto_increment columns from ``cols`` when the export opts in.
+
+    No-op when ``req.exclude_auto_increment`` is False or ``req.table`` is
+    empty (query-tab export has no fixed table to query metadata for).
+    """
+    if not req.exclude_auto_increment or not req.table:
+        return cols
+    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
+    return [c for c in cols if c not in ai_cols]
 
 
 class ExportRequest(BaseModel):
@@ -196,10 +215,7 @@ async def _export_response(session_id: str, req: ExportRequest):
                 await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
-                cols_filtered = cols
-                if req.exclude_auto_increment and req.table:
-                    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
-                    cols_filtered = [c for c in cols if c not in ai_cols]
+                cols_filtered = await _apply_ai_filter(pool, req, cols)
                 cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
                 tbl = req.table or "exported_data"
                 tbl_q = _target_table_sql(req.database, tbl, req.include_schema)
@@ -305,10 +321,7 @@ async def _export_response(session_id: str, req: ExportRequest):
                 )
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
-                cols_filtered = cols
-                if req.exclude_auto_increment and req.table:
-                    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
-                    cols_filtered = [c for c in cols if c not in ai_cols]
+                cols_filtered = await _apply_ai_filter(pool, req, cols)
                 cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
                 where_cols = pk_cols if pk_cols else cols
 
@@ -381,10 +394,7 @@ async def _export_response(session_id: str, req: ExportRequest):
                 await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
-                cols_filtered = cols
-                if req.exclude_auto_increment and req.table:
-                    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
-                    cols_filtered = [c for c in cols if c not in ai_cols]
+                cols_filtered = await _apply_ai_filter(pool, req, cols)
                 if req.csv_encoding == "utf-8-sig":
                     yield b"\xef\xbb\xbf"
 

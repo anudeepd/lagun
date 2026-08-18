@@ -610,14 +610,30 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
         if await _is_query_cancelled(execution_key):
             raise _QueryCancelled
         pool, session = await _get_pool_or_404(session_id)
+        effective_db = req.database or session.default_db
+        # Scope enforcement semantics:
+        #   - selected_databases is None or empty → no scope configured, allow
+        #     any database the MySQL user can reach (unrestricted mode).
+        #   - selected_databases is a non-empty list → only those DBs are
+        #     allowed; current DB is resolved from req.database then
+        #     session.default_db as a fallback so omitting database does not
+        #     bypass the check.
+        #   - v1 trade-off: this guards the connection's current database
+        #     only. Free-form SQL referencing another DB by name (e.g.
+        #     ``SELECT * FROM other_db.tbl``) is NOT scanned. The deeper
+        #     gate is the MySQL user's grants; if the LDAP-bound account
+        #     lacks privileges on ``other_db`` the query fails at the DBMS.
+        #     A full SQL-level scope scan is deferred — parsing is fragile
+        #     and bypassable via dynamic SQL, prepared statements, and
+        #     comments.
         if (
-            req.database
+            effective_db
             and session.selected_databases
-            and req.database not in session.selected_databases
+            and effective_db not in session.selected_databases
         ):
             raise HTTPException(
                 403,
-                f"Database '{req.database}' is not in this connection's allowed databases.",
+                f"Database '{effective_db}' is not in this connection's allowed databases.",
             )
         sql = req.sql.strip().rstrip(";").strip()
         limit = req.limit or session.query_limit
@@ -646,8 +662,8 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
                         )
                         if cancelled:
                             raise _QueryCancelled
-                        if req.database:
-                            await cur.execute(f"USE {quote_ident(req.database)}")
+                        if effective_db:
+                            await cur.execute(f"USE {quote_ident(effective_db)}")
                         if await _is_query_cancelled(execution_key):
                             raise _QueryCancelled
                         setup_ms = _elapsed_ms(setup_started)

@@ -2,6 +2,39 @@
 
 import json
 
+import pytest
+
+from lagun.api.export import _resolve_ai_columns
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: auto-increment resolver failure path (M1 regression guard)
+# ---------------------------------------------------------------------------
+
+
+class _FailingPool:
+    """Pool whose acquire() raises — proves the resolver fails loudly."""
+
+    def acquire(self):
+        return self
+
+    async def __aenter__(self):
+        raise RuntimeError("information_schema lookup failed")
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+async def test_resolve_ai_columns_raises_on_lookup_failure():
+    """M1 regression guard: a failed metadata lookup must re-raise, not return {}.
+
+    A silent empty set would let the export proceed while violating the user's
+    "exclude auto-increment columns" request and produce invalid INSERT/CSV
+    output that omits columns the user expected to omit.
+    """
+    with pytest.raises(RuntimeError, match="information_schema lookup failed"):
+        await _resolve_ai_columns(_FailingPool(), "db", "tbl", ["id", "name"])
+
 
 async def test_export_insert_format(client, session_id, test_db):
     r = await client.post(
