@@ -4,7 +4,7 @@ import { AnimatePresence, useIsPresent } from 'motion/react'
 import * as m from 'motion/react-m'
 import { X } from 'lucide-react'
 import Button from './Button'
-import { exitTransition, motionDistance, spatialTransition } from '../../motion/tokens'
+import { exitSpring, motionDistance, spatialTransition, surfaceTransition } from '../../motion/tokens'
 
 interface ModalProps {
   open: boolean
@@ -37,13 +37,13 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
       className={`fixed inset-0 z-modal flex items-center justify-center p-4 ${isPresent ? '' : 'pointer-events-none'}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1, transition: spatialTransition }}
-      exit={{ opacity: 0, transition: exitTransition }}
+      exit={{ opacity: 0, transition: exitSpring }}
       aria-hidden={!isPresent || undefined}
     >
       <m.div
         initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-        animate={{ opacity: 1, backdropFilter: 'blur(5px)', transition: { duration: 0.3 } }}
-        exit={{ opacity: 0, backdropFilter: 'blur(0px)', transition: exitTransition }}
+        animate={{ opacity: 1, backdropFilter: 'blur(5px)', transition: surfaceTransition }}
+        exit={{ opacity: 0, backdropFilter: 'blur(0px)', transition: exitSpring }}
         className="absolute inset-0 bg-black/60"
         aria-hidden="true"
         onClick={isPresent ? onClose : undefined}
@@ -54,9 +54,9 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
         aria-modal={isPresent ? 'true' : undefined}
         aria-labelledby={isPresent ? titleId : undefined}
         tabIndex={isPresent ? -1 : undefined}
-        initial={{ opacity: 0, y: motionDistance.spatial, scale: 0.9, rotateX: -3 }}
-        animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0, transition: spatialTransition }}
-        exit={{ opacity: 0, y: motionDistance.surface, scale: 0.94, transition: exitTransition }}
+        initial={{ opacity: 0, y: motionDistance.subtle, scale: 0.96, rotateX: -1 }}
+        animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0, transition: { ...spatialTransition, delay: 0.05 } }}
+        exit={{ opacity: 0, y: motionDistance.surface, scale: 0.96, transition: exitSpring }}
         className={`relative flex max-h-[90vh] w-full flex-col rounded-lg border border-surface-700 bg-surface-900 shadow-2xl ${width}`}
       >
         <div className="flex items-center justify-between border-b border-surface-700 px-4 py-3">

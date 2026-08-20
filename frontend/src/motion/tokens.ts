@@ -36,3 +36,10 @@ export const exitTransition: Transition = {
   duration: motionDuration.micro,
   ease: motionEase.exit,
 }
+
+export const exitSpring: Transition = {
+  type: 'spring',
+  stiffness: 380,
+  damping: 32,
+  mass: 0.6,
+}

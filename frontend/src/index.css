@@ -231,6 +231,17 @@
     padding-right: 10px !important;
   }
 
+  .lagun-result-grid .ag-cell.find-match {
+    background: rgba(250, 204, 21, 0.25);
+    outline: 1px solid rgb(250, 204, 21);
+    border-radius: 2px;
+  }
+
+  .lagun-result-grid .ag-cell.find-match-current {
+    background: rgba(250, 204, 21, 0.45);
+    outline: 2px solid rgb(250, 204, 21);
+  }
+
   .lagun-result-grid .ag-cell-inline-editing .ag-input-wrapper,
   .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input {
     border: 0;

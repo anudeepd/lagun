@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { motionDuration, motionEase } from '../tokens'
+import { motionDuration, motionEase, exitSpring } from '../tokens'
 
 const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8')
 
@@ -15,5 +15,18 @@ describe('motion tokens', () => {
   it('keeps shared easing curves aligned', () => {
     expect(css).toContain(`--motion-ease-move: cubic-bezier(${motionEase.move.join(', ')})`)
     expect(css).toContain(`--motion-ease-exit: cubic-bezier(${motionEase.exit.join(', ')})`)
+  })
+
+  it('defines an overdamped exit spring for modal dismissals', () => {
+    expect(exitSpring).toMatchObject({
+      type: 'spring',
+      stiffness: 380,
+      damping: 32,
+      mass: 0.6,
+    })
+    const k = exitSpring.stiffness ?? 0
+    const c = exitSpring.damping ?? 0
+    const m = exitSpring.mass ?? 0
+    expect(c).toBeGreaterThan(Math.sqrt(2 * k * m))
   })
 })

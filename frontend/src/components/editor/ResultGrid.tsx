@@ -9,6 +9,7 @@ import Button from '../ui/Button'
 import { AnimatePresence } from 'motion/react'
 
 import QueryErrorState from './QueryErrorState'
+import GridSearchBar from './GridSearchBar'
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
   getFilteredData: () => ExportOverrideData
@@ -226,6 +227,10 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [emptyMenu, setEmptyMenu] = useState<{ x: number; y: number } | null>(null)
   const [cellEditor, setCellEditor] = useState<CellEditorState | null>(null)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findMatches, setFindMatches] = useState<Array<{ rowIndex: number; colId: string }>>([])
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0)
   const anchorRowIndex = useRef<number | null>(null)
   const agApiRef = useRef<GridApi | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -272,6 +277,14 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   const pendingChangesRef = useRef(pendingChanges)
   pendingChangesRef.current = pendingChanges
+
+  const findQueryLower = useMemo(() => findQuery.toLowerCase(), [findQuery])
+
+  // Re-evaluate cellClassRules whenever the find state changes so the
+  // highlight classes track the query and the active match.
+  useEffect(() => {
+    agApiRef.current?.refreshCells({ force: true })
+  }, [findQueryLower, findMatches, currentMatchIndex])
 
   // Refresh cell styles whenever pending changes update
   useEffect(() => {
@@ -341,10 +354,19 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           }
           return base
         },
+        cellClassRules: {
+          'find-match': (params: CellClassParams<Record<string, unknown>>) =>
+            findQueryLower !== '' && String(params.value).toLowerCase().includes(findQueryLower),
+          'find-match-current': (params: CellClassParams<Record<string, unknown>>) => {
+            if (findQueryLower === '' || findMatches.length === 0) return false
+            const match = findMatches[currentMatchIndex]
+            return Boolean(match && params.rowIndex === match.rowIndex && params.column.getColId() === match.colId)
+          },
+        },
         headerClass: 'text-xs font-semibold',
       }
     }),
-    [result.columns, result.rows, editable, hiddenColumns]
+    [result.columns, result.rows, editable, hiddenColumns, findQueryLower, findMatches, currentMatchIndex]
   )
 
   const rowData = useMemo(() => buildResultGridRowData({
@@ -355,6 +377,29 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     insertDraftAnchors,
     includeRowIndexInId,
   }), [result, primaryKeyColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId])
+
+  // In-page find: build the match list over the rendered rows (highlight mode,
+  // never filtering). Debounced so search-as-you-type does not thrash.
+  useEffect(() => {
+    if (findQueryLower === '') {
+      setFindMatches([])
+      setCurrentMatchIndex(0)
+      return
+    }
+    const timer = setTimeout(() => {
+      const matches: Array<{ rowIndex: number; colId: string }> = []
+      rowData.forEach((row, rowIndex) => {
+        result.columns.forEach(col => {
+          if (String(row[col]).toLowerCase().includes(findQueryLower)) {
+            matches.push({ rowIndex, colId: col })
+          }
+        })
+      })
+      setFindMatches(matches)
+      setCurrentMatchIndex(0)
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [findQueryLower, rowData, result.columns])
 
   const getRowId = useCallback((params: { data: Record<string, unknown> }) =>
     params.data.__ag_rowId as string,
@@ -436,12 +481,58 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     })
   }, [onCellEdit])
 
+  const goToMatch = useCallback((index: number) => {
+    const api = agApiRef.current
+    if (!api) return
+    const match = findMatches[index]
+    if (!match) return
+    const node = api.getDisplayedRowAtIndex(match.rowIndex)
+    if (!node) return
+    api.ensureNodeVisible(node, 'middle')
+    api.ensureColumnVisible(match.colId)
+    api.flashCells({ rowNodes: [node], columns: [match.colId], flashDuration: 600 })
+  }, [findMatches])
+
+  const handleNext = useCallback(() => {
+    if (findMatches.length === 0) return
+    const next = (currentMatchIndex + 1) % findMatches.length
+    setCurrentMatchIndex(next)
+    goToMatch(next)
+  }, [findMatches, currentMatchIndex, goToMatch])
+
+  const handlePrev = useCallback(() => {
+    if (findMatches.length === 0) return
+    const prev = (currentMatchIndex - 1 + findMatches.length) % findMatches.length
+    setCurrentMatchIndex(prev)
+    goToMatch(prev)
+  }, [findMatches, currentMatchIndex, goToMatch])
+
+  const handleClose = useCallback(() => {
+    setFindOpen(false)
+    setFindQuery('')
+    rootRef.current?.focus()
+  }, [])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTextInputTarget(e.target)) return
+      // Ctrl/Cmd+F always opens the in-grid search. The check is intentionally
+      // unconditional — even when focus sits inside a text input such as the
+      // find bar's own input — so the browser's native find never takes over
+      // while the ResultGrid is mounted and visible. Trade-off: Ctrl+F while
+      // typing in the SQL editor opens the grid find instead of the browser
+      // find, which is acceptable because the grid shows the result of the
+      // query the user wrote.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setFindOpen(true)
+        return
+      }
+
       const root = rootRef.current
       if (!root || !root.contains(document.activeElement)) return
       if ((agApiRef.current?.getEditingCells().length ?? 0) > 0) return
+
+      if (isTextInputTarget(e.target)) return
 
       const activeCell = activeCellRef.current
       if (!activeCell) return
@@ -460,9 +551,39 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [canEditColumn, openLargeCellEditor])
+    // Backup navigation for Enter/Shift+Enter/Escape while the find bar is open.
+    // The input's own onKeyDown in GridSearchBar is the primary path, but the
+    // debounced match scan re-renders the grid (columnDefs re-created,
+    // refreshCells forced) and focus can drift off the input; this window-level
+    // capture handler is the safety net so navigation keeps working no matter
+    // where focus is. The search input itself is skipped so its own handler
+    // fires (avoiding double-advance on Enter).
+    const handleNavKey = (e: KeyboardEvent) => {
+      if (!findOpen) return
+      if (e.target instanceof HTMLInputElement && e.target.type === 'search' && e.target.closest('[role="search"]')) return
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault()
+        handleNext()
+      } else if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault()
+        handlePrev()
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        handleClose()
+      }
+    }
+
+    const handleOpenFind = () => setFindOpen(true)
+
+    window.addEventListener('keydown', handleKeyDown, { capture: true })
+    window.addEventListener('keydown', handleNavKey, { capture: true })
+    window.addEventListener('lagun:open-find', handleOpenFind)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true })
+      window.removeEventListener('keydown', handleNavKey, { capture: true })
+      window.removeEventListener('lagun:open-find', handleOpenFind)
+    }
+  }, [canEditColumn, openLargeCellEditor, findOpen, handleNext, handlePrev, handleClose])
 
   const handleSelectionChanged = useCallback((e: { api: { getSelectedRows: () => Record<string, unknown>[] } }) => {
     onSelectionChange?.(e.api.getSelectedRows())
@@ -690,7 +811,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }
 
   return (
-    <div ref={rootRef} className="h-full lagun-result-grid" onContextMenu={handleGridContextMenu}>
+    <div ref={rootRef} tabIndex={-1} className="h-full lagun-result-grid" onContextMenu={handleGridContextMenu}>
       <AgGridReact
         theme={darkTheme}
         columnDefs={columnDefs}
@@ -734,6 +855,20 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           onClose={closeMenu}
         />
       )}
+      </AnimatePresence>
+      <AnimatePresence initial={false}>
+        {findOpen && (
+          <GridSearchBar
+            open={findOpen}
+            query={findQuery}
+            matchCount={findMatches.length}
+            currentMatch={findMatches.length === 0 ? 0 : currentMatchIndex + 1}
+            onQueryChange={setFindQuery}
+            onNext={handleNext}
+            onPrev={handlePrev}
+            onClose={handleClose}
+          />
+        )}
       </AnimatePresence>
       {cellEditor && (
         <Modal
