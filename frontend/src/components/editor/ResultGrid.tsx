@@ -46,6 +46,10 @@ const darkTheme = themeQuartz.withParams({
 
 const DATE_TYPES = new Set(['datetime', 'timestamp', 'date', 'time'])
 const COLUMN_WIDTH_SAMPLE_SIZE = 40
+// Stable default so the destructured default does not allocate a fresh array on
+// every render (which would invalidate the rowData memo and re-trigger the
+// debounced find-scan effect, causing an infinite render loop).
+const EMPTY_PRIMARY_KEY_COLUMNS: string[] = []
 
 function displayLength(value: unknown): number {
   if (value == null) return 4
@@ -223,7 +227,7 @@ export const buildResultGridRowData = ({
   return [...orderedRows, ...unanchoredDrafts]
 }
 
-const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = [], editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, onCreateEmptyRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId, onSortActiveChange }: Props, ref) {
+const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = EMPTY_PRIMARY_KEY_COLUMNS, editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, onCreateEmptyRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId, onSortActiveChange }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [emptyMenu, setEmptyMenu] = useState<{ x: number; y: number } | null>(null)
   const [cellEditor, setCellEditor] = useState<CellEditorState | null>(null)
@@ -280,16 +284,22 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   const findQueryLower = useMemo(() => findQuery.toLowerCase(), [findQuery])
 
-  // Re-evaluate cellClassRules whenever the find state changes so the
-  // highlight classes track the query and the active match.
-  useEffect(() => {
-    agApiRef.current?.refreshCells({ force: true })
-  }, [findQueryLower, findMatches, currentMatchIndex])
+  // Refs mirror the find state so the columnDefs cellClassRules callbacks can
+  // read the latest values at call time without forcing columnDefs to be
+  // re-created (and the grid re-rendered) on every keystroke / match nav.
+  const findQueryLowerRef = useRef(findQueryLower)
+  const findMatchesRef = useRef(findMatches)
+  const currentMatchIndexRef = useRef(currentMatchIndex)
 
-  // Refresh cell styles whenever pending changes update
+  useEffect(() => { findQueryLowerRef.current = findQueryLower }, [findQueryLower])
+  useEffect(() => { findMatchesRef.current = findMatches }, [findMatches])
+  useEffect(() => { currentMatchIndexRef.current = currentMatchIndex }, [currentMatchIndex])
+
+  // Refresh cell styles whenever the find state or pending edits change.
+  // Single effect so a single state change never triggers a double refresh.
   useEffect(() => {
     agApiRef.current?.refreshCells({ force: true })
-  }, [pendingChanges, insertDrafts])
+  }, [findQueryLower, findMatches, currentMatchIndex, pendingChanges, insertDrafts])
 
   useEffect(() => {
     const draftIds = new Set(insertDrafts?.keys() ?? [])
@@ -356,17 +366,17 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         },
         cellClassRules: {
           'find-match': (params: CellClassParams<Record<string, unknown>>) =>
-            findQueryLower !== '' && String(params.value).toLowerCase().includes(findQueryLower),
+            findQueryLowerRef.current !== '' && String(params.value).toLowerCase().includes(findQueryLowerRef.current),
           'find-match-current': (params: CellClassParams<Record<string, unknown>>) => {
-            if (findQueryLower === '' || findMatches.length === 0) return false
-            const match = findMatches[currentMatchIndex]
+            if (findQueryLowerRef.current === '' || findMatchesRef.current.length === 0) return false
+            const match = findMatchesRef.current[currentMatchIndexRef.current]
             return Boolean(match && params.rowIndex === match.rowIndex && params.column.getColId() === match.colId)
           },
         },
         headerClass: 'text-xs font-semibold',
       }
     }),
-    [result.columns, result.rows, editable, hiddenColumns, findQueryLower, findMatches, currentMatchIndex]
+    [result.columns, result.rows, editable, hiddenColumns]
   )
 
   const rowData = useMemo(() => buildResultGridRowData({
@@ -434,6 +444,14 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     })
     setMenu(null)
   }, [canEditColumn])
+
+  // Refs pin the latest canEditColumn / openLargeCellEditor so the window-level
+  // keydown handler does not need to re-bind on every editable change.
+  const canEditColumnRef = useRef(canEditColumn)
+  useEffect(() => { canEditColumnRef.current = canEditColumn }, [canEditColumn])
+
+  const openLargeCellEditorRef = useRef(openLargeCellEditor)
+  useEffect(() => { openLargeCellEditorRef.current = openLargeCellEditor }, [openLargeCellEditor])
 
   const rememberActiveCell = useCallback((cell: ActiveCell | null) => {
     activeCellRef.current = cell
@@ -545,9 +563,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       }
 
       if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Enter') {
-        if (!canEditColumn(activeCell.columnName)) return
+        if (!canEditColumnRef.current(activeCell.columnName)) return
         e.preventDefault()
-        openLargeCellEditor(activeCell)
+        openLargeCellEditorRef.current(activeCell)
       }
     }
 
@@ -583,7 +601,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       window.removeEventListener('keydown', handleNavKey, { capture: true })
       window.removeEventListener('lagun:open-find', handleOpenFind)
     }
-  }, [canEditColumn, openLargeCellEditor, findOpen, handleNext, handlePrev, handleClose])
+  }, [findOpen, handleNext, handlePrev, handleClose])
 
   const handleSelectionChanged = useCallback((e: { api: { getSelectedRows: () => Record<string, unknown>[] } }) => {
     onSelectionChange?.(e.api.getSelectedRows())
