@@ -12,9 +12,7 @@ called, then verifies the 403 from the scope check makes the pool unreached.
 import pytest
 
 import lagun.api.schema as schema_module
-from lagun.api import schema as schema_api
 from lagun.api import table_ops as table_ops_api
-from lagun.api import query as query_api
 from lagun.db import session_store
 from lagun.models.session import SessionCreate
 
@@ -88,7 +86,9 @@ def _fake_get_pool_or_404(pool, session):
 # ---------------------------------------------------------------------------
 
 
-async def test_schema_list_tables_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_schema_list_tables_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, schema_module)
     r = await client.get(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables"
@@ -98,7 +98,9 @@ async def test_schema_list_tables_rejects_out_of_scope_db(client, scoped_session
     assert pool_calls == []
 
 
-async def test_schema_list_columns_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_schema_list_columns_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, schema_module)
     r = await client.get(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables/users/columns"
@@ -107,7 +109,9 @@ async def test_schema_list_columns_rejects_out_of_scope_db(client, scoped_sessio
     assert pool_calls == []
 
 
-async def test_schema_list_indexes_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_schema_list_indexes_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, schema_module)
     r = await client.get(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables/users/indexes"
@@ -116,7 +120,9 @@ async def test_schema_list_indexes_rejects_out_of_scope_db(client, scoped_sessio
     assert pool_calls == []
 
 
-async def test_schema_list_functions_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_schema_list_functions_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, schema_module)
     r = await client.get(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/functions"
@@ -125,7 +131,9 @@ async def test_schema_list_functions_rejects_out_of_scope_db(client, scoped_sess
     assert pool_calls == []
 
 
-async def test_schema_get_create_sql_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_schema_get_create_sql_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, schema_module)
     r = await client.get(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables/users/create_sql"
@@ -139,7 +147,9 @@ async def test_schema_get_create_sql_rejects_out_of_scope_db(client, scoped_sess
 # ---------------------------------------------------------------------------
 
 
-async def test_table_ops_drop_table_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_table_ops_drop_table_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, table_ops_api)
     r = await client.delete(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables/users"
@@ -148,7 +158,9 @@ async def test_table_ops_drop_table_rejects_out_of_scope_db(client, scoped_sessi
     assert pool_calls == []
 
 
-async def test_table_ops_truncate_table_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_table_ops_truncate_table_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, table_ops_api)
     r = await client.post(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables/users/truncate"
@@ -157,7 +169,9 @@ async def test_table_ops_truncate_table_rejects_out_of_scope_db(client, scoped_s
     assert pool_calls == []
 
 
-async def test_table_ops_create_table_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_table_ops_create_table_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, table_ops_api)
     r = await client.post(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables",
@@ -170,7 +184,9 @@ async def test_table_ops_create_table_rejects_out_of_scope_db(client, scoped_ses
     assert pool_calls == []
 
 
-async def test_table_ops_drop_column_rejects_out_of_scope_db(client, scoped_session, monkeypatch):
+async def test_table_ops_drop_column_rejects_out_of_scope_db(
+    client, scoped_session, monkeypatch
+):
     pool_calls = _pool_guard(monkeypatch, table_ops_api)
     r = await client.delete(
         f"/api/v1/sessions/{scoped_session.id}/databases/other_db/tables/users/columns/id"
@@ -184,7 +200,9 @@ async def test_table_ops_drop_column_rejects_out_of_scope_db(client, scoped_sess
 # ---------------------------------------------------------------------------
 
 
-async def test_query_explicit_database_rejects_out_of_scope(client, scoped_session, monkeypatch):
+async def test_query_explicit_database_rejects_out_of_scope(
+    client, scoped_session, monkeypatch
+):
     """req.database out-of-scope → 403, pool.acquire never called."""
     pool = _RaisingPool()
     monkeypatch.setattr(
@@ -230,7 +248,9 @@ async def test_query_empty_database_falls_back_to_default_db_scope(client, monke
     assert pool.acquire_calls == 0
 
 
-async def test_query_empty_database_proceeds_when_default_db_in_scope(client, monkeypatch):
+async def test_query_empty_database_proceeds_when_default_db_in_scope(
+    client, monkeypatch
+):
     """Empty req.database + default_db in selected_databases → scope passes, pool acquired."""
     await session_store.init_db()
     s = await session_store.create_session(

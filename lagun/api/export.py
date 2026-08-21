@@ -55,7 +55,9 @@ def _where_value(column: str, value) -> str:
     return f"{quote_ident(column)} = {escape_value(value)}"
 
 
-async def _resolve_ai_columns(pool, database: str, table: str, cols: list[str]) -> set[str]:
+async def _resolve_ai_columns(
+    pool, database: str, table: str, cols: list[str]
+) -> set[str]:
     """Return set of column names that are auto_increment. Raises on lookup failure.
 
     Cost: one extra information_schema round-trip per export call. Acceptable
@@ -79,7 +81,9 @@ async def _resolve_ai_columns(pool, database: str, table: str, cols: list[str]) 
     except Exception:
         log.warning(
             "Failed to resolve auto-increment columns for %s.%s; export aborted",
-            database, table, exc_info=True,
+            database,
+            table,
+            exc_info=True,
         )
         raise
 
@@ -231,7 +235,9 @@ async def _export_response(session_id: str, req: ExportRequest):
                             break
                         for row in rows:
                             row_dict = dict(zip(cols, row))
-                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
+                            vals = ", ".join(
+                                escape_value(row_dict[c]) for c in cols_filtered
+                            )
                             buf.write(
                                 f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
                             )
@@ -251,7 +257,9 @@ async def _export_response(session_id: str, req: ExportRequest):
                             else:
                                 buf.write(",\n")
                             row_dict = dict(zip(cols, row))
-                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
+                            vals = ", ".join(
+                                escape_value(row_dict[c]) for c in cols_filtered
+                            )
                             buf.write(f"({vals})")
                             rows_in_statement += 1
                             if rows_in_statement == req.batch_size:
@@ -337,7 +345,9 @@ async def _export_response(session_id: str, req: ExportRequest):
                             where = " AND ".join(
                                 _where_value(c, row_dict[c]) for c in where_cols
                             )
-                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
+                            vals = ", ".join(
+                                escape_value(row_dict[c]) for c in cols_filtered
+                            )
                             buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
                             buf.write(
                                 f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
@@ -363,7 +373,9 @@ async def _export_response(session_id: str, req: ExportRequest):
                         buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
                         for index, row in enumerate(rows):
                             row_dict = dict(zip(cols, row))
-                            vals = ", ".join(escape_value(row_dict[c]) for c in cols_filtered)
+                            vals = ", ".join(
+                                escape_value(row_dict[c]) for c in cols_filtered
+                            )
                             buf.write((",\n" if index else "") + f"({vals})")
                         buf.write(";\n")
                         yield buf.getvalue()

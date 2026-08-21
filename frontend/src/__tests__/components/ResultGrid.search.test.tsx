@@ -7,8 +7,11 @@ import type { QueryResult } from '../../types'
 
 // The manual mock (__mocks__/ag-grid-react.ts) adds __calls / __latestProps
 // exports that the real ag-grid-react types don't declare.
-const __calls = (agGridReact as any).__calls as Record<string, any[]>
-const __latestProps = (agGridReact as any).__latestProps as { current: any }
+interface AgGridTestHooks {
+  __calls: Record<string, unknown[]>
+  __latestProps: { current: { columnDefs?: Array<Record<string, unknown>> } | null }
+}
+const { __calls, __latestProps } = agGridReact as unknown as AgGridTestHooks
 
 // ag-grid does not fully run under jsdom, so we use the manual mock in
 // __mocks__/ag-grid-react.ts. It exposes __calls (recorded GridApi method
@@ -117,7 +120,7 @@ describe('ResultGrid search wiring', () => {
     await userEvent.type(input, 'a')
     await waitForMatches()
 
-    const colDef = __latestProps.current.columnDefs[0]
+    const colDef = __latestProps.current!.columnDefs![0] as { cellClassRules: Record<string, (params: { value?: unknown; rowIndex?: number; column?: { getColId: () => string } }) => boolean> }
     const findMatch = colDef.cellClassRules['find-match']
     expect(findMatch({ value: 'Alice' })).toBe(true)
     expect(findMatch({ value: 'Bob' })).toBe(false)
@@ -131,7 +134,7 @@ describe('ResultGrid search wiring', () => {
     await waitForMatches()
     // matches: [{rowIndex:0,colId:'name'},{rowIndex:2,colId:'name'}], current = 0
 
-    const colDef = __latestProps.current.columnDefs[0]
+    const colDef = __latestProps.current!.columnDefs![0] as { cellClassRules: Record<string, (params: { value?: unknown; rowIndex?: number; column?: { getColId: () => string } }) => boolean> }
     const isCurrent = colDef.cellClassRules['find-match-current']
     const nameCol = { getColId: () => 'name' }
     expect(isCurrent({ rowIndex: 0, column: nameCol })).toBe(true)

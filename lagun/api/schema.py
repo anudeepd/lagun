@@ -133,7 +133,9 @@ async def list_columns(session_id: str, db: str, table: str) -> list[ColumnInfo]
     if not s:
         raise HTTPException(404, "Session not found")
     if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+        raise HTTPException(
+            403, f"Database '{db}' is not in this connection's allowed databases."
+        )
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -169,7 +171,9 @@ async def list_indexes(session_id: str, db: str, table: str) -> list[IndexInfo]:
     if not s:
         raise HTTPException(404, "Session not found")
     if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+        raise HTTPException(
+            403, f"Database '{db}' is not in this connection's allowed databases."
+        )
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -203,7 +207,9 @@ async def list_functions(session_id: str, db: str) -> list[str]:
     if not s:
         raise HTTPException(404, "Session not found")
     if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+        raise HTTPException(
+            403, f"Database '{db}' is not in this connection's allowed databases."
+        )
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -224,7 +230,9 @@ async def get_create_sql(session_id: str, db: str, table: str) -> dict:
     if not s:
         raise HTTPException(404, "Session not found")
     if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+        raise HTTPException(
+            403, f"Database '{db}' is not in this connection's allowed databases."
+        )
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:

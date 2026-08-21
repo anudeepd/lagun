@@ -30,7 +30,9 @@ async def _pool(session_id: str, db: str | None = None):
     if not s:
         raise HTTPException(404, "Session not found")
     if db and s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(403, f"Database '{db}' is not in this connection's allowed databases.")
+        raise HTTPException(
+            403, f"Database '{db}' is not in this connection's allowed databases."
+        )
     return await get_pool(session_id)
 
 
