@@ -69,6 +69,13 @@ export function focusTextareaAtEnd(textarea: HTMLTextAreaElement | null): void {
   textarea.setSelectionRange(end, end)
 }
 
+export function placeInlineEditorCaretAtEnd(root: ParentNode | null): void {
+  const input = root?.querySelector<HTMLInputElement>('.ag-cell-inline-editing input')
+  if (!input) return
+  const end = input.value.length
+  input.setSelectionRange(end, end)
+}
+
 function localNow(dataType: string): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   const d = new Date()
@@ -103,8 +110,8 @@ export function startInlineCellEditing(
   rowIndex: number,
   colKey: string
 ): void {
-  // F2 tells AG Grid to place the caret at the end instead of selecting all.
-  // Using the editor's native path avoids browser-dependent focus timing.
+  // F2 only tells AG Grid to skip select-all; caret placement stays browser-default
+  // (Firefox/Waterfox start at position 0), so onCellEditingStarted moves it to the end.
   api.startEditingCell({ rowIndex, colKey, key: 'F2' })
 }
 
@@ -499,6 +506,10 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     })
   }, [onCellEdit])
 
+
+  const handleCellEditingStarted = useCallback(() => {
+    requestAnimationFrame(() => placeInlineEditorCaretAtEnd(rootRef.current))
+  }, [])
   const goToMatch = useCallback((index: number) => {
     const api = agApiRef.current
     if (!api) return
@@ -842,6 +853,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         onCellDoubleClicked={handleCellDoubleClicked}
         onCellValueChanged={onCellValueChanged}
         onSelectionChanged={handleSelectionChanged}
+        onCellEditingStarted={handleCellEditingStarted}
         onRowClicked={selectable ? handleRowClicked : undefined}
         onColumnHeaderClicked={handleColumnHeaderClicked}
         onColumnResized={handleColumnResized}
@@ -913,7 +925,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
             <textarea
               ref={focusTextareaAtEnd}
               aria-label={`Edit ${cellEditor.columnName}`}
-              className="lagun-data-text min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-data text-xs leading-5 text-slate-100 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              className="min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
               value={cellEditor.value}
               onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
               spellCheck={false}

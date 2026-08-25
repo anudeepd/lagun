@@ -242,12 +242,21 @@
     outline: 2px solid rgb(250, 204, 21);
   }
 
+  .lagun-result-grid .ag-cell-inline-editing {
+    background-color: #7c3a00 !important;
+    border: 0 !important;
+    border-radius: 0;
+    box-shadow: none !important;
+    color: #fed7aa !important;
+  }
+
   .lagun-result-grid .ag-cell-inline-editing .ag-input-wrapper,
   .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input {
     border: 0;
     border-radius: 0;
     background: transparent;
     box-shadow: none;
+    color: #fed7aa !important;
   }
 
   .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input {

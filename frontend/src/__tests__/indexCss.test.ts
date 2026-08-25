@@ -25,6 +25,9 @@ describe('inline cell editor', () => {
     expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-input-wrapper,\s*\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*border: 0;/s)
     expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*padding: 0;/s)
     expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*outline: none;/s)
+    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing\s*\{[^}]*border: 0 !important;[^}]*box-shadow: none !important;/s)
+    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing\s*\{[^}]*background-color: #7c3a00 !important;[^}]*color: #fed7aa !important;/s)
+    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-input-wrapper,\s*\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*color: #fed7aa !important;/s)
   })
 
   it('keeps read and edit text on the same horizontal inset', () => {
