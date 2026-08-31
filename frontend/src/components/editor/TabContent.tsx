@@ -11,6 +11,7 @@ import QueryEditor from './QueryEditor'
 import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './ResultGrid'
 import { buildResultGridRowId } from '../../utils/rowIdentity'
 import ResultToolbar from './ResultToolbar'
+import FilterHistoryDropdown from './FilterHistoryDropdown'
 import { Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
 import Button from '../ui/Button'
 import LimitSelect from '../ui/LimitSelect'
@@ -26,6 +27,7 @@ import { Prec, type Extension } from '@codemirror/state'
 import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
 import { isMac } from '../../utils/platform'
+import { loadFilterHistory, recordFilterHistory } from '../../utils/filterHistory'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
@@ -943,10 +945,15 @@ function TableTab({ tab, active = true }: Props) {
   const [whereFilter, setWhereFilter] = useState(initialDataState.whereFilter)
   const [appliedWhere, setAppliedWhere] = useState(initialDataState.appliedWhere)
   const [showFilterBar, setShowFilterBar] = useState(initialDataState.showFilterBar)
+  const [filterHistory, setFilterHistory] = useState<string[]>(() => loadFilterHistory(tab.database, tab.table))
   const [filterWordWrap, setFilterWordWrap] = useState(() => {
     const saved = localStorage.getItem(KEY_FILTER_WORD_WRAP)
     return saved !== null ? saved === 'true' : true
   })
+  // Reload history if the tab is rebound to a different table.
+  useEffect(() => {
+    setFilterHistory(loadFilterHistory(tab.database, tab.table))
+  }, [tab.database, tab.table])
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set())
   const [showColPicker, setShowColPicker] = useState(false)
   const [colSearch, setColSearch] = useState('')
@@ -1060,6 +1067,10 @@ function TableTab({ tab, active = true }: Props) {
         setResult(res)
         if (!res.error && commitWhereOnSuccess !== undefined) {
           setAppliedWhere(commitWhereOnSuccess)
+          // History only learns filters that actually ran — errored SQL never enters the recent list.
+          if (commitWhereOnSuccess.trim()) {
+            setFilterHistory(recordFilterHistory(tab.database, tab.table, commitWhereOnSuccess))
+          }
         }
       }
       try { addEntry({ sql: selectSql, sessionId: tab.sessionId, database: tab.database, rowCount: res.row_count ?? undefined, execTimeMs: res.exec_time_ms ?? (performance.now() - started), error: res.error ?? undefined }) } catch { /* ignore */ }
@@ -1526,6 +1537,13 @@ function TableTab({ tab, active = true }: Props) {
     loadDataRef.current(undefined, globalSearch, whereFilter, whereFilter)
   }, [whereFilter, globalSearch])
 
+  // Picking a recent filter commits it immediately (same contract as Apply),
+  // passing the picked value directly so no stale-state round-trip is needed.
+  const handleSelectFilterHistory = useCallback((filter: string) => {
+    setWhereFilter(filter)
+    loadDataRef.current(undefined, globalSearch, filter, filter)
+  }, [globalSearch])
+
   const handleClearFilter = () => {
     setWhereFilter('')
     setAppliedWhere('')
@@ -1889,6 +1907,7 @@ function TableTab({ tab, active = true }: Props) {
         <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto', transition: surfaceTransition }} exit={{ opacity: 0, height: 0, transition: exitTransition }} className="overflow-hidden border-b border-surface-700 bg-surface-900">
         <div className="flex items-center flex-wrap gap-2 px-3 py-1.5">
           <span className="inline-flex h-[34px] self-start items-center text-xs leading-none text-slate-500 font-mono shrink-0">WHERE</span>
+          <FilterHistoryDropdown history={filterHistory} onSelect={handleSelectFilterHistory} />
           <div className="flex-1 min-w-[220px] rounded overflow-visible border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
             <ReactCodeMirror
               value={whereFilter}

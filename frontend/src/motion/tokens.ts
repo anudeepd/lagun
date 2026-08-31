@@ -43,3 +43,11 @@ export const exitSpring: Transition = {
   damping: 32,
   mass: 0.6,
 }
+
+// Dismiss "pop off": the surface briefly bulges toward the viewer, then
+// shrinks away. Keyframed so the bulge is visible before the shrink begins.
+export const popOffTransition: Transition = {
+  duration: 0.24,
+  times: [0, 0.35, 1],
+  ease: motionEase.exit,
+}

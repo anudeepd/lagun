@@ -4,7 +4,7 @@ import { AnimatePresence, useIsPresent } from 'motion/react'
 import * as m from 'motion/react-m'
 import { X } from 'lucide-react'
 import Button from './Button'
-import { exitSpring, motionDistance, spatialTransition, surfaceTransition } from '../../motion/tokens'
+import { exitSpring, motionDistance, popOffTransition, spatialTransition, surfaceTransition } from '../../motion/tokens'
 
 interface ModalProps {
   open: boolean
@@ -56,7 +56,7 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
         tabIndex={isPresent ? -1 : undefined}
         initial={{ opacity: 0, y: motionDistance.subtle, scale: 0.96, rotateX: -1 }}
         animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0, transition: { ...spatialTransition, delay: 0.05 } }}
-        exit={{ opacity: 0, y: motionDistance.surface, scale: 0.96, transition: exitSpring }}
+        exit={{ opacity: [1, 0.85, 0], y: [0, -3, 8], scale: [1, 1.03, 0.92], transition: popOffTransition }}
         className={`relative flex max-h-[90vh] w-full flex-col rounded-lg border border-surface-700 bg-surface-900 shadow-2xl ${width}`}
       >
         <div className="flex items-center justify-between border-b border-surface-700 px-4 py-3">
