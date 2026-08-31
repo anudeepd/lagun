@@ -1907,7 +1907,7 @@ function TableTab({ tab, active = true }: Props) {
         <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto', transition: surfaceTransition }} exit={{ opacity: 0, height: 0, transition: exitTransition }} className="overflow-hidden border-b border-surface-700 bg-surface-900">
         <div className="flex items-center flex-wrap gap-2 px-3 py-1.5">
           <span className="inline-flex h-[34px] self-start items-center text-xs leading-none text-slate-500 font-mono shrink-0">WHERE</span>
-          <FilterHistoryDropdown history={filterHistory} onSelect={handleSelectFilterHistory} />
+          <FilterHistoryDropdown history={filterHistory} activeFilter={appliedWhere} onSelect={handleSelectFilterHistory} />
           <div className="flex-1 min-w-[220px] rounded overflow-visible border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
             <ReactCodeMirror
               value={whereFilter}
