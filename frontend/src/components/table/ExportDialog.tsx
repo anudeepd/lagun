@@ -405,7 +405,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             <span>Include schema name</span>
           </label>
         )}
-        <label className={`flex items-center gap-2 cursor-pointer ${aiCheckboxDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+        <label className={`flex items-center gap-2 text-sm text-slate-300 cursor-pointer ${aiCheckboxDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
           <input
             type="checkbox"
             checked={includeAutoIncrement}
@@ -414,7 +414,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             className="accent-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
             title="When unchecked, auto-increment columns are excluded from INSERT values and CSV output. DELETE WHERE clauses always reference primary keys (or all columns if no primary key exists) regardless of this setting. Has no effect for DELETE-only exports. Not available for query results or when auto-increment metadata is unavailable."
           />
-          <span className="text-xs text-slate-300">Include auto-increment columns</span>
+          <span>Include auto-increment columns</span>
         </label>
         <Input
           label="Batch Size"
