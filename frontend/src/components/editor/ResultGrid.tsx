@@ -430,6 +430,12 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     [selectable]
   )
 
+  // The auto-generated checkbox column is a row toggle, not data: keep it out
+  // of keyboard navigation so it never takes cell focus (and its highlight).
+  const selectionColumnDef = useMemo(() => ({
+    suppressNavigable: true,
+  }), [])
+
   const defaultColDef = useMemo(() => ({
     minWidth: 80,
     flex: 1,
@@ -465,6 +471,16 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }, [])
 
   const handleCellClicked = useCallback((e: CellClickedEvent<Record<string, unknown>>) => {
+    // The selection checkbox is a 16px native input inside a ~50px cell, so
+    // clicks on the cell padding do nothing by default. Toggle the row for
+    // the whole cell, except when the box itself was hit (it toggles
+    // natively — toggling again here would cancel it out).
+    const target = e.event?.target as HTMLElement | null
+    const cell = target?.closest?.('.ag-cell') ?? null
+    if (cell?.querySelector('input[type="checkbox"]') && !target?.closest?.('input')) {
+      e.node.setSelected(!e.node.isSelected())
+      return
+    }
     if (!e.colDef.field || e.rowIndex == null || !e.data) return
     rememberActiveCell({
       rowIndex: e.rowIndex,
@@ -861,6 +877,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         onBodyScroll={closeMenu}
         defaultColDef={defaultColDef}
         rowSelection={rowSelectionConfig}
+        selectionColumnDef={selectionColumnDef}
         suppressContextMenu
         preventDefaultOnContextMenu
         stopEditingWhenCellsLoseFocus

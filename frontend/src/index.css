@@ -231,6 +231,17 @@
     padding-right: 10px !important;
   }
 
+  /* The row-selection checkbox column is a toggle, not data: never show a
+     cell focus/range highlight on it. The row-selection background still applies. */
+  .lagun-result-grid .ag-cell[col-id^="ag-Grid-ControlsColumn"].ag-cell-focus,
+  .lagun-result-grid .ag-cell[col-id^="ag-Grid-ControlsColumn"]:focus-within,
+  .lagun-result-grid .ag-cell[col-id^="ag-Grid-ControlsColumn"].ag-cell-range-selected,
+  .lagun-result-grid .ag-cell[col-id^="ag-Grid-ControlsColumn"].ag-cell-range-single-cell {
+    border-color: transparent !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
   .lagun-result-grid .ag-cell.find-match {
     background: rgba(250, 204, 21, 0.25);
     outline: 1px solid rgb(250, 204, 21);
@@ -251,7 +262,8 @@
   }
 
   .lagun-result-grid .ag-cell-inline-editing .ag-input-wrapper,
-  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input {
+  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input,
+  .lagun-result-grid .ag-cell-inline-editing .ag-number-field-input {
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -259,7 +271,8 @@
     color: #fed7aa !important;
   }
 
-  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input {
+  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input,
+  .lagun-result-grid .ag-cell-inline-editing .ag-number-field-input {
     padding: 0;
     /* Keep the cell's focus ring; Waterfox otherwise adds a second inner ring. */
     outline: none;

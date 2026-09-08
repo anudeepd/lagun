@@ -22,15 +22,23 @@ describe('data typography', () => {
 
 describe('inline cell editor', () => {
   it('uses a single cell focus ring without a nested input border', () => {
-    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-input-wrapper,\s*\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*border: 0;/s)
-    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*padding: 0;/s)
-    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*outline: none;/s)
+    expect(css).toContain('.lagun-result-grid .ag-cell-inline-editing .ag-number-field-input')
+    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-input-wrapper,[\s\S]*?\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input[\s\S]*?\{[^}]*border: 0;/s)
+    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input,[\s\S]*?\.lagun-result-grid \.ag-cell-inline-editing \.ag-number-field-input\s*\{[^}]*padding: 0;/s)
+    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input,[\s\S]*?\.lagun-result-grid \.ag-cell-inline-editing \.ag-number-field-input\s*\{[^}]*outline: none;/s)
     expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing\s*\{[^}]*border: 0 !important;[^}]*box-shadow: none !important;/s)
     expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing\s*\{[^}]*background-color: #7c3a00 !important;[^}]*color: #fed7aa !important;/s)
-    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-input-wrapper,\s*\.lagun-result-grid \.ag-cell-inline-editing \.ag-text-field-input\s*\{[^}]*color: #fed7aa !important;/s)
+    expect(css).toMatch(/\.lagun-result-grid \.ag-cell-inline-editing \.ag-input-wrapper,[\s\S]*?\.lagun-result-grid \.ag-cell-inline-editing \.ag-number-field-input\s*\{[^}]*color: #fed7aa !important;/s)
   })
 
   it('keeps read and edit text on the same horizontal inset', () => {
     expect(css).toMatch(/\.lagun-result-grid \.ag-cell\s*\{[^}]*padding-left: 10px !important;[^}]*padding-right: 10px !important;/s)
+  })
+
+  it('shows no cell focus highlight on the row-selection checkbox column', () => {
+    expect(css).toContain('.lagun-result-grid .ag-cell[col-id^="ag-Grid-ControlsColumn"].ag-cell-focus')
+    expect(css).toContain('.lagun-result-grid .ag-cell[col-id^="ag-Grid-ControlsColumn"]:focus-within')
+    expect(css).toMatch(/ag-Grid-ControlsColumn[\s\S]*?\{[^}]*border-color: transparent !important;/s)
+    expect(css).toMatch(/ag-Grid-ControlsColumn[\s\S]*?\{[^}]*box-shadow: none !important;/s)
   })
 })
