@@ -1,6 +1,6 @@
 {
   "name": "lagun-frontend",
-  "version": "0.1.88",
+  "version": "0.1.89",
   "type": "module",
   "private": true,
   "engines": {
