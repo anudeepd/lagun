@@ -599,13 +599,31 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     // Backup navigation for Enter/Shift+Enter/Escape while the find bar is open.
     // The input's own onKeyDown in GridSearchBar is the primary path, but the
     // debounced match scan re-renders the grid (columnDefs re-created,
-    // refreshCells forced) and focus can drift off the input; this window-level
-    // capture handler is the safety net so navigation keeps working no matter
-    // where focus is. The search input itself is skipped so its own handler
-    // fires (avoiding double-advance on Enter).
+    // refreshCells forced) and focus can drift off the input onto the grid
+    // container; this window-level capture handler is the safety net so
+    // navigation keeps working when focus is inside the grid. It must NOT
+    // steal keys from editing surfaces outside the grid (WHERE filter
+    // CodeMirror autocomplete, global search, query editor, …) — plain Enter
+    // there accepts a completion instead of jumping to the next find match.
     const handleNavKey = (e: KeyboardEvent) => {
       if (!findOpen) return
       if (e.target instanceof HTMLInputElement && e.target.type === 'search' && e.target.closest('[role="search"]')) return
+      // Never steal keys from text editing surfaces: plain Enter accepts
+      // autocomplete / commits text and Escape dismisses completions first.
+      if (isTextInputTarget(e.target)) return
+      if (e.target instanceof HTMLElement && e.target.closest('.cm-editor')) return
+      if ((agApiRef.current?.getEditingCells().length ?? 0) > 0) return
+      // Only act when focus is inside this grid (find bar or cells). Focus in
+      // the toolbar / filter bar / query editor belongs to that component.
+      // Body (nothing focused) still navigates so keyboard-only use keeps working.
+      const root = rootRef.current
+      const eventNode = e.target instanceof Node ? e.target : null
+      const active = document.activeElement
+      const insideGrid = Boolean(root && ((eventNode && root.contains(eventNode)) || (active && root.contains(active))))
+      if (!insideGrid && active !== document.body && active != null) return
+      // Enter on a focused button already activates that button (find
+      // Next/Prev, Apply filter, …) — handling it here too would double-fire.
+      if (e.key === 'Enter' && e.target instanceof HTMLButtonElement) return
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault()
         handleNext()

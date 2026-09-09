@@ -148,4 +148,91 @@ describe('ResultGrid search wiring', () => {
     fireEvent(window, new Event('lagun:open-find'))
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
   })
+
+  it('Enter in an outside text input (e.g. WHERE filter) does NOT advance find matches', async () => {
+    renderResultGrid()
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const input = screen.getByRole('searchbox')
+    await userEvent.type(input, 'a')
+    await waitForMatches()
+    expect(screen.getByText('1 of 2')).toBeInTheDocument()
+    Object.keys(__calls).forEach(k => delete __calls[k])
+
+    // Simulate the WHERE filter / global search input living outside the grid root.
+    const outside = document.createElement('input')
+    outside.type = 'text'
+    document.body.appendChild(outside)
+    outside.focus()
+    try {
+      fireEvent.keyDown(outside, { key: 'Enter' })
+      // Still on the first match — the key belonged to the outside editor
+      // (e.g. accepting filter autocomplete), not to find navigation.
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+      expect(__calls.ensureNodeVisible ?? []).toHaveLength(0)
+    } finally {
+      document.body.removeChild(outside)
+    }
+  })
+
+  it('Enter in an outside CodeMirror editor does NOT advance find matches', async () => {
+    renderResultGrid()
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const input = screen.getByRole('searchbox')
+    await userEvent.type(input, 'a')
+    await waitForMatches()
+    expect(screen.getByText('1 of 2')).toBeInTheDocument()
+    Object.keys(__calls).forEach(k => delete __calls[k])
+
+    const cmEditor = document.createElement('div')
+    cmEditor.className = 'cm-editor'
+    const cmContent = document.createElement('div')
+    cmContent.className = 'cm-content'
+    cmContent.setAttribute('contenteditable', 'true')
+    cmEditor.appendChild(cmContent)
+    document.body.appendChild(cmEditor)
+    cmContent.focus()
+    try {
+      fireEvent.keyDown(cmContent, { key: 'Enter' })
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+      expect(__calls.ensureNodeVisible ?? []).toHaveLength(0)
+    } finally {
+      document.body.removeChild(cmEditor)
+    }
+  })
+
+  it('Escape in an outside text input does NOT close the find bar', async () => {
+    renderResultGrid()
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const input = screen.getByRole('searchbox')
+    await userEvent.type(input, 'a')
+    await waitForMatches()
+    expect(screen.getByRole('searchbox')).toBeInTheDocument()
+
+    const outside = document.createElement('input')
+    outside.type = 'text'
+    document.body.appendChild(outside)
+    outside.focus()
+    try {
+      fireEvent.keyDown(outside, { key: 'Escape' })
+      // The outside editor owns Escape (dismiss autocomplete first).
+      expect(screen.getByRole('searchbox')).toBeInTheDocument()
+    } finally {
+      document.body.removeChild(outside)
+    }
+  })
+
+  it('Enter inside the grid root still advances matches (safety net)', async () => {
+    const { container } = renderResultGrid()
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const input = screen.getByRole('searchbox')
+    await userEvent.type(input, 'a')
+    await waitForMatches()
+    expect(screen.getByText('1 of 2')).toBeInTheDocument()
+
+    const gridRoot = container.querySelector('.lagun-result-grid') as HTMLElement
+    // Focus drifts off the find input onto the grid container after a scan.
+    gridRoot.focus()
+    fireEvent.keyDown(gridRoot, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText('2 of 2')).toBeInTheDocument())
+  })
 })
