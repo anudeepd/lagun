@@ -342,9 +342,9 @@ async def delete_session(session_id: str) -> bool:
         await db.commit()
         ok = cur.rowcount > 0
     if ok:
-        # Drop ANALYZE throttle entries cached for this session (schema.py).
-        # Deferred import keeps the schema -> session_store dependency acyclic.
-        from lagun.api.schema import invalidate_analyze_cache
+        # Drop ANALYZE throttle entries cached for this session (table_ops.py).
+        # Deferred import keeps the api -> session_store dependency acyclic.
+        from lagun.api.table_ops import invalidate_analyze_cache
 
         invalidate_analyze_cache(session_id)
     return ok

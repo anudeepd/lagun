@@ -1,5 +1,5 @@
 import { redirectToLdapLogin } from '../utils/authRedirect'
-import type { AdminActivityFilters, AdminActivityResponse, AdminConnectionsResponse, AdminOverview, AdminRetention, AdminUsersResponse, PresenceUpdate, QueryResult } from '../types'
+import type { AdminActivityFilters, AdminActivityResponse, AdminConnectionsResponse, AdminOverview, AdminRetention, AdminUsersResponse, PresenceUpdate, QueryResult, TableInfo } from '../types'
 
 const BASE = '/api/v1'
 function formatApiError(status: number, payload: unknown): string {
@@ -86,6 +86,14 @@ export const api = {
     request<string[]>(`/sessions/${sessionId}/databases`),
   getTables: (sessionId: string, db: string, signal?: AbortSignal) =>
     request<import('../types').TableInfo[]>(`/sessions/${sessionId}/databases/${db}/tables`, { signal }),
+  getTablesBatch: (sessionId: string, databases: string[], signal?: AbortSignal) => {
+    const params = new URLSearchParams()
+    databases.forEach(db => params.append('databases', db))
+    return request<Record<string, TableInfo[]>>(
+      `/sessions/${sessionId}/tables?${params.toString()}`,
+      { signal }
+    )
+  },
   getColumns: (sessionId: string, db: string, table: string, signal?: AbortSignal) =>
     request<import('../types').ColumnInfo[]>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/columns`,
@@ -101,6 +109,11 @@ export const api = {
   getCreateSql: (sessionId: string, db: string, table: string) =>
     request<{ create_sql: string }>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/create_sql`
+    ),
+  analyzeTable: (sessionId: string, db: string, table: string, force = false) =>
+    request<{ ok: boolean; analyzed: boolean; row_count: number | null; data_length: number | null }>(
+      `/sessions/${sessionId}/databases/${db}/tables/${table}/analyze?force=${force}`,
+      { method: 'POST' }
     ),
 
   // Query

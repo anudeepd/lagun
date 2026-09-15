@@ -79,9 +79,18 @@ export const handlers = [
 
   // Schema
   http.get(`${BASE}/sessions/:id/databases`, () => HttpResponse.json(mockDatabases)),
+  http.get(`${BASE}/sessions/:id/tables`, ({ request }) => {
+    const databases = new URL(request.url).searchParams.getAll('databases')
+    return HttpResponse.json(
+      Object.fromEntries(databases.map(db => [db, mockTables]))
+    )
+  }),
   http.get(`${BASE}/sessions/:id/databases/:db/tables`, () => HttpResponse.json(mockTables)),
   http.get(`${BASE}/sessions/:id/databases/:db/tables/:table/columns`, () =>
     HttpResponse.json(mockColumns)
+  ),
+  http.post(`${BASE}/sessions/:id/databases/:db/tables/:table/analyze`, () =>
+    HttpResponse.json({ ok: true, analyzed: true, row_count: 2, data_length: 16384 })
   ),
 
   // Script execution

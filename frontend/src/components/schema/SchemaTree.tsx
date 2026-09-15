@@ -48,7 +48,7 @@ function useBookmarks(sessionId: string) {
 }
 
 export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
-  const { databases, loadDatabases, loadTables, tables, invalidateSession, loadingDbs, loadingTables } = useSchemaStore()
+  const { databases, loadDatabases, loadTables, loadTablesBatch, tables, invalidateSession, loadingDbs, loadingTables } = useSchemaStore()
   const { openTableTab, openQueryTab } = useTabStore()
   const [expandedDbs, setExpandedDbs] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
@@ -92,10 +92,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     setExpandedDbs(new Set())
     invalidateSession(sessionId)
     const refreshedDatabases = await loadDatabases(sessionId)
-    await Promise.all(
-      openDatabases
-        .filter(db => refreshedDatabases.includes(db))
-        .map(db => loadTables(sessionId, db)),
+    await loadTablesBatch(
+      sessionId,
+      openDatabases.filter(db => refreshedDatabases.includes(db)),
     )
     setExpandedDbs(new Set(openDatabases.filter(db => refreshedDatabases.includes(db))))
     setQuery('')
@@ -105,10 +104,8 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     setQuery(q)
     if (q) {
       const scopeDbs = expandedDbs.size > 0 ? dbs.filter(db => expandedDbs.has(db)) : dbs
-      scopeDbs.forEach(db => {
-        setExpandedDbs(prev => new Set([...prev, db]))
-        if (!tables[`${sessionId}/${db}`]) loadTables(sessionId, db)
-      })
+      setExpandedDbs(prev => new Set([...prev, ...scopeDbs]))
+      loadTablesBatch(sessionId, scopeDbs)
     }
   }
 
@@ -128,13 +125,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     setShowBookmarksOnly(next)
     // When switching to bookmark view, expand all DBs that have bookmarks
     if (next) {
-      dbs.forEach(db => {
-        const hasBm = [...bookmarks].some(b => b.startsWith(`${db}/`))
-        if (hasBm) {
-          setExpandedDbs(prev => new Set([...prev, db]))
-          if (!tables[`${sessionId}/${db}`]) loadTables(sessionId, db)
-        }
-      })
+      const bookmarkedDbs = dbs.filter(db => [...bookmarks].some(b => b.startsWith(`${db}/`)))
+      setExpandedDbs(prev => new Set([...prev, ...bookmarkedDbs]))
+      loadTablesBatch(sessionId, bookmarkedDbs)
     }
   }
 
@@ -147,7 +140,13 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     return { db, tbls: filtered }
   }).filter(({ db, tbls }) => {
     if (showBookmarksOnly) return tbls.length > 0
-    return !q || tbls.length > 0 || db.toLowerCase().includes(q)
+    if (!q) return true
+    // A schema whose table list has not arrived yet cannot be ruled out as a
+    // match. Hiding it would blank the list and drop the schema name the
+    // moment the user starts typing, so keep it visible (with its spinner)
+    // until its tables are known.
+    if (tables[`${sessionId}/${db}`] === undefined) return true
+    return tbls.length > 0 || db.toLowerCase().includes(q)
   })
 
   const handleTableContext = (e: React.MouseEvent, db: string, table?: string) => {

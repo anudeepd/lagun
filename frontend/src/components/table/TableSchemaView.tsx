@@ -3,6 +3,7 @@ import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, Code2, Ke
 import SyntaxHighlighter from 'react-syntax-highlighter'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
 import Button from '../ui/Button'
+import RefreshIcon from '../ui/RefreshIcon'
 import { LoadingState } from '../ui/Spinner'
 import { clipboardWrite } from '../../utils/clipboard'
 import { api } from '../../api/client'
@@ -48,6 +49,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
   const [confirmDropCol, setConfirmDropCol] = useState<string | null>(null)
   const [confirmDropIdx, setConfirmDropIdx] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
   const [schemaSql, setSchemaSql] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -79,11 +81,11 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
     URL.revokeObjectURL(url)
   }
 
-  const flash = (msg: string) => {
+  const flash = useCallback((msg: string) => {
     setStatusMsg(msg)
     showToast(msg, msg.startsWith('Error') ? 'error' : 'success')
     setTimeout(() => setStatusMsg(null), 3000)
-  }
+  }, [])
 
   const reload = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -109,6 +111,28 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
     reload(controller.signal)
     return () => controller.abort()
   }, [sessionId, database, table, reload])
+
+  const refreshStats = useCallback(async (force: boolean) => {
+    if (force) setAnalyzing(true)
+    try {
+      const stats = await api.analyzeTable(sessionId, database, table, force)
+      setTableInfo(prev =>
+        prev ? { ...prev, row_count: stats.row_count, data_length: stats.data_length } : prev
+      )
+      if (force) flash(`Refreshed statistics for ${database}.${table}.`)
+    } catch (error) {
+      if (force) flash(`Error refreshing statistics: ${error}`)
+    } finally {
+      if (force) setAnalyzing(false)
+    }
+  }, [sessionId, database, table, flash])
+
+  // Ask the server to refresh this table's statistics. The automatic path is
+  // throttled server-side (and skipped for very large tables), so opening a
+  // table view costs nothing most of the time; the button forces it.
+  useEffect(() => {
+    void refreshStats(false)
+  }, [refreshStats])
 
   // Re-fetch when the parent bumps `refreshTrigger` (i.e. when switching back
   // to the Schema tab) so the row count isn't stale. Initial mount is handled
@@ -165,6 +189,15 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
           <span>Data: <span className="text-slate-200">{fmtBytes(tableInfo.data_length)}</span></span>
           {tableInfo.comment && <span className="text-slate-500 italic">{tableInfo.comment}</span>}
           <div className="flex-1" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => void refreshStats(true)}
+            disabled={analyzing}
+            title="Recompute this table's row count and size statistics"
+          >
+            <RefreshIcon refreshing={analyzing} size={11} /> Refresh Stats
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => setConfirmTruncate(true)}>
             <AlertTriangle size={11} /> Truncate
           </Button>

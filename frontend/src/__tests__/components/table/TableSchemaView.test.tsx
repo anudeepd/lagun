@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import TableSchemaView from '../../../components/table/TableSchemaView'
 import { api } from '../../../api/client'
 
@@ -12,14 +13,20 @@ vi.mock('../../../api/client', () => ({
     dropColumn: vi.fn(),
     dropIndex: vi.fn(),
     getCreateSql: vi.fn(),
+    analyzeTable: vi.fn(),
   },
+}))
+
+const { mockLoadColumns, mockInvalidateTable } = vi.hoisted(() => ({
+  mockLoadColumns: vi.fn(),
+  mockInvalidateTable: vi.fn(),
 }))
 
 vi.mock('../../../store/schemaStore', () => ({
   useSchemaStore: () => ({
     columns: {},
-    loadColumns: vi.fn(),
-    invalidateTable: vi.fn(),
+    loadColumns: mockLoadColumns,
+    invalidateTable: mockInvalidateTable,
   }),
 }))
 
@@ -85,6 +92,34 @@ describe('TableSchemaView columns table', () => {
     vi.mocked(api.getColumns).mockResolvedValue(mockColumns)
     vi.mocked(api.getIndexes).mockResolvedValue([])
     vi.mocked(api.getTables).mockResolvedValue([tableInfo])
+    vi.mocked(api.analyzeTable).mockResolvedValue({
+      ok: true,
+      analyzed: false,
+      row_count: tableInfo.row_count,
+      data_length: tableInfo.data_length,
+    })
+  })
+
+  it('refreshes only statistics for the opened table, and shows forced results', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.analyzeTable).mockResolvedValue({
+      ok: true,
+      analyzed: true,
+      row_count: 4242,
+      data_length: 2048,
+    })
+
+    render(<TableSchemaView {...baseProps} />)
+
+    // Opening the view asks the server for a throttled (non-forced) refresh.
+    await waitFor(() =>
+      expect(api.analyzeTable).toHaveBeenCalledWith('session-1', 'app_db', 'users', false),
+    )
+
+    await user.click(screen.getByRole('button', { name: /Refresh Stats/i }))
+
+    expect(api.analyzeTable).toHaveBeenCalledWith('session-1', 'app_db', 'users', true)
+    await waitFor(() => expect(screen.getByText('4,242')).toBeInTheDocument())
   })
 
   it('renders the # column header and 1-based row indices', async () => {

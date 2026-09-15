@@ -1,6 +1,8 @@
 """Table and index management endpoints."""
 
-from fastapi import APIRouter, HTTPException
+import time
+
+from fastapi import APIRouter, HTTPException, Query
 
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
@@ -23,6 +25,21 @@ from lagun.models.schema import (
 )
 
 router = APIRouter(tags=["table_ops"])
+
+# Automatic stats refresh (force=False) runs at most once per table per window.
+_ANALYZE_THROTTLE_SECONDS = 600.0
+# Skip the automatic path for very large tables; an explicit force=True still runs.
+_ANALYZE_SIZE_LIMIT_BYTES = 1 << 30  # 1 GiB
+_last_analyze: dict[tuple[str, str, str], float] = {}
+
+
+def invalidate_analyze_cache(session_id: str | None = None) -> None:
+    """Drop ANALYZE throttle entries. Pass session_id to clear one session; None to clear all."""
+    if session_id is None:
+        _last_analyze.clear()
+        return
+    for key in [k for k in _last_analyze if k[0] == session_id]:
+        del _last_analyze[key]
 
 
 async def _pool(session_id: str, db: str | None = None):
@@ -86,6 +103,64 @@ async def drop_table(session_id: str, db: str, table: str):
         async with conn.cursor() as cur:
             await cur.execute(sql)
     return {"ok": True}
+
+
+@router.post("/sessions/{session_id}/databases/{db}/tables/{table}/analyze")
+async def analyze_table(
+    session_id: str, db: str, table: str, force: bool = Query(False)
+) -> dict:
+    """Refresh InnoDB statistics for one table.
+
+    information_schema.TABLES.TABLE_ROWS is a sampling-based estimate; ANALYZE
+    TABLE recomputes it. Only the table in front of the user is ever analyzed —
+    a schema-wide ANALYZE would run for every table a listing happens to touch.
+
+    Callers pass force=False for the automatic refresh that happens when a table
+    view opens; that path is throttled and skips very large tables. force=True
+    is the explicit user request and always runs.
+    """
+    pool = await _pool(session_id, db)
+    qualified = f"{quote_ident(db)}.{quote_ident(table)}"
+    key = (session_id, db, table)
+    now = time.monotonic()
+
+    if not force and now - _last_analyze.get(key, float("-inf")) < _ANALYZE_THROTTLE_SECONDS:
+        analyzed = False
+    else:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT DATA_LENGTH FROM information_schema.TABLES
+                       WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s""",
+                    (db, table),
+                )
+                row = await cur.fetchone()
+                data_length = row[0] if row else None
+                if not force and data_length is not None and data_length >= _ANALYZE_SIZE_LIMIT_BYTES:
+                    analyzed = False
+                else:
+                    await cur.execute(f"ANALYZE TABLE {qualified}")
+                    await cur.fetchall()  # ANALYZE returns a status row set
+                    _last_analyze[key] = now
+                    analyzed = True
+
+    stats = await _table_stats(pool, db, table)
+    return {"ok": True, "analyzed": analyzed, **stats}
+
+
+async def _table_stats(pool, db: str, table: str) -> dict:
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT TABLE_ROWS, DATA_LENGTH FROM information_schema.TABLES
+                   WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s""",
+                (db, table),
+            )
+            row = await cur.fetchone()
+    return {
+        "row_count": row[0] if row else None,
+        "data_length": row[1] if row else None,
+    }
 
 
 @router.post("/sessions/{session_id}/databases/{db}/tables/{table}/truncate")

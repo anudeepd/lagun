@@ -44,6 +44,55 @@ async def test_create_and_drop_table(client, session_id, test_db):
     assert "products" not in names
 
 
+async def test_analyze_table_reports_fresh_stats(client, session_id, test_db):
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/analyze",
+        params={"force": "true"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["analyzed"] is True
+    assert body["row_count"] == 2
+    assert body["data_length"] is not None
+
+
+async def test_analyze_table_throttles_automatic_refresh(client, session_id, test_db):
+    """The automatic path runs once per table per window; force bypasses it."""
+    url = f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/analyze"
+
+    first = await client.post(url)
+    assert first.status_code == 200
+    assert first.json()["analyzed"] is True
+
+    throttled = await client.post(url)
+    assert throttled.status_code == 200
+    assert throttled.json()["analyzed"] is False
+    # Stats are still reported, so the caller can render them.
+    assert throttled.json()["row_count"] == 2
+
+    forced = await client.post(url, params={"force": "true"})
+    assert forced.json()["analyzed"] is True
+
+
+async def test_analyze_table_requires_an_accessible_session(client, session_id, test_db):
+    missing = await client.post(
+        "/api/v1/sessions/no-such-session/databases/lagun_test/tables/users/analyze"
+    )
+    assert missing.status_code == 404
+
+
+async def test_listing_tables_does_not_refresh_stats(client, session_id, test_db):
+    """Reading a schema's table list must not trigger ANALYZE for its tables."""
+    from lagun.api import table_ops
+
+    table_ops._last_analyze.clear()
+    r = await client.get(f"/api/v1/sessions/{session_id}/databases/{test_db}/tables")
+    assert r.status_code == 200
+
+    assert table_ops._last_analyze == {}
+
+
 async def test_truncate_table(client, session_id, test_db):
     r = await client.post(
         f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/truncate"

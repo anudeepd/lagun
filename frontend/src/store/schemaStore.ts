@@ -5,6 +5,9 @@ import type { TableInfo, ColumnInfo } from '../types'
 // Module-level in-flight promise maps — not in Zustand state (which is only for UI indicators)
 const _inflightDbs: Partial<Record<string, Promise<string[]>>> = {}
 const _inflightTables: Partial<Record<string, Promise<TableInfo[]>>> = {}
+// Keys with a batch table fetch in flight, so repeated keystrokes do not
+// re-request the same schemas.
+const _pendingTableBatches = new Set<string>()
 const _inflightColumns: Partial<Record<string, Promise<ColumnInfo[]>>> = {}
 
 interface SchemaState {
@@ -20,6 +23,7 @@ interface SchemaState {
 
   loadDatabases: (sessionId: string) => Promise<string[]>
   loadTables: (sessionId: string, db: string) => Promise<TableInfo[]>
+  loadTablesBatch: (sessionId: string, dbs: string[]) => Promise<void>
   loadColumns: (sessionId: string, db: string, table: string) => Promise<ColumnInfo[]>
   invalidateSession: (sessionId: string) => void
   invalidateTable: (sessionId: string, db: string, table: string) => void
@@ -76,6 +80,36 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
     }).finally(() => { delete _inflightTables[key] })
     _inflightTables[key] = promise
     return promise
+  },
+
+  loadTablesBatch: async (sessionId, dbs) => {
+    const { tables } = get()
+    const wanted = [...new Set(dbs)].filter(db => {
+      const key = `${sessionId}/${db}`
+      return tables[key] === undefined && !_pendingTableBatches.has(key)
+    })
+    if (wanted.length === 0) return
+
+    const keys = wanted.map(db => `${sessionId}/${db}`)
+    const keySet = new Set(keys)
+    keys.forEach(key => _pendingTableBatches.add(key))
+    set(s => ({ loadingTables: new Set([...s.loadingTables, ...keys]) }))
+    const finish = () => {
+      keys.forEach(key => _pendingTableBatches.delete(key))
+      set(s => ({ loadingTables: new Set([...s.loadingTables].filter(k => !keySet.has(k))) }))
+    }
+    try {
+      const grouped = await api.getTablesBatch(sessionId, wanted)
+      set(s => {
+        const next = { ...s.tables }
+        wanted.forEach(db => { next[`${sessionId}/${db}`] = grouped[db] ?? [] })
+        return { tables: next }
+      })
+    } finally {
+      // A failed batch leaves those schemas unknown, so they stay visible
+      // under a search filter and can be retried.
+      finish()
+    }
   },
 
   loadColumns: async (sessionId, db, table) => {
