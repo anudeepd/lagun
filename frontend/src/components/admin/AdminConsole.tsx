@@ -346,6 +346,7 @@ function UsersPanel({
       <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">LDAP access policy and live workspace activity</caption>
+          <colgroup><col className="w-[32%]" /><col className="w-[18%]" /><col className="w-[16%]" /><col className="w-[14%]" /><col className="w-[20%]" /></colgroup>
           <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600">
             <tr>
               <th scope="col" className="px-4 py-2">User</th>
@@ -358,15 +359,15 @@ function UsersPanel({
           <tbody>
             {users.map(user => (
               <tr key={user.username} className="border-b border-surface-800/70 last:border-0">
-                <td className="break-words px-4 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
-                <td className="px-4 py-3">
+                <td className="align-top break-words px-4 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
+                <td className="align-top px-4 py-3">
                   <span className={`rounded-full px-2 py-1 text-[10px] ${user.policy_state === 'allowed' ? 'bg-green-950/40 text-green-300' : 'bg-slate-800 text-slate-500'}`}>
                     {user.policy_state === 'allowed' ? 'Allowed' : 'Observed only'}
                   </span>
                 </td>
-                <td className="px-4 py-3 font-mono tabular-nums text-slate-400">{user.active_clients}</td>
-                <td className="px-4 py-3 font-mono tabular-nums text-slate-400">{user.active_tabs}</td>
-                <td className="px-4 py-3 text-right">
+                <td className="align-top px-4 py-3 font-mono tabular-nums text-slate-400">{user.active_clients}</td>
+                <td className="align-top px-4 py-3 font-mono tabular-nums text-slate-400">{user.active_tabs}</td>
+                <td className="align-top px-4 py-3 text-right">
                   {user.policy_state === 'allowed' && (
                     <button type="button" disabled={Boolean(busyUsername)} onClick={() => onRequestRemove(user.username)} className="min-h-8 rounded border border-red-900/60 px-2.5 py-1.5 text-[11px] text-red-300 hover:bg-red-950/40 disabled:opacity-50">
                       {busyUsername === user.username ? 'Applying…' : 'Remove'}
@@ -423,6 +424,7 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
         </div>
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Connection posture preview</caption>
+          <colgroup><col className="w-[36%]" /><col className="w-[14%]" /><col className="w-[28%]" /><col className="w-[22%]" /></colgroup>
         <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-4 py-2">Connection</th><th scope="col" className="px-4 py-2">Type</th><th scope="col" className="px-4 py-2">Access</th><th scope="col" className="px-4 py-2">Scope</th></tr></thead>
           <tbody>
             {connections.slice(0, 5).map(connection => <ConnectionRow key={connection.id} connection={connection} />)}
@@ -437,11 +439,11 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
 function ConnectionRow({ connection }: { connection: AdminConnection }) {
   return (
     <tr className="border-b border-surface-800/70 last:border-0">
-      <td className="break-words px-4 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
-      <td className="break-words px-4 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
+      <td className="align-top break-words px-4 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
+      <td className="align-top break-words px-4 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
 
-      <td className="break-words px-4 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
-      <td className="break-words px-4 py-3 text-slate-500 [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
+      <td className="align-top break-words px-4 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
+      <td className="align-top break-words px-4 py-3 text-slate-500 [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
     </tr>
   )
 }
@@ -635,6 +637,7 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
       <div id="connection-inventory-table" className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Saved connection inventory and active users</caption>
+          <colgroup><col className="w-[25%]" /><col className="w-[17%]" /><col className="w-[12%]" /><col className="w-[15%]" /><col className="w-[16%]" /><col className="w-[15%]" /></colgroup>
           <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Owner / access</th><th scope="col" className="px-3 py-2">Database identity</th><th scope="col" className="px-3 py-2">Scope</th><th scope="col" className="px-3 py-2">Connected users / tabs</th><th scope="col" className="px-3 py-2">Updated</th></tr></thead>
           <tbody>
             {connections.map(connection => {
@@ -645,11 +648,11 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
               })
               return (
                 <tr key={connection.id} className="border-b border-surface-800/70 last:border-0">
-                  <td className="break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
-                  <td className="break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-slate-600 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
-                  <td className="break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
-                  <td className="break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
-                  <td className="px-3 py-3 align-top">
+                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
+                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-slate-600 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
+                  <td className="align-top break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
+                  <td className="align-top break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
+                  <td className="align-top px-3 py-3">
                     {activeUsers.size ? (
                       <div className="grid min-w-0 gap-2">
                         {[...activeUsers.entries()].map(([username, labels]) => {
@@ -683,7 +686,7 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
                       </div>
                     ) : <span className="text-slate-600">No active users</span>}
                   </td>
-                  <td className="break-words px-3 py-3 text-slate-500 [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
+                  <td className="align-top break-words px-3 py-3 text-slate-500 [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
                 </tr>
               )
             })}
@@ -744,7 +747,7 @@ function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEven
       <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="block w-full table-fixed text-left text-xs lg:table">
           <caption className="sr-only">Lagun API audit events with raw request targets and bodies</caption>
-          <colgroup className="hidden lg:table-column-group"><col className="w-36" /><col className="w-28" /><col /><col className="w-20" /><col className="w-24" /></colgroup>
+          <colgroup className="hidden lg:table-column-group"><col className="w-44" /><col className="w-36" /><col /><col className="w-20" /><col className="w-24" /></colgroup>
           <thead className="hidden sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600 lg:table-header-group"><tr><th scope="col" className="px-3 py-2">When</th><th scope="col" className="px-3 py-2">Actor</th><th scope="col" className="px-3 py-2">Request</th><th scope="col" className="px-3 py-2">Status</th><th scope="col" className="px-3 py-2 text-right">Duration</th></tr></thead>
           <tbody className="block lg:table-row-group">
             {events.map(event => <ActivityEventRow key={`${event.occurred_at}-${event.path}-${event.duration_ms}`} event={event} />)}
@@ -759,9 +762,9 @@ function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEven
 function ActivityEventRow({ event }: { event: AdminActivityEvent }) {
   return (
     <tr className="block border-b border-surface-800/70 px-3 py-3 last:border-0 lg:table-row lg:px-0 lg:py-0">
-      <td className="flex justify-between gap-3 py-1 text-slate-500 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">When</span><span>{formatDate(event.occurred_at)}</span></td>
+      <td className="flex justify-between gap-3 py-1 text-slate-500 lg:table-cell lg:px-3 lg:py-3 lg:align-top lg:whitespace-nowrap"><span className="text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">When</span><span>{formatDate(event.occurred_at)}</span></td>
       <td className="flex min-w-0 justify-between gap-3 py-1 font-medium text-slate-200 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] font-normal uppercase tracking-wider text-slate-600 lg:hidden">Actor</span><span className="break-words [overflow-wrap:anywhere]">{event.username}</span></td>
-      <td className="min-w-0 py-2 align-top lg:px-3 lg:py-3">
+      <td className="block min-w-0 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top">
         <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">Request</span>
         <div className="break-words font-mono text-[11px] leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{event.method} {event.path}</div>
         {event.details && (
