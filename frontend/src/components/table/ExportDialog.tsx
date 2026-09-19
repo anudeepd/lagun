@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import { clipboardWrite } from '../../utils/clipboard'
 import { apiFetch } from '../../api/client'
@@ -231,6 +231,29 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const [csvEscapechar, setCsvEscapechar] = useState('"')
   const [csvLineterminator, setCsvLineterminator] = useState('crlf')
   const [csvEncoding, setCsvEncoding] = useState('utf-8')
+
+  // Callers keep this dialog mounted so Modal can play its exit animation, so a
+  // fresh open no longer remounts and resets the form. Reset it here instead;
+  // the reset lands while the dialog is still fully transparent.
+  useEffect(() => {
+    if (!open) return
+    setFormat(customSql ? 'csv' : 'insert')
+    setInsertMode('single')
+    setBatchSize('500')
+    setIncludeSchema(false)
+    setIncludeAutoIncrement(false)
+    setExporting(false)
+    setCopying(false)
+    setCopied(false)
+    setError(null)
+    setShowAdvanced(false)
+    setCsvDelimiter(',')
+    setCsvDelimiterCustom('')
+    setCsvQuotechar('"')
+    setCsvEscapechar('"')
+    setCsvLineterminator('crlf')
+    setCsvEncoding('utf-8')
+  }, [open, customSql])
 
   // Map line ending names to actual characters
   const lineTerminatorMap: Record<string, string> = {

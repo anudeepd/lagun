@@ -102,13 +102,11 @@ export default function SessionList() {
           </div>
         </m.div>
       ))}
-      {editSession && (
-        <SessionForm
-          open={!!editSession}
-          onClose={() => setEditSession(null)}
-          session={editSession}
-        />
-      )}
+      <SessionForm
+        open={!!editSession}
+        onClose={() => setEditSession(null)}
+        session={editSession ?? undefined}
+      />
       <ConfirmDialog
         open={!!deleteTarget}
         title="Delete Connection"

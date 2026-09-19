@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import type { ScriptQueryValidationResult } from '../../types'
 
 interface BulkConfirmDialogProps {
   open: boolean
-  validation: ScriptQueryValidationResult
+  validation?: ScriptQueryValidationResult
   database?: string
   statements: string[]
   onConfirm: () => void
@@ -19,12 +19,20 @@ function preview(statement: string): string {
 export default function BulkConfirmDialog({ open, validation, database, statements, onConfirm, onClose }: BulkConfirmDialogProps) {
   const [acknowledged, setAcknowledged] = useState(false)
 
-  const inserts = validation.operation_counts.INSERT ?? 0
-  const updates = validation.operation_counts.UPDATE ?? 0
-  const deletes = validation.operation_counts.DELETE ?? 0
+  // Callers keep this dialog mounted so Modal can play its exit animation, so a
+  // fresh open no longer remounts. The destructive-action acknowledgement must
+  // never carry over into the next run.
+  useEffect(() => {
+    if (open) setAcknowledged(false)
+  }, [open])
+
+  const counts = validation?.operation_counts
+  const inserts = counts?.INSERT ?? 0
+  const updates = counts?.UPDATE ?? 0
+  const deletes = counts?.DELETE ?? 0
   const hasDestructive = updates > 0 || deletes > 0
 
-  const total = validation.statement_count
+  const total = validation?.statement_count ?? 0
   const label = hasDestructive
     ? `Run ${total.toLocaleString()} writes (destructive)`
     : `Run ${total.toLocaleString()} inserts`

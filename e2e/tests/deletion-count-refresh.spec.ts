@@ -47,12 +47,15 @@ test.describe('Deletion count refresh', () => {
     await page.locator('span.text-xs.truncate', { hasText: 'E2E Test Session' }).click()
     await expect(page.getByText('e2e_test')).toBeVisible()
 
-    // Expand the e2e_test database in the schema tree
-    await page.getByRole('button', { name: 'e2e_test' }).click()
-    await expect(page.getByRole('button', { name: 'products' })).toBeVisible()
+    // Expand the e2e_test database in the schema tree. `exact` keeps the row
+    // button from also matching its sibling "New query on e2e_test" button.
+    await page.getByRole('button', { name: 'e2e_test', exact: true }).click()
+    // `exact` keeps the table row button from also matching its sibling
+    // "Bookmark e2e_test.products" button.
+    await expect(page.getByRole('button', { name: 'products', exact: true })).toBeVisible()
 
     // Open the products table (opens a table tab)
-    await page.getByRole('button', { name: 'products' }).click()
+    await page.getByRole('button', { name: 'products', exact: true }).click()
 
     // Switch from Schema view to Data view
     await page.getByRole('button', { name: 'Data', exact: true }).click()
@@ -63,7 +66,7 @@ test.describe('Deletion count refresh', () => {
 
   test('Deletion immediately updates row count in toolbar', async ({ page }) => {
     // Verify initial row count in the ResultToolbar
-    await expect(page.getByText(rowCountLabel(TOTAL_ROWS))).toBeVisible({ timeout: 5_000 })
+    await expect(page.locator('main').getByText(rowCountLabel(TOTAL_ROWS))).toBeVisible({ timeout: 5_000 })
 
     // Select first 2 rows via their checkboxes
     // Use .ag-row to scope to data rows only (header has .ag-header-row)
@@ -75,7 +78,7 @@ test.describe('Deletion count refresh', () => {
     await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
 
     // Context menu appears with "Delete N rows" option
-    const deleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: 'Delete 2 rows' })
+    const deleteBtn = page.getByRole('menuitem', { name: 'Delete 2 rows' })
     await expect(deleteBtn).toBeVisible({ timeout: 3_000 })
     await deleteBtn.click({ force: true })
     await page.getByRole('button', { name: 'Delete Rows' }).click()
@@ -84,7 +87,7 @@ test.describe('Deletion count refresh', () => {
     // Assert the ResultToolbar count shows TOTAL_ROWS - 2
     // (no waiting for the server refresh from loadData)
     const expectedAfterFirst = TOTAL_ROWS - 2
-    await expect(page.getByText(rowCountLabel(expectedAfterFirst))).toBeVisible({ timeout: 5_000 })
+    await expect(page.locator('main').getByText(rowCountLabel(expectedAfterFirst))).toBeVisible({ timeout: 5_000 })
 
     // Assert deleted rows are no longer visible in the grid
     await expect(page.locator('.ag-row')).toHaveCount(expectedAfterFirst)
@@ -92,7 +95,7 @@ test.describe('Deletion count refresh', () => {
 
   test('Rapid successive deletions show correct final count', async ({ page }) => {
     // Verify initial row count
-    await expect(page.getByText(rowCountLabel(TOTAL_ROWS))).toBeVisible({ timeout: 5_000 })
+    await expect(page.locator('main').getByText(rowCountLabel(TOTAL_ROWS))).toBeVisible({ timeout: 5_000 })
 
     // --- First deletion: select and delete 2 rows ---
     const rowCheckboxes = page.locator('.ag-row .ag-checkbox-input')
@@ -100,14 +103,14 @@ test.describe('Deletion count refresh', () => {
     await rowCheckboxes.nth(1).click()
     await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
 
-    const firstDeleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: /Delete/ })
+    const firstDeleteBtn = page.getByRole('menuitem', { name: /^Delete/ })
     await expect(firstDeleteBtn).toBeVisible({ timeout: 3_000 })
     await firstDeleteBtn.click()
     await page.getByRole('button', { name: 'Delete Rows' }).click()
 
     // Verify count dropped by 2 after first deletion
     const afterFirst = TOTAL_ROWS - 2
-    await expect(page.getByText(rowCountLabel(afterFirst))).toBeVisible({ timeout: 5_000 })
+    await expect(page.locator('main').getByText(rowCountLabel(afterFirst))).toBeVisible({ timeout: 5_000 })
 
     // --- Second deletion: select and delete 2 more rows ---
     // Wait for the first loadData (fire-and-forget server refresh) to settle
@@ -115,7 +118,7 @@ test.describe('Deletion count refresh', () => {
     await waitForRefreshToSettle(page)
 
     // Verify count is still 8 after server refresh
-    await expect(page.getByText(rowCountLabel(afterFirst))).toBeVisible({ timeout: 5_000 })
+    await expect(page.locator('main').getByText(rowCountLabel(afterFirst))).toBeVisible({ timeout: 5_000 })
 
     // Select two more rows by checkbox. Keyboard Space can start editing in
     // editable grids, which is not what this deletion test is exercising.
@@ -127,14 +130,14 @@ test.describe('Deletion count refresh', () => {
     // Right-click on a data cell to open context menu
     await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
 
-    const secondDeleteBtn = page.locator('div.z-\\[9999\\] button', { hasText: 'Delete 2 rows' })
+    const secondDeleteBtn = page.getByRole('menuitem', { name: 'Delete 2 rows' })
     await expect(secondDeleteBtn).toBeVisible({ timeout: 3_000 })
     await secondDeleteBtn.click()
     await page.getByRole('button', { name: 'Delete Rows' }).click()
 
     // Assert final count is original - 4 (both deletions applied)
     const expectedFinal = TOTAL_ROWS - 4
-    await expect(page.getByText(rowCountLabel(expectedFinal))).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('main').getByText(rowCountLabel(expectedFinal))).toBeVisible({ timeout: 10_000 })
 
     // Assert grid shows the correct final number of rows
     await expect(page.locator('.ag-row')).toHaveCount(expectedFinal)

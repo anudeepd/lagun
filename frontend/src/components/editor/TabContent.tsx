@@ -872,33 +872,29 @@ function QueryTab({ tab }: Props) {
         )}
       </div>
 
-      {queryExportContext && tab.database && (
-        <Suspense fallback={null}>
-          <ExportDialog
-            open={true}
-            onClose={() => setQueryExportContext(null)}
-            sessionId={tab.sessionId}
-            database={tab.database}
-            table="query_result"
-            sql={queryExportContext.sql}
-            rowsOverride={queryExportContext.rowsOverride}
-            rowsOverrideLabel="displayed rows"
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <ExportDialog
+          open={queryExportContext !== null && !!tab.database}
+          onClose={() => setQueryExportContext(null)}
+          sessionId={tab.sessionId}
+          database={tab.database ?? ''}
+          table="query_result"
+          sql={queryExportContext?.sql}
+          rowsOverride={queryExportContext?.rowsOverride}
+          rowsOverrideLabel="displayed rows"
+        />
+      </Suspense>
 
-      {bulkConfirm && (
-        <Suspense fallback={null}>
-          <BulkConfirmDialog
-            open={true}
-            validation={bulkConfirm.validation}
-            database={tab.database}
-            statements={bulkStatements}
-            onConfirm={handleBulkConfirm}
-            onClose={() => { setBulkConfirm(null); setBulkStatements([]); setBulkValidation(null) }}
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <BulkConfirmDialog
+          open={bulkConfirm !== null}
+          validation={bulkConfirm?.validation}
+          database={tab.database}
+          statements={bulkStatements}
+          onConfirm={handleBulkConfirm}
+          onClose={() => { setBulkConfirm(null); setBulkStatements([]); setBulkValidation(null) }}
+        />
+      </Suspense>
 
       {(running || bulkConfirm || bulkValidation) && bulkStatements.length >= FAST_EXECUTE_THRESHOLD && results.length === 0 && (
         <div className="flex-shrink-0 bg-surface-900 border-t border-surface-800 px-3 py-1.5 text-xs text-slate-400">
@@ -2065,33 +2061,29 @@ function TableTab({ tab, active = true }: Props) {
         </div>
       )}
 
-      {dataExportContext && tab.database && tab.table && (
-        <Suspense fallback={null}>
-          <ExportDialog
-            open={true}
-            onClose={() => setDataExportContext(null)}
-            sessionId={tab.sessionId}
-            database={tab.database}
-            table={tab.table}
-            rowsOverride={dataExportContext.rowsOverride}
-            rowsOverrideLabel={dataExportContext.rowsOverrideLabel ?? 'displayed rows'}
-            pkColumnsForSql={pkColumns}
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <ExportDialog
+          open={dataExportContext !== null && !!tab.database && !!tab.table}
+          onClose={() => setDataExportContext(null)}
+          sessionId={tab.sessionId}
+          database={tab.database ?? ''}
+          table={tab.table ?? ''}
+          rowsOverride={dataExportContext?.rowsOverride}
+          rowsOverrideLabel={dataExportContext?.rowsOverrideLabel ?? 'displayed rows'}
+          pkColumnsForSql={pkColumns}
+        />
+      </Suspense>
 
-      {showImport && tab.database && (
-        <Suspense fallback={null}>
-          <ImportDialog
-            open={showImport}
-            onClose={() => setShowImport(false)}
-            sessionId={tab.sessionId}
-            database={tab.database}
-            table={tab.table}
-            onImportComplete={() => loadData()}
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <ImportDialog
+          open={showImport && !!tab.database}
+          onClose={() => setShowImport(false)}
+          sessionId={tab.sessionId}
+          database={tab.database ?? ''}
+          table={tab.table}
+          onImportComplete={() => loadData()}
+        />
+      </Suspense>
       <ConfirmDialog
         open={deleteRowsTarget !== null}
         title={deleteRowsTarget?.length === 1 ? 'Delete Row' : 'Delete Rows'}

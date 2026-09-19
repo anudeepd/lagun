@@ -25,9 +25,15 @@ test('edit a cell, click Apply, and verify persistence', async ({ page, sessionI
   await cellEditor.fill('99.99')
   await cellEditor.press('Enter')
 
-  const applyButton = page.getByRole('button', { name: /Apply/ })
+  // The toolbar button opens the change-review dialog; the write only happens
+  // when the dialog is confirmed.
+  const applyButton = page.getByRole('button', { name: /^Apply \(/ })
   await expect(applyButton).toBeVisible({ timeout: 5000 })
   await applyButton.click()
+
+  const reviewDialog = page.getByRole('dialog', { name: 'Review Staged Changes' })
+  await expect(reviewDialog).toBeVisible({ timeout: 5000 })
+  await reviewDialog.getByRole('button', { name: 'Apply Changes' }).click()
 
   await expect(page.locator('.ag-cell', { hasText: '99.99' })).toBeVisible({ timeout: 10_000 })
 

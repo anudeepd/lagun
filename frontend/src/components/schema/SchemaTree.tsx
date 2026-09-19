@@ -393,17 +393,15 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       )}
       </AnimatePresence>
 
-      {importTarget && (
-        <Suspense fallback={null}>
+      <Suspense fallback={null}>
         <ImportDialog
           open={!!importTarget}
           onClose={() => setImportTarget(null)}
           sessionId={sessionId}
-          database={importTarget.db}
-          table={importTarget.table}
+          database={importTarget?.db ?? ''}
+          table={importTarget?.table}
         />
-        </Suspense>
-      )}
+      </Suspense>
       <ConfirmDialog
         open={Boolean(destructiveTarget)}
         title={destructiveTarget?.action === 'drop' ? 'Drop Table' : 'Truncate Table'}

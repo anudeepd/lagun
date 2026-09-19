@@ -136,7 +136,9 @@ test('bulk execution rejects unsupported large mixed scripts without running', a
   await editor.pressSequentially(sql)
   await page.keyboard.press('Control+Enter')
 
-  await expect(page.getByText(/Statement 26 starts with SELECT/)).toBeVisible({ timeout: 10_000 })
+  // QueryErrorState renders the same message twice (guidance paragraph plus the
+  // raw driver details), so match the guidance paragraph specifically.
+  await expect(page.locator('p', { hasText: /Statement 26 starts with SELECT/ })).toBeVisible({ timeout: 10_000 })
 
   const count = await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
     data: { sql: 'SELECT COUNT(*) FROM e2e_test.bulk_reject' },

@@ -24,9 +24,15 @@ async function editCellAndApply(
   await editor.fill(newValue)
   await editor.press('Enter')
 
-  const applyButton = page.getByRole('button', { name: /Apply/ })
+  // The toolbar button opens the change-review dialog; the write only happens
+  // when the dialog is confirmed.
+  const applyButton = page.getByRole('button', { name: /^Apply \(/ })
   await expect(applyButton).toBeVisible({ timeout: 5000 })
   await applyButton.click({ force: true })
+
+  const reviewDialog = page.getByRole('dialog', { name: 'Review Staged Changes' })
+  await expect(reviewDialog).toBeVisible({ timeout: 5000 })
+  await reviewDialog.getByRole('button', { name: 'Apply Changes' }).click({ force: true })
 
   await expect(page.locator('.ag-cell', { hasText: newValue })).toBeVisible({ timeout: 10_000 })
 }

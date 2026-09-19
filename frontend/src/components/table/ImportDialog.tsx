@@ -101,8 +101,34 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   const { loadTables } = useSchemaStore()
 
   useEffect(() => {
+    if (!open) return
     loadTables(sessionId, database)
-  }, [sessionId, database, loadTables])
+  }, [open, sessionId, database, loadTables])
+
+  // Callers keep this dialog mounted so Modal can play its exit animation, so a
+  // fresh open no longer remounts and resets the wizard. Reset it here instead;
+  // the reset lands while the dialog is still fully transparent.
+  useEffect(() => {
+    if (!open) return
+    setFormat('csv')
+    setFile(null)
+    setPreview(null)
+    setPreviewError(null)
+    setPreviewLoading(false)
+    setDelimiter(',')
+    setDelimiterCustom('')
+    setQuotechar('"')
+    setEscapechar('"')
+    setEncoding('utf-8')
+    setFirstRowHeader(true)
+    setTargetTable(preselectedTable ?? '')
+    setStrategy('insert')
+    setPreserveEmptyStrings(false)
+    setShowAdvanced(false)
+    setImporting(false)
+    setResult(null)
+    setDropWaitState(null)
+  }, [open, preselectedTable])
 
   const effectiveDelimiter = delimiter === 'custom' ? delimiterCustom : delimiter
 

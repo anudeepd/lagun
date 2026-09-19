@@ -60,6 +60,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
 
   const openSchemaExport = async () => {
     const { create_sql } = await api.getCreateSql(sessionId, database, table)
+    setCopied(false)
     setSchemaSql(formatSchemaSql(create_sql, table))
   }
 
@@ -349,18 +350,16 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
         onSaved={reload}
       />
 
-      {editCol && (
-        <EditColumnDialog
-          open={!!editCol}
-          onClose={() => setEditCol(null)}
-          sessionId={sessionId}
-          database={database}
-          table={table}
-          mode="modify"
-          column={editCol}
-          onSaved={async () => { await reload(); setEditCol(null) }}
-        />
-      )}
+      <EditColumnDialog
+        open={!!editCol}
+        onClose={() => setEditCol(null)}
+        sessionId={sessionId}
+        database={database}
+        table={table}
+        mode="modify"
+        column={editCol ?? undefined}
+        onSaved={async () => { await reload(); setEditCol(null) }}
+      />
 
       <IndexDialog
         open={showAddIndex}
@@ -381,23 +380,23 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
         currentPkColumns={indexes.find(i => i.name === 'PRIMARY')?.columns ?? []}
       />
 
-      {schemaSql && (
-        <Modal
-          open={true}
-          onClose={() => setSchemaSql(null)}
-          title={`${database}.${table} - CREATE statement`}
-          width="max-w-3xl"
-          footer={(
-            <>
-              <Button variant="ghost" size="sm" onClick={handleCopy}>
-                <Copy size={11} /> {copied ? 'Copied!' : 'Copy'}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleDownload}>
-                <Download size={11} /> Download
-              </Button>
-            </>
-          )}
-        >
+      <Modal
+        open={schemaSql !== null}
+        onClose={() => setSchemaSql(null)}
+        title={`${database}.${table} - CREATE statement`}
+        width="max-w-3xl"
+        footer={(
+          <>
+            <Button variant="ghost" size="sm" onClick={handleCopy}>
+              <Copy size={11} /> {copied ? 'Copied!' : 'Copy'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDownload}>
+              <Download size={11} /> Download
+            </Button>
+          </>
+        )}
+      >
+        {schemaSql && (
           <div className="-m-4 flex-1 overflow-auto bg-surface-950">
             <SyntaxHighlighter
               language="sql"
@@ -415,8 +414,8 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
               {schemaSql}
             </SyntaxHighlighter>
           </div>
-        </Modal>
-      )}
+        )}
+      </Modal>
       <ConfirmDialog
         open={confirmTruncate}
         title="Truncate Table"

@@ -935,19 +935,24 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           />
         )}
       </AnimatePresence>
-      {cellEditor && (
-        <Modal
-          open={!!cellEditor}
-          onClose={() => setCellEditor(null)}
-          title="Edit cell"
-          width="max-w-3xl"
-          footer={(
-            <>
-              <Button variant="secondary" onClick={() => setCellEditor(null)}>Cancel</Button>
-              <Button variant="primary" onClick={handleApplyCellEditor}>Apply</Button>
-            </>
-          )}
-        >
+      {/*
+        Kept mounted while closed: Modal owns the AnimatePresence that plays the
+        exit animation, so gating the component itself (rather than its `open`
+        prop) made Escape close it in a single frame.
+      */}
+      <Modal
+        open={!!cellEditor}
+        onClose={() => setCellEditor(null)}
+        title="Edit cell"
+        width="max-w-3xl"
+        footer={(
+          <>
+            <Button variant="secondary" onClick={() => setCellEditor(null)}>Cancel</Button>
+            <Button variant="primary" onClick={handleApplyCellEditor}>Apply</Button>
+          </>
+        )}
+      >
+        {cellEditor && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="lagun-data-text font-data text-slate-300">{cellEditor.columnName}</span>
@@ -966,8 +971,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
               spellCheck={false}
             />
           </div>
-        </Modal>
-      )}
+        )}
+      </Modal>
     </div>
   )
 })

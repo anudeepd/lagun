@@ -48,6 +48,9 @@ export default function SessionForm({ open, onClose, session }: Props) {
   const queryLimitRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    // Callers keep this dialog mounted so Modal can play its exit animation;
+    // reset on open so a close mid-animation does not blank the visible form.
+    if (!open) return
     if (session) {
       setForm({
         name: session.name,
