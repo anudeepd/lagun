@@ -51,13 +51,18 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert 'class="password-toggle"' in template
     assert 'input[type="password"]::-ms-reveal' in template
     assert "::-moz-reveal" not in template
-    assert 'class="feedback-slot" aria-live="polite"' in template
-    assert "sessionStorage.setItem(usernameStorageKey, username.value);" in template
-    assert "document.getElementById('login-error') && savedUsername" in template
+    # Shared login card: the error is announced once (role=alert) and linked to
+    # the fields, and the username is restored only after a failed attempt.
+    assert 'id="login-error" role="alert"' in template
+    assert 'aria-describedby="login-error"' in template
+    assert "const hasError = {{ 'true' if error else 'false' }};" in template
+    assert "if (hasError && username && !username.value)" in template
+    assert "sessionStorage.setItem(storageKey, username.value);" in template
     assert "@media (prefers-reduced-motion: reduce)" in template
-    assert "animation: lagun-surface-in 280ms" in template
-    assert "transform: translateY(10px) scale(.985)" in template
-    assert "bottom: calc(100% + 0.75rem)" in template
+    assert "animation: login-card-in 340ms" in template
+    assert "animation: login-error-up 180ms" in template
+    assert "transform: translateY(14px) scale(.985)" in template
+    assert "top: -3.6rem;" in template
     assert "Secured by" in template
     assert "security-lock" in template
     assert "max-width: 400px;" in template
@@ -72,8 +77,10 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert "password.focus();" in template
     assert 'tabindex="-1"' not in template
     assert '<span class="submit-label" aria-live="polite">Sign in</span>' in template
-    assert "submitLabel.textContent = 'Signing in';" in template
-    assert "btn.setAttribute('aria-busy', 'true');" in template
+    assert "label.textContent = 'Signing in';" in template
+    # Busy state lives on the form so it does not suppress the label's live region.
+    assert "loginForm.setAttribute('aria-busy', 'true');" in template
+    assert 'aria-live="polite"' in template
     assert "event.preventDefault();" in template
     assert "requestAnimationFrame(function() {" in template
     assert "HTMLFormElement.prototype.submit.call(loginForm);" in template
