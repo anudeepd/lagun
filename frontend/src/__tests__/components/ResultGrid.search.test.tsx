@@ -3,7 +3,16 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ResultGrid from '../../components/editor/ResultGrid'
 import * as agGridReact from 'ag-grid-react'
+import { clipboardWrite } from '../../utils/clipboard'
 import type { QueryResult } from '../../types'
+
+// AppLayout keeps every tab mounted and marks the inactive panels `inert`, so a
+// hidden ResultGrid must ignore the window-global key handling. jsdom does not
+// implement `inert` event suppression, so these tests assert the component's own
+// guard through rendered state, with the grid mounted inside a real element that
+// carries the `inert` attribute (`rootRef.current.closest('[inert]')`).
+vi.mock('../../utils/clipboard', () => ({ clipboardWrite: vi.fn(() => Promise.resolve()) }))
+const mockClipboardWrite = vi.mocked(clipboardWrite)
 
 // The manual mock (__mocks__/ag-grid-react.ts) adds __calls / __latestProps
 // exports that the real ag-grid-react types don't declare.
@@ -234,5 +243,96 @@ describe('ResultGrid search wiring', () => {
     gridRoot.focus()
     fireEvent.keyDown(gridRoot, { key: 'Enter' })
     await waitFor(() => expect(screen.getByText('2 of 2')).toBeInTheDocument())
+  })
+})
+
+describe('ResultGrid inside an inert subtree (a tab that is mounted but hidden)', () => {
+  beforeEach(() => {
+    Object.keys(__calls).forEach(k => delete __calls[k])
+    __latestProps.current = null
+    mockClipboardWrite.mockClear()
+  })
+
+  it('Ctrl+F opens the find bar only in the reachable grid, not in the inert sibling', () => {
+    const { container } = render(
+      <>
+        <div id="active-panel"><ResultGrid result={baseResult} /></div>
+        <div id="hidden-panel"><ResultGrid result={baseResult} /></div>
+      </>
+    )
+    // The grid's own guard reads the attribute off the DOM, so the wrapper must
+    // carry a real `inert` attribute — jsdom would otherwise route the event
+    // into both grids regardless of inertness.
+    container.querySelector('#hidden-panel')!.setAttribute('inert', '')
+
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+
+    const liveRoot = container.querySelector('#active-panel .lagun-result-grid')!
+    const hiddenRoot = container.querySelector('#hidden-panel .lagun-result-grid')!
+    expect(liveRoot.querySelector('[role="search"]')).not.toBeNull()
+    expect(hiddenRoot.querySelector('[role="search"]')).toBeNull()
+    // The window-level open-find event (parity with Ctrl+F) is gated the same way.
+    fireEvent(window, new Event('lagun:open-find'))
+    expect(liveRoot.querySelector('[role="search"]')).not.toBeNull()
+    expect(hiddenRoot.querySelector('[role="search"]')).toBeNull()
+  })
+
+  it('closes an open find bar when the tab turns inert, so activating it later shows no stale bar', async () => {
+    const { container } = render(<div id="panel"><ResultGrid result={baseResult} /></div>)
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    expect(screen.getByRole('searchbox')).toBeInTheDocument()
+
+    const panel = container.querySelector('#panel') as HTMLElement
+    panel.setAttribute('inert', '')
+    await waitFor(() => expect(screen.queryByRole('searchbox')).not.toBeInTheDocument())
+
+    // Switching back to the tab must not resurrect the bar the user opened
+    // while looking at the other tab.
+    panel.removeAttribute('inert')
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+  })
+
+  it('Enter from document.body does not step matches in an inert grid with its find bar open', async () => {
+    // The effect that closes the bar on inertness is neutralised here so the
+    // navigation guard is exercised on its own: the bar stays open while the
+    // panel is inert, which is the window the guard exists for.
+    vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} takeRecords() { return [] } })
+    try {
+      const { container } = render(<div id="panel"><ResultGrid result={baseResult} /></div>)
+      fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+      await userEvent.type(screen.getByRole('searchbox'), 'a')
+      await waitForMatches()
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+      Object.keys(__calls).forEach(k => delete __calls[k])
+
+      container.querySelector('#panel')!.setAttribute('inert', '')
+      expect(screen.getByRole('searchbox')).toBeInTheDocument()
+
+      fireEvent.keyDown(document.body, { key: 'Enter' })
+
+      expect(__calls.ensureNodeVisible ?? []).toHaveLength(0)
+      expect(screen.getByText('1 of 2')).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('Ctrl+C copies for the reachable grid but not from inside an inert subtree', () => {
+    const { container } = renderResultGrid()
+    const root = container.querySelector('.lagun-result-grid') as HTMLElement
+    const props = __latestProps.current as { onCellFocused: (e: unknown) => void }
+    props.onCellFocused({
+      rowIndex: 0,
+      column: 'name',
+      api: { getDisplayedRowAtIndex: () => ({ data: { name: 'Alice' } }) },
+    })
+    root.focus()
+
+    fireEvent.keyDown(root, { key: 'c', ctrlKey: true })
+    expect(mockClipboardWrite).toHaveBeenCalledTimes(1)
+
+    container.setAttribute('inert', '')
+    fireEvent.keyDown(root, { key: 'c', ctrlKey: true })
+    expect(mockClipboardWrite).toHaveBeenCalledTimes(1)
   })
 })

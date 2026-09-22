@@ -54,7 +54,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
       <div className="flex items-center gap-3 px-4 py-3">
         {statusIcon}
         <span className={`text-sm font-medium ${statusColor}`}>{statusText}</span>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-muted">
           {result.statements_executed.toLocaleString()} statements, {result.affected_rows.toLocaleString()} affected, {result.exec_time_ms}ms
         </span>
         <div className="flex-1" />
@@ -65,7 +65,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
         )}
         <button
           onClick={() => setExpanded(e => !e)}
-          className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+          className="flex items-center gap-1 text-xs text-muted hover:text-slate-300 transition-colors"
         >
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           Details
@@ -74,7 +74,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
 
       <AnimatePresence initial={false}>
       {expanded && (
-        <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto', transition: surfaceTransition }} exit={{ opacity: 0, height: 0, transition: exitTransition }} className="overflow-hidden border-t border-surface-700 px-4 py-3 space-y-3 text-xs">
+        <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="overflow-hidden border-t border-surface-700 px-4 py-3 space-y-3 text-xs">
           <div className="grid grid-cols-2 gap-2 text-slate-400">
             <div>Mode: <span className="text-slate-200">one transaction</span></div>
             <div>Statements: <span className="text-slate-200">{result.statements_executed.toLocaleString()}</span></div>
@@ -90,7 +90,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
 
           {result.failed_statement_preview && (
             <div>
-              <div className="text-slate-500 mb-1">Failed statement:</div>
+              <div className="text-muted mb-1">Failed statement:</div>
               <pre className="bg-surface-800 rounded p-2 text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap break-all">
                 {result.failed_statement_preview}
               </pre>
@@ -104,14 +104,14 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
                 {result.error.code}
               </div>
               <div className="text-slate-400">{result.error.problem}</div>
-              <div className="text-slate-500">{result.error.cause}</div>
+              <div className="text-muted">{result.error.cause}</div>
               <div className="text-slate-400">{result.error.fix}</div>
             </div>
           )}
 
           {statements.length > 0 && (
             <div>
-              <div className="text-slate-500 mb-1">First statements:</div>
+              <div className="text-muted mb-1">First statements:</div>
               <div className="space-y-1">
                 {previewList(statements, [0, 1, 2]).map((s, i) => (
                   <pre key={i} className="bg-surface-800 rounded p-2 text-slate-400 font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all">
@@ -129,7 +129,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
             const lastStmts = previewList(statements, lastIndices)
             return lastStmts.length > 0 && (
               <div>
-                <div className="text-slate-500 mb-1">Last executed statements:</div>
+                <div className="text-muted mb-1">Last executed statements:</div>
                 <div className="space-y-1">
                   {lastStmts.map((s, i) => (
                     <pre key={i} className="bg-surface-800 rounded p-2 text-slate-400 font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all">

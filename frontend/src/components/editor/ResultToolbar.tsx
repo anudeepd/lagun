@@ -3,6 +3,7 @@ import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import type { QueryResult } from '../../types'
 import { exitTransition, surfaceTransition } from '../../motion/tokens'
+import { formatRowCount } from '../../utils/formatRows'
 
 interface Props {
   result: QueryResult | null
@@ -32,11 +33,11 @@ export default function ResultToolbar({ result, running }: Props) {
             <>
               <span className="flex items-center gap-1 text-slate-400">
                 <Hash size={11} />
-                {result.row_count.toLocaleString()} {result.row_count === 1 ? 'row' : 'rows'}
+                {formatRowCount(result.row_count)}
               </span>
               {result.affected_rows != null && <span className="text-slate-400">{result.affected_rows} affected</span>}
-              <span className="flex items-center gap-1 text-slate-500"><Clock size={11} />{result.exec_time_ms}ms</span>
-              {result.insert_id ? <span className="text-slate-500">insert_id={result.insert_id}</span> : null}
+              <span className="flex items-center gap-1 text-muted"><Clock size={11} />{result.exec_time_ms}ms</span>
+              {result.insert_id ? <span className="text-muted">insert_id={result.insert_id}</span> : null}
             </>
           ) : null}
         </m.div>

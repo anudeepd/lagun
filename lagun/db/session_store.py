@@ -1,8 +1,10 @@
 """aiosqlite CRUD for saved sessions."""
 
 import json
+import logging
 import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,21 +15,32 @@ import aiosqlite
 from lagun.db.crypto import encrypt_password, decrypt_password
 from lagun.models.session import SessionCreate, SessionRead, SessionUpdate
 
+_log = logging.getLogger(__name__)
+
 
 def _default_db_path() -> Path:
     """Return the persistent store path, with an operator-controlled override."""
     return Path(os.getenv("LAGUN_DB", Path.home() / ".lagun" / "lagun.db")).expanduser()
 
 
-_DB_PATH = _default_db_path()
+# None means "not pinned": the path is resolved from the environment on every
+# use, so LAGUN_DB set after this module was imported (tests, `lagun serve`)
+# is honoured. Tests pin it to a per-test temp file.
+_DB_PATH: Path | None = None
 _SQLITE_BUSY_SECONDS = float(os.getenv("LAGUN_SQLITE_BUSY_SECONDS", "10"))
 
 
+def _db_path() -> Path:
+    """Resolve the store path lazily, honouring LAGUN_DB at call time."""
+    return _DB_PATH if _DB_PATH is not None else _default_db_path()
+
+
 def _connect() -> aiosqlite.Connection:
-    return aiosqlite.connect(_DB_PATH, timeout=max(1, _SQLITE_BUSY_SECONDS))
+    return aiosqlite.connect(_db_path(), timeout=max(1, _SQLITE_BUSY_SECONDS))
 
 
-_SCHEMA = """
+_BASELINE_TABLES: tuple[str, ...] = (
+    """
 CREATE TABLE IF NOT EXISTS sessions (
     id                  TEXT PRIMARY KEY,
     name                TEXT NOT NULL,
@@ -40,21 +53,25 @@ CREATE TABLE IF NOT EXISTS sessions (
     ssl_enabled         INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
-    selected_databases  TEXT NOT NULL DEFAULT '[]'
-);
-
+    selected_databases  TEXT NOT NULL DEFAULT '[]',
+    managed_selected_databases TEXT NOT NULL DEFAULT '[]'
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS shared_session_access (
     session_id TEXT NOT NULL,
     username TEXT NOT NULL,
     PRIMARY KEY (session_id, username)
-);
-
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS hidden_shared_sessions (
     session_id TEXT NOT NULL,
     username TEXT NOT NULL,
     PRIMARY KEY (session_id, username)
-);
-
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS audit_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     occurred_at TEXT NOT NULL,
@@ -65,56 +82,108 @@ CREATE TABLE IF NOT EXISTS audit_events (
     details TEXT,
     status_code INTEGER NOT NULL,
     duration_ms REAL NOT NULL
-);
-
+)
+""",
+    """
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
-);
-"""
+)
+""",
+)
+
+# Columns added to `sessions` after the first release. Databases written by any
+# released version converge on the same shape because the only tolerated error
+# is the specific "duplicate column name" one (see _apply_statement).
+_SESSIONS_ADDED_COLUMNS: tuple[str, ...] = (
+    "selected_databases TEXT NOT NULL DEFAULT '[]'",
+    "owner_username TEXT",
+    "managed INTEGER NOT NULL DEFAULT 0",
+    "config_key TEXT",
+    "is_default INTEGER NOT NULL DEFAULT 0",
+    "managed_selected_databases TEXT NOT NULL DEFAULT '[]'",
+)
+
+_BASELINE_INDEXES: tuple[str, ...] = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS sessions_config_key_unique "
+    "ON sessions(config_key) WHERE config_key IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS sessions_owner_username_idx "
+    "ON sessions(owner_username)",
+    "CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx "
+    "ON audit_events(occurred_at)",
+)
+
+# Numbered migrations applied in order, keyed on PRAGMA user_version. Version 1
+# is the schema as of 0.1.93, so a database written by an older release is at
+# user_version 0 and is upgraded in place on the next startup.
+_MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
+    (
+        1,
+        "baseline schema, session ownership columns and audit indexes",
+        _BASELINE_TABLES
+        + tuple(
+            f"ALTER TABLE sessions ADD COLUMN {column}"
+            for column in _SESSIONS_ADDED_COLUMNS
+        )
+        + _BASELINE_INDEXES,
+    ),
+)
+_SCHEMA_VERSION = _MIGRATIONS[-1][0]
+
+
+async def _apply_statement(db: aiosqlite.Connection, statement: str) -> None:
+    """Run one migration statement.
+
+    The only error tolerated is SQLite's "duplicate column name" from an ADD
+    COLUMN that a database created by an older release already carries. Every
+    other failure (locked database, missing table, constraint failure) must
+    reach the runner so the migration is reported instead of half-applied.
+    """
+    try:
+        await db.execute(statement)
+    except sqlite3.OperationalError as error:
+        if "duplicate column name" in str(error).lower() and "ADD COLUMN" in statement:
+            return
+        raise
+
+
+async def _migrate(db: aiosqlite.Connection) -> int:
+    """Apply migrations newer than the database's user_version; return the version."""
+    async with db.execute("PRAGMA user_version") as cur:
+        row = await cur.fetchone()
+    version = int(row[0]) if row else 0
+    for target, description, statements in _MIGRATIONS:
+        if target <= version:
+            continue
+        try:
+            # An explicit BEGIN: `executescript` implicitly commits, and each
+            # migration (user_version included) must apply atomically.
+            await db.execute("BEGIN")
+            for statement in statements:
+                await _apply_statement(db, statement)
+            await db.execute(f"PRAGMA user_version = {target}")
+            await db.commit()
+        except Exception as error:
+            await db.rollback()
+            raise RuntimeError(
+                f"lagun.db migration {target} ({description}) failed: {error}"
+            ) from error
+        version = target
+    return version
 
 
 async def init_db():
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # The store holds encrypted passwords and audit details, so keep the
+    # directory private. mode applies only when the directory is created;
+    # an existing one is left as the operator set it.
+    _db_path().parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     async with _connect() as db:
         await db.execute("PRAGMA journal_mode=WAL")
         await db.execute("PRAGMA synchronous=NORMAL")
         await db.execute(
             f"PRAGMA busy_timeout={int(max(1, _SQLITE_BUSY_SECONDS) * 1000)}"
         )
-        await db.executescript(_SCHEMA)
-        # Migrate existing DBs that lack the selected_databases column
-        try:
-            await db.execute(
-                "ALTER TABLE sessions ADD COLUMN selected_databases TEXT NOT NULL DEFAULT '[]'"
-            )
-            await db.commit()
-        except sqlite3.OperationalError:
-            pass  # Column already exists
-        for column in (
-            "owner_username TEXT",
-            "managed INTEGER NOT NULL DEFAULT 0",
-            "config_key TEXT",
-            "is_default INTEGER NOT NULL DEFAULT 0",
-        ):
-            try:
-                await db.execute(f"ALTER TABLE sessions ADD COLUMN {column}")
-                await db.commit()
-            except sqlite3.OperationalError:
-                pass
-        await db.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS sessions_config_key_unique "
-            "ON sessions(config_key) WHERE config_key IS NOT NULL"
-        )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS sessions_owner_username_idx "
-            "ON sessions(owner_username)"
-        )
-        await db.execute(
-            "CREATE INDEX IF NOT EXISTS audit_events_occurred_at_idx "
-            "ON audit_events(occurred_at)"
-        )
-        await db.commit()
+        await _migrate(db)
 
 
 def _row_to_model(row: aiosqlite.Row) -> SessionRead:
@@ -132,12 +201,15 @@ def _row_to_model(row: aiosqlite.Row) -> SessionRead:
         selected_databases=json.loads(row["selected_databases"])
         if row["selected_databases"]
         else [],
+        managed_selected_databases=json.loads(row["managed_selected_databases"])
+        if row["managed_selected_databases"]
+        else [],
         managed=bool(row["managed"]),
         is_default=bool(row["is_default"]),
     )
 
 
-_READ_COLUMNS = "id, name, host, port, username, default_db, query_limit, ssl_enabled, created_at, updated_at, selected_databases, managed, is_default"
+_READ_COLUMNS = "id, name, host, port, username, default_db, query_limit, ssl_enabled, created_at, updated_at, selected_databases, managed_selected_databases, managed, is_default"
 
 
 async def list_sessions(owner_username: str | None = None) -> list[SessionRead]:
@@ -168,6 +240,7 @@ async def list_admin_connections() -> list[dict]:
                 s.created_at,
                 s.updated_at,
                 s.selected_databases,
+                s.managed_selected_databases,
                 s.managed,
                 s.is_default,
                 s.owner_username,
@@ -196,6 +269,9 @@ async def list_admin_connections() -> list[dict]:
             "updated_at": row["updated_at"],
             "selected_databases": json.loads(row["selected_databases"])
             if row["selected_databases"]
+            else [],
+            "managed_selected_databases": json.loads(row["managed_selected_databases"])
+            if row["managed_selected_databases"]
             else [],
             "managed": bool(row["managed"]),
             "is_default": bool(row["is_default"]),
@@ -269,6 +345,8 @@ async def get_session_password(session_id: str) -> Optional[str]:
             row = await cur.fetchone()
     if not row:
         return None
+    # decrypt_password raises CredentialDecryptError when the master key changed,
+    # which main.py maps to an actionable response.
     return decrypt_password(row[0])
 
 
@@ -379,6 +457,29 @@ async def hide_shared_session(session_id: str, username: str) -> None:
         await db.commit()
 
 
+# Audit writes must never fail the request they describe, but a silent gap
+# (read-only store, full disk, locked database) is invisible to operators. Warn
+# at most once per interval and report how many failures were held back.
+_AUDIT_WRITE_WARNING_INTERVAL_SECONDS = max(
+    0.0, float(os.getenv("LAGUN_AUDIT_WRITE_WARNING_INTERVAL_SECONDS", "60"))
+)
+_last_audit_write_warning = 0.0
+_suppressed_audit_write_warnings = 0
+
+
+def _warn_audit_write_failure(error: Exception) -> None:
+    global _last_audit_write_warning, _suppressed_audit_write_warnings
+    now = time.monotonic()
+    if now - _last_audit_write_warning < _AUDIT_WRITE_WARNING_INTERVAL_SECONDS:
+        _suppressed_audit_write_warnings += 1
+        return
+    suppressed = _suppressed_audit_write_warnings
+    _suppressed_audit_write_warnings = 0
+    _last_audit_write_warning = now
+    held_back = f" ({suppressed} earlier failures suppressed)" if suppressed else ""
+    _log.warning("Could not write audit event: %s%s", error, held_back, exc_info=error)
+
+
 async def record_audit_event(
     *,
     username: str,
@@ -389,21 +490,26 @@ async def record_audit_event(
     status_code: int,
     duration_ms: float,
 ) -> None:
-    async with _connect() as db:
-        await db.execute(
-            "INSERT INTO audit_events (occurred_at, username, method, path, session_id, details, status_code, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                datetime.now(timezone.utc).isoformat(),
-                username,
-                method,
-                path,
-                session_id,
-                details,
-                status_code,
-                duration_ms,
-            ),
-        )
-        await db.commit()
+    try:
+        async with _connect() as db:
+            await db.execute(
+                "INSERT INTO audit_events (occurred_at, username, method, path, session_id, details, status_code, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    username,
+                    method,
+                    path,
+                    session_id,
+                    details,
+                    status_code,
+                    duration_ms,
+                ),
+            )
+            await db.commit()
+    except Exception as error:
+        # Swallowed so auditing can never fail the database action it describes,
+        # but no longer silently: the operator gets the exception (rate-limited).
+        _warn_audit_write_failure(error)
 
 
 def _audit_contains_pattern(value: str) -> str:
@@ -418,9 +524,15 @@ async def list_audit_events(
     path: str | None = None,
     status_code: int | None = None,
     search: str | None = None,
+    before_id: int | None = None,
 ) -> list[dict]:
     clauses: list[str] = []
     values: list[object] = []
+    if before_id is not None:
+        # Keyset cursor: rows strictly older than the first row of the previous
+        # page. `id` is returned so the caller can build the next cursor.
+        clauses.append("id < ?")
+        values.append(before_id)
     if username:
         clauses.append("LOWER(username) LIKE LOWER(?) ESCAPE '\\'")
         values.append(_audit_contains_pattern(username))
@@ -448,10 +560,16 @@ async def list_audit_events(
     async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            f"SELECT occurred_at, username, method, path, session_id, details, status_code, duration_ms FROM audit_events{where} ORDER BY id DESC LIMIT ?",
+            f"SELECT id, occurred_at, username, method, path, session_id, details, status_code, duration_ms FROM audit_events{where} ORDER BY id DESC LIMIT ?",
             (*values, limit),
         ) as cur:
             return [dict(row) for row in await cur.fetchall()]
+
+
+# A purge that removed at least this share of the remaining table rebuilds the
+# file so the freed pages return to the filesystem (VACUUM); every purge
+# checkpoints so the write-ahead log can be truncated.
+_PURGE_VACUUM_MIN_SHARE = 0.25
 
 
 async def purge_audit_events(older_than_days: int) -> int:
@@ -462,8 +580,16 @@ async def purge_audit_events(older_than_days: int) -> int:
         cur = await db.execute(
             "DELETE FROM audit_events WHERE occurred_at < ?", (cutoff,)
         )
+        removed = cur.rowcount
         await db.commit()
-        return cur.rowcount
+        async with db.execute("SELECT COUNT(*) FROM audit_events") as count_cur:
+            (remaining,) = await count_cur.fetchone()
+        # Without this the deleted pages stay in the file (and in the -wal
+        # sibling) forever, so a successful purge never returns space.
+        if removed and removed >= _PURGE_VACUUM_MIN_SHARE * (removed + remaining):
+            await db.execute("VACUUM")
+        await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return removed
 
 
 async def list_sessions_raw() -> list[dict]:

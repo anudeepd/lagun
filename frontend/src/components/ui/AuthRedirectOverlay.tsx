@@ -42,7 +42,7 @@ export default function AuthRedirectOverlay() {
   return (
     <AnimatePresence>
     {mode && copy && (
-    <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="fixed inset-0 z-critical flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
+    <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="fixed inset-0 z-critical flex items-center justify-center bg-slate-950/70 lagun-safe-area backdrop-blur-sm">
       <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="w-full max-w-sm rounded-xl border border-surface-700 bg-surface-900/95 p-5 shadow-2xl">
         <div className={hasAction ? 'mb-4 flex items-center gap-3' : 'flex items-center gap-3'}>
           <div className="h-9 w-9 rounded-full border border-brand-500/40 bg-brand-500/10 p-2">
@@ -57,7 +57,7 @@ export default function AuthRedirectOverlay() {
           <button
             type="button"
             onClick={redirectToLdapLoginNow}
-            className="w-full rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            className="w-full rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           >
             {copy.action}
           </button>

@@ -143,6 +143,36 @@ describe('AdminConsole', () => {
       statusCode: undefined,
     }))
   })
+  it('pages older audit events with the keyset cursor', async () => {
+    const event = (path: string) => ({
+      occurred_at: '2026-08-05T00:00:00Z',
+      username: 'alice',
+      method: 'GET',
+      path,
+      session_id: 'session-1',
+      details: null,
+      status_code: 200,
+      duration_ms: 4,
+    })
+    vi.mocked(api.getAdminActivity)
+      .mockResolvedValueOnce({ items: [event('/api/v1/newest')], next_before_id: 42, observed_at: 1 })
+      .mockResolvedValueOnce({ items: [event('/api/v1/older')], next_before_id: null, observed_at: 1 })
+
+    render(<AdminConsole />)
+    await screen.findByRole('heading', { name: 'Workspace overview' })
+    fireEvent.click(screen.getByRole('button', { name: 'Query & API audit' }))
+    expect(await screen.findByText('GET /api/v1/newest')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Load 100 older' }))
+
+    // The cursor from the first page is what asks for the second one.
+    await waitFor(() => expect(api.getAdminActivity).toHaveBeenLastCalledWith(expect.anything(), 42))
+    expect(await screen.findByText('GET /api/v1/older')).toBeInTheDocument()
+    // Appended, not replaced, and the pager disappears once the cursor is null.
+    expect(screen.getByText('GET /api/v1/newest')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Load 100 older' })).not.toBeInTheDocument())
+  })
+
   it('shows raw query targets and complete request bodies', async () => {
     const payload = '{"sql":"SELECT * FROM users WHERE email=\'alice@example.test\'","filters":{"active":true}}'
     vi.mocked(api.getAdminActivity).mockResolvedValueOnce({
@@ -445,7 +475,7 @@ describe('AdminConsole', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Retention' }))
     fireEvent.click(screen.getByRole('button', { name: 'Review purge' }))
-    expect(screen.getByRole('dialog', { name: 'Purge audit history?' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Purge audit history?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Purge history' }))
 
     await waitFor(() => expect(api.purgeAdminRetention).toHaveBeenCalledWith(30))
@@ -487,6 +517,37 @@ describe('AdminConsole', () => {
       vi.useRealTimers()
     }
   })
+  it('validates an empty LDAP username on submit and only disables the action in flight', async () => {
+    render(<AdminConsole />)
+    await screen.findByRole('heading', { name: 'Workspace overview' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Users (1)' }))
+    expect(await screen.findByRole('heading', { name: 'Users & policy' })).toBeInTheDocument()
+
+    const input = screen.getByLabelText('LDAP username')
+    expect(input).toHaveAttribute('name', 'username')
+    const allow = screen.getByRole('button', { name: 'Allow user' })
+    expect(allow).toBeEnabled()
+
+    fireEvent.click(allow)
+
+    const error = await screen.findByRole('alert')
+    expect(error).toHaveTextContent('Enter an LDAP username.')
+    expect(error).toHaveAttribute('id', 'admin-username-error')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveAttribute('aria-describedby', 'admin-username-error')
+    expect(api.addAdminUser).not.toHaveBeenCalled()
+
+    // Typing clears the error instead of leaving a stale one attached to the field.
+    fireEvent.change(input, { target: { value: 'bob' } })
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(input).not.toHaveAttribute('aria-invalid')
+
+    // The action is disabled only while the request is in flight (never settles here).
+    vi.mocked(api.addAdminUser).mockImplementationOnce(() => new Promise<never>(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: 'Allow user' }))
+    expect(screen.getByRole('button', { name: 'Applying…' })).toBeDisabled()
+  })
   it('adds and removes LDAP users with confirmation', async () => {
     render(<AdminConsole />)
     await screen.findByRole('heading', { name: 'Workspace overview' })
@@ -499,7 +560,7 @@ describe('AdminConsole', () => {
     await waitFor(() => expect(api.addAdminUser).toHaveBeenCalledWith('bob', 'policy-1'))
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
-    expect(screen.getByRole('dialog', { name: 'Remove LDAP user?' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Remove LDAP user?' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove user' }))
     await waitFor(() => expect(api.removeAdminUser).toHaveBeenCalledWith('alice', 'policy-1'))
   })

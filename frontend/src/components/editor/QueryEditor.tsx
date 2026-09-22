@@ -105,6 +105,10 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
   onRunRef.current = onRun
   const runningRef = useRef(running)
   runningRef.current = running
+  // The Ctrl+Enter keymap is built once, so it reads the current database
+  // through a ref: running without one fails server-side with error 1046.
+  const databaseRef = useRef(database)
+  databaseRef.current = database
 
   // Stable extension: only recreates when database changes, not on every schema update.
   // Schema completions read from the ref at completion time so they're always current.
@@ -189,7 +193,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
   const runKeymap = useMemo(() => Prec.highest(keymap.of([{
     key: 'Ctrl-Enter',
     mac: 'Cmd-Enter',
-    run: () => { if (!runningRef.current) onRunRef.current(); return true },
+    run: () => { if (!runningRef.current && databaseRef.current) onRunRef.current(); return true },
   }])), [])
   const tooltipExtensions = useMemo((): Extension[] =>
     typeof document === 'undefined' ? [] : [tooltips({ parent: document.body })],
@@ -231,7 +235,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
             </Select>
             </m.div>
           ) : database ? (
-            <span className="text-xs text-slate-500 bg-surface-800 px-2 py-0.5 rounded truncate max-w-[220px]">
+            <span className="text-xs text-muted bg-surface-800 px-2 py-0.5 rounded truncate max-w-[220px]">
               {database}
             </span>
           ) : null}
@@ -245,7 +249,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               whileHover={{ scale: 1.025 }}
               whileTap={{ scale: 0.96 }}
               transition={surfaceTransition}
-              className="flex items-center gap-1 text-xs text-slate-500 rounded"
+              className="flex items-center gap-1 text-xs text-muted rounded"
             >
               <span>Limit</span>
               <LimitSelect value={limit} options={LIMIT_OPTIONS} onChange={onLimitChange} />
@@ -263,7 +267,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               <WrapText size={12} />
             </Button>
           )}
-          <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-surface-800 border border-surface-700 rounded">
+          <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted bg-surface-800 border border-surface-700 rounded">
             {isMac ? '⌘↵' : 'Ctrl+↵'}
           </kbd>
           {running && onCancel && (
@@ -272,12 +276,17 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               Cancel
             </Button>
           )}
+          {!database && (
+            <span className="text-[11px] text-amber-400" role="status">
+              Select a database to run
+            </span>
+          )}
           <Button
             variant="primary"
             size="sm"
             onClick={onRun}
-            disabled={running || !value.trim()}
-            title={`Run (${modKey}Enter)`}
+            disabled={running || !value.trim() || !database}
+            title={!database ? 'Select a database first' : `Run (${modKey}Enter)`}
           >
             <span className="relative inline-flex h-3 w-3 items-center justify-center">
               <AnimatePresence initial={false} mode="sync">

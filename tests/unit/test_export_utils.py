@@ -11,9 +11,11 @@ def test_target_table_sql_includes_schema_when_requested():
     assert _target_table_sql("my_db", "users", include_schema=True) == "`my_db`.`users`"
 
 
-def test_target_table_sql_rejects_invalid_identifiers():
-    with pytest.raises(ValueError):
-        _target_table_sql("my_db", "we`ird", include_schema=True)
+def test_target_table_sql_escapes_embedded_backticks():
+    """The table name is quoted, so a backtick in it cannot end the identifier."""
+    assert (
+        _target_table_sql("my_db", "we`ird", include_schema=True) == "`my_db`.`we``ird`"
+    )
 
 
 def test_target_table_label_matches_schema_option():
@@ -109,3 +111,38 @@ async def test_resolve_ai_columns_raises_on_lookup_failure(caplog):
         in record.message
         for record in caplog.records
     )
+
+
+# ---------------------------------------------------------------------------
+# CSV formula neutralisation (S-8)
+# ---------------------------------------------------------------------------
+
+
+def test_formula_prefixes_are_neutralised():
+    from lagun.api.export import _csv_neutralize
+
+    for value in ("=1+1", "+SUM(A1)", "-2+3", "@cmd", "\tpayload", "\rpayload"):
+        assert _csv_neutralize(value) == "'" + value, value
+
+
+def test_numeric_values_keep_their_meaning():
+    """A leading - or + on a number is a sign, not a formula trigger."""
+    from lagun.api.export import _csv_neutralize
+
+    for value in ("-5", "+1.5", "-1e6", "-0.5", "+2.0E-3"):
+        assert _csv_neutralize(value) == value, value
+
+
+def test_ordinary_and_empty_values_are_untouched():
+    from lagun.api.export import _csv_neutralize
+
+    for value in ("", "hello", "C:\\Users", "a=b"):
+        assert _csv_neutralize(value) == value, value
+
+
+def test_csv_cell_renders_null_as_empty_and_neutralises_the_rest():
+    from lagun.api.export import _csv_cell
+
+    assert _csv_cell(None) == ""
+    assert _csv_cell("=1+1") == "'=1+1"
+    assert _csv_cell(-5) == "-5"

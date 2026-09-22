@@ -54,6 +54,80 @@ export const mockColumns = [
   },
 ]
 
+// ── Table data: SELECT + row mutation endpoints ─────────────────────────
+//
+// The data tab applies an edit locally and then reloads, so a fixed fixture
+// would erase the very change a test just made. These handlers therefore read
+// and write one mutable in-memory table, and record the parsed request body of
+// every data-path call so a test can assert what the component serialized.
+
+/** Column names the mock data endpoints speak — mirrors `mockColumns`. */
+export const mockDataColumns = ['id', 'name']
+
+const INITIAL_TABLE_ROWS: unknown[][] = [
+  [1, 'Alice'],
+  [2, 'Bob'],
+]
+
+/** Rows `POST /query` returns; the row-write handlers mutate them in place. */
+export const mockTableRows: unknown[][] = INITIAL_TABLE_ROWS.map(row => [...row])
+
+export function resetMockTableRows() {
+  mockTableRows.length = 0
+  mockTableRows.push(...INITIAL_TABLE_ROWS.map(row => [...row]))
+}
+
+export interface CapturedDataRequest {
+  method: string
+  url: string
+  body: Record<string, unknown> | null
+}
+
+/** Data-path requests the component sent, in arrival order. */
+export const dataRequests: Record<
+  'query' | 'cellUpdate' | 'rowUpdate' | 'rowInsert' | 'rowDelete',
+  CapturedDataRequest[]
+> = {
+  query: [],
+  cellUpdate: [],
+  rowUpdate: [],
+  rowInsert: [],
+  rowDelete: [],
+}
+
+export function resetDataRequests() {
+  for (const captured of Object.values(dataRequests)) captured.length = 0
+}
+
+async function captureDataRequest(
+  kind: keyof typeof dataRequests,
+  request: Request,
+): Promise<Record<string, unknown>> {
+  const body = await request.json().catch(() => null) as Record<string, unknown> | null
+  dataRequests[kind].push({ method: request.method, url: new URL(request.url).pathname, body })
+  return body ?? {}
+}
+
+/** A MySQL literal for the `sql_executed` strings, shared so every handler
+ *  renders values identically. */
+function sqlLiteral(value: unknown): string {
+  if (value === null || value === undefined) return 'NULL'
+  return typeof value === 'number' ? String(value) : `'${String(value).replace(/'/g, "''")}'`
+}
+
+function whereSql(primaryKey: Record<string, unknown>): string {
+  return Object.entries(primaryKey)
+    .map(([name, value]) => `\`${name}\`=${sqlLiteral(value)}`)
+    .join(' AND ')
+}
+
+function rowMatchesKey(row: unknown[], primaryKey: Record<string, unknown>): boolean {
+  return Object.entries(primaryKey).every(([name, value]) => {
+    const index = mockDataColumns.indexOf(name)
+    return index !== -1 && String(row[index]) === String(value)
+  })
+}
+
 export const handlers = [
   http.get(`${BASE}/config/server`, () =>
     HttpResponse.json({ ldap_enabled: false, ldap_idle_timeout: 0, is_admin: false })
@@ -92,6 +166,89 @@ export const handlers = [
   http.post(`${BASE}/sessions/:id/databases/:db/tables/:table/analyze`, () =>
     HttpResponse.json({ ok: true, analyzed: true, row_count: 2, data_length: 16384 })
   ),
+  http.get(`${BASE}/sessions/:id/databases/:db/functions`, () => HttpResponse.json([])),
+
+  // Table data: SELECT and the row-mutation endpoints the data tab writes through
+  http.post(`${BASE}/sessions/:id/query`, async ({ request }) => {
+    await captureDataRequest('query', request)
+    return HttpResponse.json({
+      columns: [...mockDataColumns],
+      rows: mockTableRows.map(row => [...row]),
+      row_count: mockTableRows.length,
+      exec_time_ms: 4.2,
+    })
+  }),
+  http.post(`${BASE}/sessions/:id/cell-update`, async ({ request }) => {
+    const body = await captureDataRequest('cellUpdate', request)
+    const primaryKey = (body.primary_key ?? {}) as Record<string, unknown>
+    const columnIndex = mockDataColumns.indexOf(String(body.column ?? ''))
+    let affected = 0
+    for (const row of mockTableRows) {
+      if (!rowMatchesKey(row, primaryKey)) continue
+      if (columnIndex !== -1) row[columnIndex] = body.new_value
+      affected += 1
+    }
+    return HttpResponse.json({
+      ok: true,
+      affected_rows: affected,
+      sql_executed: `UPDATE \`${String(body.table ?? '')}\` SET \`${String(body.column ?? '')}\`=${sqlLiteral(body.new_value)} WHERE ${whereSql(primaryKey)}`,
+    })
+  }),
+  http.post(`${BASE}/sessions/:id/row-update`, async ({ request }) => {
+    const body = await captureDataRequest('rowUpdate', request)
+    const primaryKey = (body.primary_key ?? {}) as Record<string, unknown>
+    const updates = (body.updates ?? {}) as Record<string, unknown>
+    const matched = mockTableRows.filter(row => rowMatchesKey(row, primaryKey))
+    for (const row of matched) {
+      for (const [name, value] of Object.entries(updates)) {
+        const index = mockDataColumns.indexOf(name)
+        if (index !== -1) row[index] = value
+      }
+    }
+    const setSql = Object.entries(updates)
+      .map(([name, value]) => `\`${name}\`=${sqlLiteral(value)}`)
+      .join(', ')
+    return HttpResponse.json({
+      ok: true,
+      affected_rows: matched.length,
+      sql_executed: `UPDATE \`${String(body.table ?? '')}\` SET ${setSql} WHERE ${whereSql(primaryKey)}`,
+    })
+  }),
+  http.post(`${BASE}/sessions/:id/row-insert`, async ({ request }) => {
+    const body = await captureDataRequest('rowInsert', request)
+    const values = (body.values ?? {}) as Record<string, unknown>
+    const insertId = mockTableRows.reduce((max, row) => Math.max(max, Number(row[0]) || 0), 0) + 1
+    const row = mockDataColumns.map((column, index) =>
+      column in values ? values[column] : (index === 0 ? insertId : null)
+    )
+    mockTableRows.push(row)
+    const columns = Object.keys(values)
+    return HttpResponse.json({
+      ok: true,
+      insert_id: insertId,
+      affected_rows: 1,
+      sql_executed: `INSERT INTO \`${String(body.table ?? '')}\` (${columns.map(name => `\`${name}\``).join(', ')}) VALUES (${columns.map(name => sqlLiteral(values[name])).join(', ')})`,
+    })
+  }),
+  http.delete(`${BASE}/sessions/:id/rows`, async ({ request }) => {
+    const body = await captureDataRequest('rowDelete', request)
+    const primaryKeys = Array.isArray(body.primary_keys)
+      ? body.primary_keys as Record<string, unknown>[]
+      : []
+    let affected = 0
+    for (const primaryKey of primaryKeys) {
+      for (let index = mockTableRows.length - 1; index >= 0; index -= 1) {
+        if (!rowMatchesKey(mockTableRows[index], primaryKey)) continue
+        mockTableRows.splice(index, 1)
+        affected += 1
+      }
+    }
+    return HttpResponse.json({
+      ok: true,
+      affected_rows: affected,
+      sql_executed: `DELETE FROM \`${String(body.table ?? '')}\` WHERE ${primaryKeys.map(pk => `(${whereSql(pk)})`).join(' OR ')}`,
+    })
+  }),
 
   // Script execution
   http.post(`${BASE}/sessions/:id/query/script/validate`, async ({ request }) => {

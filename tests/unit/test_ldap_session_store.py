@@ -2,6 +2,7 @@
 
 import asyncio
 
+from lagun.api.scope import effective_scope
 from lagun.db import session_store
 from lagun.db.connections_config import sync_connections_config
 from lagun.models.session import SessionCreate
@@ -77,7 +78,10 @@ connections:
 
     await sync_connections_config(str(config))
     alice_session = (await session_store.list_sessions_for_user("alice"))[0]
-    assert alice_session.selected_databases == ["app", "analytics"]
+    # The config list is the administrator's ceiling; the effective scope is the
+    # ceiling until the user narrows it.
+    assert alice_session.managed_selected_databases == ["app", "analytics"]
+    assert effective_scope(alice_session) == frozenset({"app", "analytics"})
 
     config.write_text("""
 connections:
@@ -91,7 +95,8 @@ connections:
 
     await sync_connections_config(str(config))
     alice_session = (await session_store.list_sessions_for_user("alice"))[0]
-    assert alice_session.selected_databases == ["reporting"]
+    assert alice_session.managed_selected_databases == ["reporting"]
+    assert effective_scope(alice_session) == frozenset({"reporting"})
 
 
 async def test_managed_connection_rejects_invalid_selected_databases(

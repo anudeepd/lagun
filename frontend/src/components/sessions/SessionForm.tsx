@@ -4,6 +4,8 @@ import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
 import RefreshIcon from '../ui/RefreshIcon'
+import { LoadingState } from '../ui/Spinner'
+import Label from '../ui/Label'
 import { useSessionStore } from '../../store/sessionStore'
 import { api } from '../../api/client'
 import type { Session, SessionUpdate } from '../../types'
@@ -41,6 +43,11 @@ export default function SessionForm({ open, onClose, session }: Props) {
   const [fetchDbError, setFetchDbError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const isManaged = !!session?.managed
+  // A shared (managed) connection may carry an administrator allowlist. The user
+  // can narrow their own selection, never widen it, so the option list is
+  // intersected with that allowlist and the field is labelled accordingly.
+  const managedAllowedDbs = isManaged ? (session?.managed_selected_databases ?? []) : []
+  const boundedByManagedList = managedAllowedDbs.length > 0
   const managedLock = 'Managed in connections.yaml — ask an admin to change.'
   const nameRef = useRef<HTMLInputElement>(null)
   const usernameRef = useRef<HTMLInputElement>(null)
@@ -181,7 +188,12 @@ export default function SessionForm({ open, onClose, session }: Props) {
         })
       }
       if (r.ok) {
-        const dbs = r.databases ?? []
+        const fetched = r.databases ?? []
+        // Never offer a database outside the administrator's allowlist: the
+        // selection may be narrowed by the user but not widened beyond it.
+        const dbs = boundedByManagedList
+          ? fetched.filter(db => managedAllowedDbs.includes(db))
+          : fetched
         setAvailableDbs(dbs)
         setSelectedDbs(prev => prev.filter(d => dbs.includes(d)))
       } else {
@@ -252,7 +264,9 @@ export default function SessionForm({ open, onClose, session }: Props) {
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wide">Databases</span>
+            <Label as="span">
+              {boundedByManagedList ? "Databases (within the administrator's allowed list)" : 'Databases'}
+            </Label>
             <div className="flex items-center gap-2">
               {availableDbs.length > 0 && (
                 <button
@@ -281,9 +295,15 @@ export default function SessionForm({ open, onClose, session }: Props) {
           )}
 
           {availableDbs.length === 0 && !fetchingDbs && !fetchDbError && (
-            <p className="text-xs text-slate-500 italic">
+            <p className="text-xs text-muted italic">
               Click Fetch to load available databases from the server.
             </p>
+          )}
+
+          {/* The Fetch button spins in place; this is the single announcement
+              for the empty list area it is filling. */}
+          {fetchingDbs && availableDbs.length === 0 && (
+            <LoadingState label="Fetching databases…" compact className="sr-only" />
           )}
 
           {availableDbs.length > 0 && (
@@ -302,10 +322,13 @@ export default function SessionForm({ open, onClose, session }: Props) {
                   </label>
                 ))}
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted">
                 {selectedDbs.length === 0
                   ? 'No selection — all databases will be shown'
                   : `${selectedDbs.length} of ${availableDbs.length} selected`}
+                {boundedByManagedList && (
+                  <> (only databases on the administrator&apos;s allowed list are offered)</>
+                )}
               </p>
             </>
           )}

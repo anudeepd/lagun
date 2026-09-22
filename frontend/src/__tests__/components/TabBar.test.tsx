@@ -80,7 +80,7 @@ describe('TabBar', () => {
     render(<TabBar />)
     fireEvent.click(screen.getByRole('button', { name: 'Close All' }))
 
-    expect(screen.getByRole('dialog', { name: 'Close All Tabs' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: 'Close All Tabs' })).toBeInTheDocument()
     expect(screen.getByText(/authenticated session/i)).toBeInTheDocument()
     expect(useTabStore.getState().tabs).toHaveLength(1)
   })

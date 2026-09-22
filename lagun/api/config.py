@@ -20,6 +20,7 @@ from lagun.db.crypto import (
     decrypt_with_passphrase,
     encrypt_with_passphrase,
 )
+from lagun.models.config import ServerConfig, SessionExport
 from lagun.models.session import SessionCreate
 
 router = APIRouter(tags=["config"])
@@ -27,7 +28,11 @@ router = APIRouter(tags=["config"])
 _EXPORT_VERSION = 1
 
 
-@router.get("/config/server")
+@router.get(
+    "/config/server",
+    response_model=ServerConfig,
+    summary="Read this server's LDAP configuration",
+)
 async def get_server_config(request: Request):
     ldap_is_enabled = ldap_enabled()
     username = getattr(request.state, "user", None)
@@ -51,11 +56,17 @@ class ExportRequest(BaseModel):
 
 
 class ImportResult(BaseModel):
+    """`skipped` counts entries not imported: duplicates of an existing session, or invalid ones."""
+
     imported: int
     skipped: int
 
 
-@router.post("/config/export")
+@router.post(
+    "/config/export",
+    response_model=SessionExport,
+    summary="Download saved connections as a JSON backup",
+)
 async def export_config(req: ExportRequest):
     if not req.passphrase:
         raise HTTPException(
@@ -71,6 +82,7 @@ async def export_config(req: ExportRequest):
         plaintext = decrypt_password(s["password_enc"])
         sessions_out.append(
             {
+                "source_id": s["id"],
                 "name": s["name"],
                 "host": s["host"],
                 "port": s["port"],
@@ -123,6 +135,21 @@ async def export_config(req: ExportRequest):
     )
 
 
+async def _find_existing_session(source_id: str | None, data: SessionCreate) -> bool:
+    """True when the store already holds the session an imported entry describes.
+
+    The entry's exported ``source_id`` is checked first; otherwise — and when that
+    row no longer exists — the natural key ``(name, host, port, username)`` is
+    used, so re-importing a payload whose sessions were already imported (each
+    copy getting a fresh row id) is detected as a duplicate.
+    """
+    if source_id and await session_store.get_session(source_id) is not None:
+        return True
+    natural_key = (data.name, data.host, data.port, data.username)
+    existing = await session_store.list_sessions()
+    return any((s.name, s.host, s.port, s.username) == natural_key for s in existing)
+
+
 @router.post("/config/import", response_model=ImportResult)
 async def import_config(
     file: UploadFile,
@@ -164,7 +191,7 @@ async def import_config(
     if not isinstance(entries, list):
         raise HTTPException(400, "Invalid export: sessions must be an array")
 
-    prepared: list[SessionCreate] = []
+    prepared: list[tuple[str | None, SessionCreate]] = []
     skipped = 0
     for entry in entries:
         if not isinstance(entry, dict):
@@ -174,17 +201,23 @@ async def import_config(
             plaintext_password = decrypt_with_passphrase(
                 entry["password_enc"], passphrase, salt_bytes
             )
+            source_id = entry.get("source_id")
+            if not isinstance(source_id, str) or not source_id:
+                source_id = None
             prepared.append(
-                SessionCreate(
-                    name=entry["name"],
-                    host=entry.get("host", "localhost"),
-                    port=entry.get("port", 3306),
-                    username=entry.get("username", ""),
-                    password=plaintext_password,
-                    default_db=entry.get("default_db"),
-                    query_limit=entry.get("query_limit", 100),
-                    ssl_enabled=bool(entry.get("ssl_enabled", False)),
-                    selected_databases=entry.get("selected_databases", []),
+                (
+                    source_id,
+                    SessionCreate(
+                        name=entry["name"],
+                        host=entry.get("host", "localhost"),
+                        port=entry.get("port", 3306),
+                        username=entry.get("username", ""),
+                        password=plaintext_password,
+                        default_db=entry.get("default_db"),
+                        query_limit=entry.get("query_limit", 100),
+                        ssl_enabled=bool(entry.get("ssl_enabled", False)),
+                        selected_databases=entry.get("selected_databases", []),
+                    ),
                 )
             )
         except InvalidToken as exc:
@@ -195,8 +228,11 @@ async def import_config(
             skipped += 1
 
     imported = 0
-    for session in prepared:
+    for source_id, session in prepared:
         try:
+            if await _find_existing_session(source_id, session):
+                skipped += 1
+                continue
             await session_store.create_session(session)
             imported += 1
         except Exception:

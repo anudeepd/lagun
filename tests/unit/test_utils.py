@@ -29,24 +29,33 @@ def test_quote_ident_with_dollar():
     assert quote_ident("col$name") == "`col$name`"
 
 
-def test_quote_ident_rejects_hyphen():
-    with pytest.raises(ValueError):
-        quote_ident("my-table")
+def test_quote_ident_quotes_names_mysql_allows():
+    """Hyphens, spaces and non-ASCII are legal in MySQL identifiers.
+
+    Rejecting them made real databases and tables unreachable from the schema
+    tree, so they are quoted instead.
+    """
+    assert quote_ident("my-table") == "`my-table`"
+    assert quote_ident("my table") == "`my table`"
+    assert quote_ident("caf\u00e9") == "`caf\u00e9`"
 
 
-def test_quote_ident_rejects_space():
-    with pytest.raises(ValueError):
-        quote_ident("my table")
+def test_quote_ident_doubles_embedded_backticks():
+    """Doubling is what keeps a backtick from ending the quoted identifier."""
+    assert quote_ident("we`ird") == "`we``ird`"
 
 
-def test_quote_ident_rejects_semicolon():
-    with pytest.raises(ValueError):
-        quote_ident("users; DROP TABLE users--")
+def test_quote_ident_contains_injection_attempts():
+    """A payload stays inside the quotes, so it is inert."""
+    quoted = quote_ident("users; DROP TABLE users--")
+    assert quoted == "`users; DROP TABLE users--`"
+    assert quoted.count("`") == 2
 
 
-def test_quote_ident_rejects_backtick():
-    with pytest.raises(ValueError):
-        quote_ident("`users`")
+def test_quote_ident_rejects_empty_and_nul():
+    for bad in ("", "a\x00b"):
+        with pytest.raises(ValueError):
+            quote_ident(bad)
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +183,13 @@ def test_escape_value_binary_uses_lossless_hex_literal():
 
 
 def test_escape_value_backslashes_use_sql_mode_independent_hex_literal():
-    assert escape_value(r"C:\new") == "0x433a5c6e6577"
+    """The hex form needs an explicit charset, or the literal is binary.
+
+    `0x433a5c6e6577` assigned to a utf8mb4 column is coerced by the server, but
+    as a bare hex literal in a comparison it is a binary string; CONVERT pins the
+    interpretation so the value is charset-correct wherever it is used.
+    """
+    assert escape_value(r"C:\new") == "CONVERT(0x433a5c6e6577 USING utf8mb4)"
 
 
 def test_escape_value_rejects_non_finite_floats():
@@ -249,3 +264,25 @@ def test_system_dbs_contains_known_entries():
     assert "performance_schema" in SYSTEM_DBS
     assert "mysql" in SYSTEM_DBS
     assert "sys" in SYSTEM_DBS
+
+
+# ---------------------------------------------------------------------------
+# escape_string_literal
+# ---------------------------------------------------------------------------
+
+
+def test_escape_string_literal_doubles_quotes():
+    assert escape_string_literal("it's") == "it''s"
+
+
+def test_escape_string_literal_doubles_backslashes():
+    """MySQL treats backslash as an escape character, so it must be doubled."""
+    assert escape_string_literal("C:\\Users") == "C:\\\\Users"
+    assert escape_string_literal("trailing\\") == "trailing\\\\"
+    assert escape_string_literal("a\\'b") == "a\\\\''b"
+
+
+def test_escape_string_literal_still_rejects_statement_metacharacters():
+    for value in ("a;b", "a--b", "a/*b"):
+        with pytest.raises(ValueError):
+            escape_string_literal(value)

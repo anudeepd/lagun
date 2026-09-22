@@ -1,7 +1,12 @@
 """Pydantic models for query execution."""
 
 from typing import Any, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+# Upper bound on a single bulk row-delete request, matching the export path's
+# pk_values cap. Without it the key list — and the one transaction it opens —
+# is sized entirely by the caller.
+_MAX_ROW_DELETE_KEYS = 10_000
 
 
 class QueryRequest(BaseModel):
@@ -125,9 +130,25 @@ class RowDeleteRequest(BaseModel):
     table: str
     primary_keys: list[dict[str, Any]]  # list of PK dicts
 
+    @field_validator("primary_keys")
+    @classmethod
+    def bounded_primary_keys(cls, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(value) > _MAX_ROW_DELETE_KEYS:
+            raise ValueError(
+                f"primary_keys cannot contain more than {_MAX_ROW_DELETE_KEYS:,} rows"
+            )
+        return value
+
 
 class RowDeleteResult(BaseModel):
     ok: bool
     affected_rows: int
     sql_executed: str
+    error: Optional[str] = None
+
+
+class QueryKillResult(BaseModel):
+    """Outcome of a cancellation request; a no-op cancellation is `ok: true`."""
+
+    ok: bool
     error: Optional[str] = None

@@ -8,14 +8,21 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from fastapi import APIRouter, HTTPException, Request
 
 from lagun.auth import request_username
 from lagun.db.pool import DatabaseCapacityError, DatabaseConnectionError, get_pool
 from lagun.db.session_store import get_session
-from lagun.db.utils import quote_ident, escape_value
+from lagun.db.utils import quote_ident, escape_value, format_mysql_time
+from lagun.api.scope import effective_scope, require_db_scope
+from lagun.api.sql_analysis import (
+    add_row_limit,
+    statement_kind,
+    strip_comments_and_literals,
+    target_table,
+)
 from lagun.api.sql_script import SqlScriptError, split_sql_script
 from lagun.models.query import (
     QueryRequest,
@@ -33,6 +40,7 @@ from lagun.models.query import (
     RowInsertResult,
     RowDeleteRequest,
     RowDeleteResult,
+    QueryKillResult,
 )
 
 router = APIRouter(tags=["query"])
@@ -72,7 +80,15 @@ _BULK_LOCK_WAIT_TIMEOUT_SECONDS = int(
 )
 _BULK_MAX_RUNTIME_SECONDS = int(os.getenv("LAGUN_BULK_MAX_RUNTIME_SECONDS", "120"))
 _QUERY_MAX_RUNTIME_SECONDS = float(os.getenv("LAGUN_QUERY_MAX_RUNTIME_SECONDS", "30"))
+# Hard ceiling on rows returned by a single query, independent of the session's
+# own query_limit. A caller can ask for at most this many rows, so a result set
+# can never be sized by the request alone.
+_QUERY_MAX_RESULT_ROWS = int(os.getenv("LAGUN_QUERY_MAX_RESULT_ROWS", "100000"))
 _BULK_PREVIEW_CHARS = 160
+# How many rendered DELETE statements a bulk row-delete echoes back. The response
+# is a convenience for the query log, not a record, so it is capped rather than
+# grown with the request.
+_ROW_DELETE_MAX_ECHO = 50
 _NONTRANSACTIONAL_ENGINES = {
     "MYISAM",
     "MEMORY",
@@ -81,10 +97,6 @@ _NONTRANSACTIONAL_ENGINES = {
     "BLACKHOLE",
     "FEDERATED",
 }
-_SQL_IDENTIFIER_RE = r"(?:`(?:``|[^`])+`|[A-Za-z_][A-Za-z0-9_$]*)"
-_SQL_TABLE_REF_RE = (
-    rf"(?P<first>{_SQL_IDENTIFIER_RE})(?:\s*\.\s*(?P<second>{_SQL_IDENTIFIER_RE}))?"
-)
 
 
 async def _get_pool_or_404(session_id: str):
@@ -111,103 +123,6 @@ def _preview_statement(statement: str) -> str:
 def _is_lock_wait_timeout(exc: BaseException) -> bool:
     errno = getattr(exc, "args", [None])[0] if getattr(exc, "args", None) else None
     return errno == 1205 or "lock wait timeout" in str(exc).lower()
-
-
-def _strip_comments_and_literals(sql: str) -> str:
-    result: list[str] = []
-    i = 0
-    while i < len(sql):
-        ch = sql[i]
-        nxt = sql[i + 1] if i + 1 < len(sql) else ""
-        if ch == "-" and nxt == "-":
-            i += 2
-            while i < len(sql) and sql[i] != "\n":
-                i += 1
-            result.append(" ")
-        elif ch == "#":
-            i += 1
-            while i < len(sql) and sql[i] != "\n":
-                i += 1
-            result.append(" ")
-        elif ch == "/" and nxt == "*":
-            if i + 2 < len(sql) and sql[i + 2] == "!":
-                result.append("/*! ")
-            i += 2
-            while i + 1 < len(sql) and not (sql[i] == "*" and sql[i + 1] == "/"):
-                i += 1
-            i += 2
-            result.append(" ")
-        elif ch == "'":
-            i += 1
-            while i < len(sql):
-                if sql[i] == "\\" and i + 1 < len(sql) and sql[i + 1] == "'":
-                    i += 2
-                elif sql[i] == "'" and i + 1 < len(sql) and sql[i + 1] == "'":
-                    i += 2
-                elif sql[i] == "'":
-                    i += 1
-                    break
-                else:
-                    i += 1
-            result.append("''")
-        elif ch == '"':
-            i += 1
-            while i < len(sql):
-                if sql[i] == '"' and i + 1 < len(sql) and sql[i + 1] == '"':
-                    i += 2
-                elif sql[i] == '"':
-                    i += 1
-                    break
-                else:
-                    i += 1
-            result.append('""')
-        elif ch == "`":
-            result.append("`")
-            i += 1
-            while i < len(sql) and sql[i] != "`":
-                result.append("_")
-                i += 1
-            if i < len(sql):
-                result.append("`")
-                i += 1
-        else:
-            result.append(ch)
-            i += 1
-    return "".join(result)
-
-
-def _statement_kind(statement: str) -> str | None:
-    stripped = _strip_comments_and_literals(statement)
-    m = re.search(r"\b([A-Za-z]+)\b", stripped)
-    return m.group(1).upper() if m else None
-
-
-def _unquote_sql_identifier(identifier: str) -> str:
-    identifier = identifier.strip()
-    if identifier.startswith("`") and identifier.endswith("`"):
-        return identifier[1:-1].replace("``", "`")
-    return identifier
-
-
-def _target_table(statement: str) -> tuple[str | None, str] | None:
-    prefix = r"^\s*(?:(?:--[^\n]*\n|#[^\n]*\n|/\*[^!][\s\S]*?\*/)\s*)*"
-    ws_or_end = r"(?:\s|$)"
-    patterns = [
-        rf"{prefix}INSERT\s+(?:IGNORE\s+)?INTO\s+{_SQL_TABLE_REF_RE}{ws_or_end}",
-        rf"{prefix}UPDATE\s+{_SQL_TABLE_REF_RE}\s+SET\b",
-        rf"{prefix}DELETE\s+FROM\s+{_SQL_TABLE_REF_RE}\s+WHERE\b",
-        rf"{prefix}DELETE\s+FROM\s+{_SQL_TABLE_REF_RE}{ws_or_end}",
-    ]
-    for pattern in patterns:
-        m = re.search(pattern, statement, re.IGNORECASE)
-        if not m:
-            continue
-        first = _unquote_sql_identifier(m.group("first"))
-        second = m.group("second")
-        if second:
-            return first, _unquote_sql_identifier(second)
-        return None, first
-    return None
 
 
 def _validate_script_statements(statements: list[str]) -> ScriptQueryValidationResult:
@@ -252,9 +167,9 @@ def _validate_script_statements(statements: list[str]) -> ScriptQueryValidationR
                     "Split or shrink this statement.",
                 ),
             )
-        normalized = _strip_comments_and_literals(statement)
+        normalized = strip_comments_and_literals(statement)
         upper = normalized.upper()
-        kind = _statement_kind(statement)
+        kind = statement_kind(statement)
         if kind not in counts:
             return ScriptQueryValidationResult(
                 ok=False,
@@ -283,7 +198,7 @@ def _validate_script_statements(statements: list[str]) -> ScriptQueryValidationR
                     "Rewrite it as INSERT ... VALUES or run it normally.",
                 ),
             )
-        if "/*!" in upper or re.search(
+        if "/*!" in statement or re.search(
             r"\bON\s+DUPLICATE\s+KEY\b|\b(WITH|SELECT|CALL|USE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|LOAD|LOCK|UNLOCK|START|BEGIN|COMMIT|ROLLBACK)\b",
             upper,
         ):
@@ -300,7 +215,7 @@ def _validate_script_statements(statements: list[str]) -> ScriptQueryValidationR
                     "Use simple INSERT VALUES, UPDATE ... WHERE, or DELETE ... WHERE statements.",
                 ),
             )
-        if _target_table(statement) is None:
+        if target_table(statement) is None:
             return ScriptQueryValidationResult(
                 ok=False,
                 statement_count=len(statements),
@@ -377,7 +292,7 @@ async def _check_transactional_targets(
 
     seen_engines: dict[tuple[str, str], str] = {}
     for idx, statement in enumerate(statements):
-        target = _target_table(statement)
+        target = target_table(statement)
         if target is None:
             continue
         database, table = target
@@ -416,6 +331,40 @@ async def _check_transactional_targets(
                     "Large write scripts cannot guarantee rollback for this table.",
                     f"Statement {idx + 1} targets {database}.{table}, which uses the non-transactional {engine.lower()} engine.",
                     "Convert the table to InnoDB or run this script manually after accepting that rollback is not guaranteed.",
+                ),
+            )
+    return None
+
+
+def _script_scope_error(
+    statements: list[str], scope: frozenset[str] | None, current_database: str | None
+) -> tuple[int, str, ScriptQueryError] | None:
+    """First statement that targets a schema outside the connection's scope.
+
+    The bulk path is a write path like any other, so it gets the same scope rule
+    as the single-statement endpoints — including for schema-qualified
+    statements, which is why the target is resolved per statement rather than
+    trusting the request's ``database``.
+    """
+    if scope is None:
+        return None
+    for idx, statement in enumerate(statements):
+        target = target_table(statement)
+        if target is None:
+            continue
+        database, _ = target
+        resolved = database or current_database
+        if resolved and resolved not in scope:
+            return (
+                idx,
+                _preview_statement(statement),
+                _script_error(
+                    "OUT_OF_SCOPE_DATABASE",
+                    "Large write script targets a database this connection cannot use.",
+                    f"Statement {idx + 1} targets {resolved}, which is outside this "
+                    "connection's allowed databases.",
+                    "Remove the statement, or ask an administrator to extend this "
+                    "connection's allowed databases.",
                 ),
             )
     return None
@@ -611,38 +560,27 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
             raise _QueryCancelled
         pool, session = await _get_pool_or_404(session_id)
         effective_db = req.database or session.default_db
-        # Scope enforcement semantics:
-        #   - selected_databases is None or empty → no scope configured, allow
-        #     any database the MySQL user can reach (unrestricted mode).
-        #   - selected_databases is a non-empty list → only those DBs are
-        #     allowed; current DB is resolved from req.database then
-        #     session.default_db as a fallback so omitting database does not
-        #     bypass the check.
-        #   - v1 trade-off: this guards the connection's current database
-        #     only. Free-form SQL referencing another DB by name (e.g.
-        #     ``SELECT * FROM other_db.tbl``) is NOT scanned. The deeper
-        #     gate is the MySQL user's grants; if the LDAP-bound account
-        #     lacks privileges on ``other_db`` the query fails at the DBMS.
-        #     A full SQL-level scope scan is deferred — parsing is fragile
-        #     and bypassable via dynamic SQL, prepared statements, and
-        #     comments.
-        if (
-            effective_db
-            and session.selected_databases
-            and effective_db not in session.selected_databases
-        ):
-            raise HTTPException(
-                403,
-                f"Database '{effective_db}' is not in this connection's allowed databases.",
-            )
+        # Scope enforcement resolves req.database and then session.default_db, so
+        # omitting the database cannot bypass the check, and a managed connection
+        # is bounded by the administrator's ceiling (see lagun/api/scope.py).
+        #
+        # Known limitation: this guards the connection's current database only.
+        # Free-form SQL naming another schema (``SELECT * FROM other_db.tbl``) is
+        # not scanned — parsing is fragile and bypassable via dynamic SQL and
+        # prepared statements. The deeper gate remains the MySQL user's grants.
+        require_db_scope(session, effective_db)
         sql = req.sql.strip().rstrip(";").strip()
-        limit = req.limit or session.query_limit
+        limit = min(req.limit or session.query_limit, _QUERY_MAX_RESULT_ROWS)
 
-        # Auto-append LIMIT for plain SELECT without existing LIMIT
-        is_select = re.match(r"^\s*SELECT\b", sql, re.IGNORECASE)
-        has_limit = re.search(r"\bLIMIT\b", _strip_quotes(sql), re.IGNORECASE)
-        if is_select and not has_limit:
-            sql = f"{sql} LIMIT {limit}"
+        # Every row-returning statement gets a LIMIT unless it already has a
+        # top-level one. A prefix regex is not enough: `WITH ... SELECT` and
+        # `/* hint */ SELECT` both return rows but match neither `^SELECT` nor a
+        # naive LIMIT search, so they used to run unbounded. add_row_limit also
+        # knows where a LIMIT may legally go (`SELECT ... FOR UPDATE`), and
+        # returns None when the grammar has no room for one.
+        limited = add_row_limit(sql, limit)
+        if limited is not None:
+            sql = limited
 
         pool_wait_started = time.monotonic()
         async with pool.acquire() as conn:
@@ -676,9 +614,12 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
                         if cur.description:
                             columns = [d[0] for d in cur.description]
                             fetch_started = time.monotonic()
-                            raw_rows = [list(r) for r in (await cur.fetchall())]
+                            raw_rows = await cur.fetchall()
                             fetch_ms = _elapsed_ms(fetch_started)
                             serialize_started = time.monotonic()
+                            # Serialize straight out of the driver's rows: an
+                            # intermediate `[list(r) for r in ...]` copy would
+                            # double peak memory for large result sets.
                             rows = [
                                 [_serialize(value) for value in row] for row in raw_rows
                             ]
@@ -750,7 +691,11 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
     )
 
 
-@router.delete("/sessions/{session_id}/query")
+@router.delete(
+    "/sessions/{session_id}/query",
+    response_model=QueryKillResult,
+    response_model_exclude_unset=True,
+)
 async def kill_query(session_id: str, request: Request):
     owner_username = request_username(request)
     async with _active_queries_lock:
@@ -778,7 +723,11 @@ async def kill_query(session_id: str, request: Request):
         return {"ok": False, "error": str(exc)}
 
 
-@router.delete("/sessions/{session_id}/query/{execution_id}")
+@router.delete(
+    "/sessions/{session_id}/query/{execution_id}",
+    response_model=QueryKillResult,
+    response_model_exclude_unset=True,
+)
 async def kill_query_execution(
     session_id: str,
     execution_id: str,
@@ -807,7 +756,9 @@ async def kill_query_execution(
     response_model=ScriptQueryValidationResult,
 )
 async def validate_script_query(session_id: str, req: ScriptQueryRequest):
-    pool, _ = await _get_pool_or_404(session_id)
+    pool, session = await _get_pool_or_404(session_id)
+    current_database = req.database or session.default_db
+    require_db_scope(session, current_database)
     statements, err = _statements_from_request(req)
     if err:
         return ScriptQueryValidationResult(
@@ -816,6 +767,19 @@ async def validate_script_query(session_id: str, req: ScriptQueryRequest):
     validation = _validate_script_statements(statements or [])
     if not validation.ok:
         return validation
+    scope_error = _script_scope_error(
+        statements or [], effective_scope(session), current_database
+    )
+    if scope_error:
+        idx, preview, error = scope_error
+        return ScriptQueryValidationResult(
+            ok=False,
+            statement_count=len(statements or []),
+            operation_counts=validation.operation_counts,
+            rejected_statement_index=idx,
+            rejected_statement_preview=preview,
+            error=error,
+        )
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             if req.database:
@@ -838,7 +802,9 @@ async def validate_script_query(session_id: str, req: ScriptQueryRequest):
 async def execute_script_query(
     session_id: str, req: ScriptQueryRequest, request: Request
 ):
-    pool, _ = await _get_pool_or_404(session_id)
+    pool, session = await _get_pool_or_404(session_id)
+    current_database = req.database or session.default_db
+    require_db_scope(session, current_database)
     t0 = time.monotonic()
 
     statements, err = _statements_from_request(req)
@@ -865,6 +831,23 @@ async def execute_script_query(
             failed_statement_preview=validation.rejected_statement_preview,
             rolled_back=False,
             error=validation.error,
+        )
+
+    scope_error = _script_scope_error(
+        statements or [], effective_scope(session), current_database
+    )
+    if scope_error:
+        idx, preview, error = scope_error
+        return ScriptQueryResult(
+            ok=False,
+            execution_id=req.execution_id,
+            statements_executed=0,
+            affected_rows=0,
+            exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
+            failed_statement_index=idx,
+            failed_statement_preview=preview,
+            rolled_back=False,
+            error=error,
         )
 
     async with _active_script_queries_lock:
@@ -1021,9 +1004,21 @@ async def execute_script_query(
             _active_script_details.pop((session_id, req.execution_id), None)
 
 
-@router.delete("/sessions/{session_id}/query/script/{execution_id}")
-async def kill_script_query(session_id: str, execution_id: str):
+@router.delete(
+    "/sessions/{session_id}/query/script/{execution_id}",
+    response_model=QueryKillResult,
+    response_model_exclude_unset=True,
+)
+async def kill_script_query(session_id: str, execution_id: str, request: Request):
+    username = request_username(request)
     async with _active_script_queries_lock:
+        details = _active_script_details.get((session_id, execution_id)) or {}
+        owner = details.get("username")
+        # Same rule as normal query cancellation: only the owner may cancel a
+        # run, and a non-owner gets the same answer as for a nonexistent one so
+        # execution ids cannot be probed.
+        if owner is not None and username is not None and owner != username:
+            return {"ok": False, "error": "No active large write script"}
         thread_id = _active_script_queries.get(session_id, {}).get(execution_id)
         if thread_id is None and execution_id in _active_script_queries.get(
             session_id, {}
@@ -1041,50 +1036,90 @@ async def kill_script_query(session_id: str, execution_id: str):
         return {"ok": False, "error": str(exc)}
 
 
-def _strip_quotes(sql: str) -> str:
-    """Remove quoted strings and backtick identifiers so keywords inside them are ignored."""
-    result: list[str] = []
-    i = 0
-    while i < len(sql):
-        ch = sql[i]
-        if ch == "'":
-            i += 1
-            while i < len(sql):
-                if sql[i] == "'" and i + 1 < len(sql) and sql[i + 1] == "'":
-                    i += 2
-                elif sql[i] == "'":
-                    i += 1
-                    break
-                else:
-                    i += 1
-        elif ch == '"':
-            i += 1
-            while i < len(sql) and sql[i] != '"':
-                i += 1
-            i += 1
-        elif ch == "`":
-            i += 1
-            while i < len(sql) and sql[i] != "`":
-                i += 1
-            i += 1
-        else:
-            result.append(ch)
-            i += 1
-    return "".join(result)
+def _echo_statements(statements: list[str], total: int) -> str:
+    """Join echoed SQL, noting how many statements were left out."""
+    joined = ";\n".join(statements)
+    omitted = max(0, total - len(statements))
+    if omitted:
+        return f"{joined}\n-- … {omitted} more statement(s) omitted"
+    return joined
+
+
+# MySQL types whose driver values arrive as bytes and must be written back as
+# bytes, never as the hex text the grid displays.
+_BINARY_DATA_TYPES = frozenset(
+    {
+        "binary",
+        "varbinary",
+        "blob",
+        "tinyblob",
+        "mediumblob",
+        "longblob",
+        "bit",
+        "geometry",
+        "point",
+        "linestring",
+        "polygon",
+        "multipoint",
+        "multilinestring",
+        "multipolygon",
+        "geometrycollection",
+    }
+)
 
 
 def _serialize(v: Any) -> Any:
     if isinstance(v, int) and not isinstance(v, bool) and abs(v) > _JS_MAX_SAFE_INTEGER:
         return str(v)
-    if isinstance(
-        v, (datetime.datetime, datetime.date, datetime.time, datetime.timedelta)
-    ):
+    if isinstance(v, datetime.timedelta):
+        # str(timedelta) is "1 day, 1:00:00", which is not a TIME literal and
+        # cannot be replayed or written back.
+        return format_mysql_time(v)
+    if isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
         return str(v)
     if isinstance(v, decimal.Decimal):
         return str(v)
     if isinstance(v, bytes):
-        return v.hex()
+        # Marked as hex so the value is unambiguously binary and can be decoded
+        # again on the way back in (see _coerce_binary_columns).
+        return "0x" + v.hex()
     return v
+
+
+async def _column_data_types(
+    cur, database: str, table: str, columns: Iterable[str]
+) -> dict[str, str]:
+    """DATA_TYPE per column, so a write can send bytes to a binary column."""
+    names = [name for name in dict.fromkeys(columns) if name]
+    if not names:
+        return {}
+    placeholders = ", ".join(["%s"] * len(names))
+    await cur.execute(
+        "SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS "
+        f"WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME IN ({placeholders})",
+        (database, table, *names),
+    )
+    return {row[0]: str(row[1]).lower() for row in await cur.fetchall()}
+
+
+def _coerce_binary_value(value: Any, data_type: str | None) -> Any:
+    """Decode the grid's ``0x…`` text back into bytes for a binary column."""
+    if data_type not in _BINARY_DATA_TYPES or not isinstance(value, str):
+        return value
+    body = value[2:] if value[:2].lower() == "0x" else value
+    try:
+        return bytes.fromhex(body)
+    except ValueError:
+        return value
+
+
+def _coerce_binary_map(
+    values: dict[str, Any], data_types: dict[str, str]
+) -> dict[str, Any]:
+    return {
+        key: _coerce_binary_value(value, data_types.get(key))
+        for key, value in values.items()
+    }
 
 
 def _build_pk_where(pk: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -1121,7 +1156,8 @@ def _display_value(value: Any) -> str:
 
 @router.post("/sessions/{session_id}/cell-update", response_model=CellUpdateResult)
 async def cell_update(session_id: str, req: CellUpdateRequest):
-    pool, _ = await _get_pool_or_404(session_id)
+    pool, session = await _get_pool_or_404(session_id)
+    require_db_scope(session, req.database)
     display_sql = ""
 
     try:
@@ -1129,16 +1165,27 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
         tbl_q = quote_ident(req.table)
         col_q = quote_ident(req.column)
 
-        pk_clauses, pk_values = _build_pk_where(req.primary_key)
-
-        sql = f"UPDATE {db_q}.{tbl_q} SET {col_q} = %s WHERE {pk_clauses}"
-        params = [req.new_value] + pk_values
-        display_sql = _display_sql(sql, params)
-
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, params)
-                affected = cur.rowcount
+                data_types = await _column_data_types(
+                    cur, req.database, req.table, [req.column, *req.primary_key]
+                )
+                pk_clauses, pk_values = _build_pk_where(
+                    _coerce_binary_map(req.primary_key, data_types)
+                )
+                new_value = _coerce_binary_value(
+                    req.new_value, data_types.get(req.column)
+                )
+
+                sql = f"UPDATE {db_q}.{tbl_q} SET {col_q} = %s WHERE {pk_clauses}"
+                params = [new_value] + pk_values
+                display_sql = _display_sql(sql, params)
+
+                # Single-row writes had no deadline at all; a stuck statement
+                # held a pooled connection for as long as the server allowed.
+                async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                    await cur.execute(sql, params)
+                    affected = cur.rowcount
 
         return CellUpdateResult(
             ok=True, affected_rows=affected, sql_executed=display_sql
@@ -1151,23 +1198,30 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
 
 @router.post("/sessions/{session_id}/row-update", response_model=RowUpdateResult)
 async def row_update(session_id: str, req: RowUpdateRequest):
-    pool, _ = await _get_pool_or_404(session_id)
+    pool, session = await _get_pool_or_404(session_id)
+    require_db_scope(session, req.database)
     display_sql = ""
     try:
         db_q = quote_ident(req.database)
         tbl_q = quote_ident(req.table)
 
-        set_clauses = ", ".join(f"{quote_ident(col)} = %s" for col in req.updates)
-        pk_clauses, pk_values = _build_pk_where(req.primary_key)
-        sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
-        params = list(req.updates.values()) + pk_values
-        display_sql = sql
-        display_sql = _display_sql(sql, params)
-
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, params)
-                affected = cur.rowcount
+                data_types = await _column_data_types(
+                    cur, req.database, req.table, [*req.updates, *req.primary_key]
+                )
+                updates = _coerce_binary_map(req.updates, data_types)
+                pk_clauses, pk_values = _build_pk_where(
+                    _coerce_binary_map(req.primary_key, data_types)
+                )
+                set_clauses = ", ".join(f"{quote_ident(col)} = %s" for col in updates)
+                sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
+                params = list(updates.values()) + pk_values
+                display_sql = _display_sql(sql, params)
+
+                async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                    await cur.execute(sql, params)
+                    affected = cur.rowcount
 
         return RowUpdateResult(
             ok=True, affected_rows=affected, sql_executed=display_sql
@@ -1180,22 +1234,28 @@ async def row_update(session_id: str, req: RowUpdateRequest):
 
 @router.post("/sessions/{session_id}/row-insert", response_model=RowInsertResult)
 async def row_insert(session_id: str, req: RowInsertRequest):
-    pool, _ = await _get_pool_or_404(session_id)
+    pool, session = await _get_pool_or_404(session_id)
+    require_db_scope(session, req.database)
     display_sql = ""
     try:
         db_q = quote_ident(req.database)
         tbl_q = quote_ident(req.table)
-        if req.values:
-            cols = ", ".join(quote_ident(c) for c in req.values)
-            placeholders = ", ".join("%s" for _ in req.values)
-            sql = f"INSERT INTO {db_q}.{tbl_q} ({cols}) VALUES ({placeholders})"
-        else:
-            sql = f"INSERT INTO {db_q}.{tbl_q} () VALUES ()"
-        params = list(req.values.values())
-        display_sql = _display_sql(sql, params)
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, params)
+                data_types = await _column_data_types(
+                    cur, req.database, req.table, req.values
+                )
+                values = _coerce_binary_map(req.values, data_types)
+                if values:
+                    cols = ", ".join(quote_ident(c) for c in values)
+                    placeholders = ", ".join("%s" for _ in values)
+                    sql = f"INSERT INTO {db_q}.{tbl_q} ({cols}) VALUES ({placeholders})"
+                else:
+                    sql = f"INSERT INTO {db_q}.{tbl_q} () VALUES ()"
+                params = list(values.values())
+                display_sql = _display_sql(sql, params)
+                async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                    await cur.execute(sql, params)
                 return RowInsertResult(
                     ok=True,
                     insert_id=cur.lastrowid,
@@ -1208,7 +1268,8 @@ async def row_insert(session_id: str, req: RowInsertRequest):
 
 @router.delete("/sessions/{session_id}/rows", response_model=RowDeleteResult)
 async def row_delete(session_id: str, req: RowDeleteRequest):
-    pool, _ = await _get_pool_or_404(session_id)
+    pool, session = await _get_pool_or_404(session_id)
+    require_db_scope(session, req.database)
     display_sqls: list[str] = []
     try:
         db_q = quote_ident(req.database)
@@ -1223,13 +1284,26 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                     raise RuntimeError(
                         "Failed to disable autocommit for transactional delete"
                     )
+                data_types = await _column_data_types(
+                    cur,
+                    req.database,
+                    req.table,
+                    [key for pk in req.primary_keys for key in pk],
+                )
                 try:
-                    for pk in req.primary_keys:
-                        pk_clauses, pk_values = _build_pk_where(pk)
-                        sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
-                        display_sqls.append(_display_sql(sql, pk_values))
-                        await cur.execute(sql, pk_values)
-                        total_affected += cur.rowcount
+                    # The whole batch shares one transaction, so it also shares
+                    # one deadline: a huge key list must not hold a pooled
+                    # connection and row locks indefinitely.
+                    async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                        for pk in req.primary_keys:
+                            pk_clauses, pk_values = _build_pk_where(
+                                _coerce_binary_map(pk, data_types)
+                            )
+                            sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
+                            if len(display_sqls) < _ROW_DELETE_MAX_ECHO:
+                                display_sqls.append(_display_sql(sql, pk_values))
+                            await cur.execute(sql, pk_values)
+                            total_affected += cur.rowcount
                     await cur.execute("COMMIT")
                 except Exception:
                     await cur.execute("ROLLBACK")
@@ -1237,12 +1311,19 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                 finally:
                     await cur.execute("SET autocommit=1")
         return RowDeleteResult(
-            ok=True, affected_rows=total_affected, sql_executed=";\n".join(display_sqls)
+            ok=True,
+            affected_rows=total_affected,
+            sql_executed=_echo_statements(display_sqls, len(req.primary_keys)),
         )
     except Exception as exc:
         return RowDeleteResult(
             ok=False,
             affected_rows=0,
-            sql_executed=";\n".join(display_sqls),
-            error=str(exc),
+            sql_executed=_echo_statements(display_sqls, len(req.primary_keys)),
+            error=(
+                f"Delete exceeded the {_QUERY_MAX_RUNTIME_SECONDS:g}-second limit "
+                "and was rolled back."
+                if isinstance(exc, TimeoutError)
+                else str(exc)
+            ),
         )

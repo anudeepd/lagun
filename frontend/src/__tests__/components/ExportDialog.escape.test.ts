@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildFrontendContent, responseTextWithLimit } from '../../components/table/ExportDialog'
+import { buildFrontendContent, neutralizeCsvCell, responseTextWithLimit } from '../../components/table/ExportDialog'
 
 const DB = 'db'
 const TBL = 'tbl'
@@ -119,6 +119,74 @@ describe('header escaping', () => {
   it('no quoteChar — header returned raw', () => {
     const out = csv(['myCol'], [['val']], { quoteChar: '' })
     expect(out.split('\r\n')[0]).toBe('myCol')
+  })
+})
+
+describe('neutralizeCsvCell() — formula prefixes', () => {
+  it('prefixes formula-leading strings with an apostrophe', () => {
+    expect(neutralizeCsvCell('=1+1')).toBe("'=1+1")
+    expect(neutralizeCsvCell('+SUM(A1)')).toBe("'+SUM(A1)")
+    expect(neutralizeCsvCell('@cmd')).toBe("'@cmd")
+    expect(neutralizeCsvCell('-2+3')).toBe("'-2+3")
+  })
+
+  it('prefixes a leading TAB', () => {
+    expect(neutralizeCsvCell('\t=1+1')).toBe("'\t=1+1")
+    // A bare TAB is whitespace, not a number, so it is neutralised too.
+    expect(neutralizeCsvCell('\t')).toBe("'\t")
+  })
+
+  it('prefixes a leading CR', () => {
+    expect(neutralizeCsvCell('\r=1+1')).toBe("'\r=1+1")
+    expect(neutralizeCsvCell('\r')).toBe("'\r")
+  })
+
+  it('leaves plain numbers unchanged', () => {
+    expect(neutralizeCsvCell('-5')).toBe('-5')
+    expect(neutralizeCsvCell('+1.5')).toBe('+1.5')
+    expect(neutralizeCsvCell('-1e6')).toBe('-1e6')
+    expect(neutralizeCsvCell(-5)).toBe('-5')
+    expect(neutralizeCsvCell(1.5)).toBe('1.5')
+  })
+
+  it('leaves empty, null and undefined unchanged', () => {
+    expect(neutralizeCsvCell('')).toBe('')
+    expect(neutralizeCsvCell(null)).toBe('')
+    expect(neutralizeCsvCell(undefined)).toBe('')
+  })
+
+  it('leaves ordinary text and non-leading prefixes unchanged', () => {
+    expect(neutralizeCsvCell('Alice')).toBe('Alice')
+    expect(neutralizeCsvCell('a=b')).toBe('a=b')
+  })
+})
+
+describe('CSV output — formula neutralisation', () => {
+  it('an exported row containing =1+1 appears prefixed in the CSV string', () => {
+    const out = csv(['col'], [['=1+1']])
+    expect(out).toContain("'=1+1")
+    expect(out.split('\r\n')[1]).toBe("'=1+1")
+  })
+
+  it('a neutralised value is still quoted when it contains the delimiter', () => {
+    const out = csv(['col'], [['=1+1,2']])
+    expect(out.split('\r\n')[1]).toBe("\"'=1+1,2\"")
+  })
+
+  it('header values are neutralised too (headers are always quoted)', () => {
+    const out = csv(['=SUM(A1)'], [['v']])
+    expect(out.split('\r\n')[0]).toBe("\"'=SUM(A1)\"")
+  })
+
+  it('numeric cells are left byte-identical end-to-end', () => {
+    const out = csv(['col'], [['-5'], ['+1.5'], ['-1e6']])
+    const [, ...rows] = out.split('\r\n')
+    expect(rows).toEqual(['-5', '+1.5', '-1e6'])
+  })
+
+  it('neutralises in the no-quoteChar path too', () => {
+    const out = csv(['col'], [['+SUM(A1)']], { quoteChar: '', escapeChar: '\\' })
+    expect(out.split('\r\n')[1]).toBe("'+SUM(A1)")
   })
 })
 

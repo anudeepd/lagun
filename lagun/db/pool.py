@@ -1,6 +1,7 @@
 """Bounded MySQL connection pools keyed by saved session ID."""
 
 import asyncio
+import logging
 import os
 import ssl as ssl_mod
 import time
@@ -9,7 +10,10 @@ from contextlib import suppress
 import aiomysql
 from pymysql.constants import CLIENT
 
+from lagun.db.net_policy import require_host_allowed
 from lagun.db.session_store import get_session, get_session_password
+
+_log = logging.getLogger(__name__)
 
 _POOL_MAX_SIZE = max(1, int(os.getenv("LAGUN_DB_POOL_MAX_SIZE", "10")))
 _GLOBAL_CONNECTION_LIMIT = max(
@@ -21,6 +25,9 @@ _ACQUIRE_TIMEOUT_SECONDS = max(
 _POOL_IDLE_SECONDS = max(1, float(os.getenv("LAGUN_DB_POOL_IDLE_SECONDS", "900")))
 _POOL_REAP_INTERVAL_SECONDS = max(
     1, float(os.getenv("LAGUN_DB_POOL_REAP_INTERVAL_SECONDS", "60"))
+)
+_POOL_CLOSE_GRACE_SECONDS = max(
+    0.1, float(os.getenv("LAGUN_DB_POOL_CLOSE_GRACE_SECONDS", "5"))
 )
 
 
@@ -150,6 +157,17 @@ class ManagedPool:
     async def wait_closed(self) -> None:
         await self.raw.wait_closed()
 
+    def terminate(self) -> None:
+        """Close free *and* leased connections immediately.
+
+        aiomysql's `close()` only closes free connections, so a connection held
+        by an in-flight query survives until that query returns — which is
+        unbounded. `terminate()` is the synchronous "close everything now" the
+        shutdown path falls back to once the grace period expires.
+        """
+        self._closing = True
+        self.raw.terminate()
+
 
 _pools: dict[str, ManagedPool] = {}
 _pool_locks: dict[str, asyncio.Lock] = {}
@@ -192,27 +210,42 @@ async def get_pool(session_id: str) -> ManagedPool:
         session = await get_session(session_id)
         if not session:
             raise ValueError(f"Session {session_id!r} not found")
+        # Re-checked here, not only when the session was saved, so a tightened
+        # allowlist also covers connections that already exist.
+        require_host_allowed(session.host)
         password = await get_session_password(session_id)
         ssl_ctx = None
         if session.ssl_enabled:
             ssl_ctx = ssl_mod.create_default_context()
         safe_flags = CLIENT.MULTI_RESULTS & ~CLIENT.MULTI_STATEMENTS
-        raw = await aiomysql.create_pool(
-            host=session.host,
-            port=session.port,
-            user=session.username,
-            password=password or "",
-            db=session.default_db or "",
-            charset="utf8mb4",
-            autocommit=True,
-            minsize=0,
-            maxsize=max(1, _POOL_MAX_SIZE),
-            connect_timeout=10,
-            pool_recycle=1800,
-            ssl=ssl_ctx,
-            local_infile=False,
-            client_flag=safe_flags,
-        )
+        try:
+            raw = await aiomysql.create_pool(
+                host=session.host,
+                port=session.port,
+                user=session.username,
+                password=password or "",
+                db=session.default_db or "",
+                charset="utf8mb4",
+                autocommit=True,
+                minsize=0,
+                maxsize=max(1, _POOL_MAX_SIZE),
+                connect_timeout=10,
+                pool_recycle=1800,
+                ssl=ssl_ctx,
+                local_infile=False,
+                client_flag=safe_flags,
+            )
+        except Exception as error:
+            # The lease path already maps driver failures to 502; the first
+            # connection of a session must not be the one that leaks a raw
+            # driver exception out as a 500.
+            raise DatabaseConnectionError(
+                session.name,
+                session.host,
+                session.port,
+                session.username,
+                error,
+            ) from error
         pool = ManagedPool(raw, session)
         async with _get_lock():
             _pools[session_id] = pool
@@ -261,5 +294,20 @@ async def close_all_pools() -> None:
         _pool_locks.clear()
     for pool in pools:
         await pool.close()
+    forced = 0
     for pool in pools:
-        await pool.wait_closed()
+        # wait_closed() waits for connections leased by in-flight queries, which
+        # may never return. Bound it so shutdown cannot hang the process.
+        try:
+            await asyncio.wait_for(
+                pool.wait_closed(), timeout=_POOL_CLOSE_GRACE_SECONDS
+            )
+        except asyncio.TimeoutError:
+            forced += 1
+            pool.terminate()
+    if forced:
+        _log.warning(
+            "Force-terminated %d database pool(s) after the %.1fs shutdown grace period",
+            forced,
+            _POOL_CLOSE_GRACE_SECONDS,
+        )

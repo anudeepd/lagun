@@ -67,6 +67,14 @@ NASTY_VALUES = [
     ("very_long", "x" * 65_000),
 ]
 
+# Cells the CSV exporter transforms on the way out. Spreadsheet formula triggers
+# are prefixed with an apostrophe so a stored value cannot execute as a formula
+# on whoever opens the file (see lagun.api.export._csv_neutralize); every other
+# value in the corpus round-trips byte-for-byte.
+EXPORT_TRANSFORMS = {
+    "csv_injection_attempt": "'=CMD|'/c calc'!A0",
+}
+
 
 @pytest_asyncio.fixture
 async def special_db(mysql_container):
@@ -131,6 +139,7 @@ def _check_round_trip(body: str, expected_values: list[str], **reader_kwargs):
         f"expected {len(expected_values)} rows, got {len(data_rows)}"
     )
     for i, (row, (label, expected)) in enumerate(zip(data_rows, expected_values)):
+        expected = EXPORT_TRANSFORMS.get(label, expected)
         actual = row[2]
         assert actual == expected, (
             f"row {i} ({label!r}): got {actual!r}, want {expected!r}"

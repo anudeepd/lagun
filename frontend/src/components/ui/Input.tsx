@@ -1,5 +1,6 @@
 import { type InputHTMLAttributes, forwardRef } from 'react'
 import clsx from 'clsx'
+import Label from './Label'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string
@@ -11,17 +12,13 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
     const inputId = props.id ?? (label ? `input-${label.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}` : undefined)
     return (
       <div className="flex flex-col gap-1">
-        {label && (
-          <label htmlFor={inputId} className="text-xs font-medium text-slate-400 uppercase tracking-wide">
-            {label}
-          </label>
-        )}
+        {label && <Label htmlFor={inputId}>{label}</Label>}
         <input
           ref={ref}
           id={inputId}
           className={clsx(
-            'lagun-interactive bg-surface-800 border border-surface-700 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500',
-            'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500',
+            'lagun-interactive bg-surface-800 border border-surface-700 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder-muted',
+            'focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400',
             'disabled:opacity-50 disabled:cursor-not-allowed',
             error && 'border-red-500',
             className

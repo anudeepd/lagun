@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ImportDialog from '../../components/table/ImportDialog'
 
@@ -41,6 +41,18 @@ describe('ImportDialog formats', () => {
     render(<ImportDialog {...props} />)
     expect(screen.getByLabelText('File Format')).toBeInTheDocument()
     expect(screen.getByText('CSV Format Options')).toBeInTheDocument()
+  })
+
+  it('reveals the advanced CSV options on demand', async () => {
+    render(<ImportDialog {...props} />)
+
+    expect(screen.queryByLabelText('Delimiter')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'CSV Format Options' }))
+    expect(await screen.findByLabelText('Delimiter')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'CSV Format Options' }))
+    await waitFor(() => expect(screen.queryByLabelText('Delimiter')).not.toBeInTheDocument())
   })
 
   it('layers the target-table menu above the import dialog', async () => {

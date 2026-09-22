@@ -2,9 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Entrance for panel-sized surfaces: opacity + transform only. A blur on a
+   whole panel repaints its entire area on every frame, so it is deliberately
+   absent here (keep blur for small overlays). */
 @keyframes lagun-surface-in {
-  0% { opacity: 0; transform: translateY(-12px) scale(.94); filter: blur(2px); }
-  70% { opacity: 1; transform: translateY(1px) scale(1.01); filter: blur(0); }
+  0% { opacity: 0; transform: translateY(-12px) scale(.94); }
+  70% { opacity: 1; transform: translateY(1px) scale(1.01); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -20,12 +23,18 @@
 
 /* Keep tab/view surfaces mounted. Safari can skip CSS animations when a panel
    is switched from display:none, while opacity/transform transitions remain
-   composited and interruptible. */
-.lagun-view-panel {
-  will-change: opacity;
-}
+   composited and interruptible.
+
+   `will-change` is applied only by the `.is-animating` flag that the panel's
+   opacity transition toggles for its duration. A permanent `will-change` on
+   these surfaces would keep a promoted, GPU-resident layer alive for every
+   mounted tab panel even though they are idle almost all of the time. */
+.lagun-view-panel,
 .lagun-tab-panel {
   backface-visibility: hidden;
+}
+.lagun-view-panel.is-animating,
+.lagun-tab-panel.is-animating {
   will-change: opacity;
 }
 .lagun-grid-surface {
@@ -153,6 +162,9 @@
 
 @layer base {
   :root {
+    /* The app is dark-only, so tell the browser: native scrollbars, form
+       controls, autofill and the caret follow this instead of staying light. */
+    color-scheme: dark;
     --lagun-surface: #0f172a;
     --lagun-raised-surface: #1e293b;
     --lagun-border: #334155;
@@ -208,6 +220,18 @@
 }
 
 @layer utilities {
+  /* Full-viewport fixed overlays (Modal, AuthRedirectOverlay) run edge to edge,
+     so on a notched/full-bleed device their dialog could sit under the notch or
+     the home indicator. Add the hardware insets to the declared 1rem gutter;
+     `env()` resolves to 0 on every device without insets, so the desktop
+     appearance is unchanged. */
+  .lagun-safe-area {
+    padding:
+      calc(1rem + env(safe-area-inset-top, 0px))
+      calc(1rem + env(safe-area-inset-right, 0px))
+      calc(1rem + env(safe-area-inset-bottom, 0px))
+      calc(1rem + env(safe-area-inset-left, 0px));
+  }
   .truncate-path {
     direction: rtl;
     text-overflow: ellipsis;
@@ -217,6 +241,22 @@
   .lagun-icon-button {
     min-height: 2.25rem;
     min-width: 2.25rem;
+  }
+  /* WCAG 2.2 SC 2.5.8: dense icon controls (sidebar star/refresh, row actions,
+     tab close) keep their small visual size but must not have a sub-24px hit
+     area. Centre the icon inside a 24px box. */
+  .lagun-hit-target {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 1.5rem;
+    min-width: 1.5rem;
+  }
+  @media (pointer: coarse) {
+    .lagun-hit-target {
+      min-height: 2.75rem;
+      min-width: 2.75rem;
+    }
   }
   .lagun-interactive {
     transition-duration: var(--motion-duration-micro);

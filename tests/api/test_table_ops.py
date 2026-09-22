@@ -75,7 +75,9 @@ async def test_analyze_table_throttles_automatic_refresh(client, session_id, tes
     assert forced.json()["analyzed"] is True
 
 
-async def test_analyze_table_requires_an_accessible_session(client, session_id, test_db):
+async def test_analyze_table_requires_an_accessible_session(
+    client, session_id, test_db
+):
     missing = await client.post(
         "/api/v1/sessions/no-such-session/databases/lagun_test/tables/users/analyze"
     )

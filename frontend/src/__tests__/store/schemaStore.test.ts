@@ -102,3 +102,43 @@ describe('schemaStore', () => {
     })
   })
 })
+
+describe('database listing failures', () => {
+  it('records why a listing failed instead of rendering an empty tree', async () => {
+    const { server } = await import('../server')
+    const { http, HttpResponse } = await import('msw')
+    server.use(
+      http.get('http://localhost/api/v1/sessions/:id/databases', () =>
+        HttpResponse.json({ detail: 'Database connection failed' }, { status: 502 })
+      )
+    )
+
+    const { useSchemaStore } = await import('../../store/schemaStore')
+    useSchemaStore.setState({ databases: {}, dbErrors: {} })
+
+    const result = await useSchemaStore.getState().loadDatabases('session-broken')
+
+    expect(result).toEqual([])
+    // The tree shows this text; without it an unreachable connection looked
+    // exactly like a connection with no schemas.
+    expect(useSchemaStore.getState().dbErrors['session-broken']).toBeTruthy()
+  })
+
+  it('clears the recorded error once a listing succeeds', async () => {
+    const { server } = await import('../server')
+    const { http, HttpResponse } = await import('msw')
+    const { useSchemaStore } = await import('../../store/schemaStore')
+
+    server.use(
+      http.get('http://localhost/api/v1/sessions/:id/databases', () =>
+        HttpResponse.json(['app_db'])
+      )
+    )
+    useSchemaStore.setState({ databases: {}, dbErrors: { 'session-ok': 'stale failure' } })
+
+    await useSchemaStore.getState().loadDatabases('session-ok')
+
+    expect(useSchemaStore.getState().dbErrors['session-ok']).toBeUndefined()
+    expect(useSchemaStore.getState().databases['session-ok']).toEqual(['app_db'])
+  })
+})

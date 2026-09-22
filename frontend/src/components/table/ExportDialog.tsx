@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import { clipboardWrite } from '../../utils/clipboard'
-import { apiFetch } from '../../api/client'
+import { API_BASE, api, apiFetch } from '../../api/client'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Select from '../ui/Select'
@@ -34,7 +34,20 @@ interface Props {
 function sqlLiteral(v: unknown): string {
   if (v === null || v === undefined) return 'NULL'
   if (typeof v === 'number' || typeof v === 'bigint') return String(v)
-  return `'${String(v).split("'").join("''")}'`
+  const s = String(v)
+  // MySQL treats backslash as an escape character (NO_BACKSLASH_ESCAPES is off
+  // by default), so `'C:\Users'` would lose the backslash on replay and a value
+  // ending in one would escape the closing quote. A hex literal needs no
+  // escaping and stays charset-correct; `CONVERT(... USING utf8mb4)` keeps it
+  // text rather than binary so the server can still convert it to the column's
+  // charset.
+  if (s.includes('\\') || s.includes('\u0000') || s.includes('\u001a')) {
+    const hex = Array.from(new TextEncoder().encode(s))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+    return `CONVERT(0x${hex} USING utf8mb4)`
+  }
+  return `'${s.split("'").join("''")}'`
 }
 
 function sqlPredicate(column: string, value: unknown): string {
@@ -51,6 +64,33 @@ export const buildQualifiedTableName = (database: string, table: string, include
   return includeSchema
     ? `${quoteIdent(database)}.${quoteIdent(table)}`
     : quoteIdent(table)
+}
+
+// Characters that make a spreadsheet treat a cell as a formula.
+const CSV_FORMULA_PREFIXES = '=+-@\u0009\u000d'
+
+/**
+ * Neutralises CSV formula injection (CWE-1236) for one CSV cell or header.
+ *
+ * A value that starts with `=`, `+`, `-`, `@`, TAB or CR is prefixed with a
+ * single apostrophe so Excel, LibreOffice and Sheets read it as text. This
+ * matters even though users export their own data: Lagun supports shared
+ * connections where several LDAP users work on the same tables, so one user can
+ * store a crafted value that another user later exports and opens.
+ *
+ * Values that are genuinely numeric (`-5`, `+1.5`, `-1e6`) are left untouched so
+ * numbers survive the round-trip as numbers. Empty values stay empty. The rule
+ * matches the backend CSV generator — the frontend and backend exports must
+ * neutralise identically.
+ */
+export function neutralizeCsvCell(value: unknown): string {
+  const s = value === null || value === undefined ? '' : String(value)
+  if (s === '' || CSV_FORMULA_PREFIXES.indexOf(s[0]) === -1) return s
+  // `Number('')` is 0 and `Number('\t')` is 0, so reject whitespace-only strings
+  // explicitly: a bare TAB/CR is not a number and must still be neutralised.
+  const trimmed = s.trim()
+  if (trimmed !== '' && !Number.isNaN(Number(trimmed))) return s
+  return `'${s}`
 }
 
 export const buildFrontendContent = (
@@ -79,10 +119,10 @@ export const buildFrontendContent = (
 
   if (format === 'csv') {
     const { delimiter: d, quoteChar: q, escapeChar: e, lineTerminator: nl } = csvOpts
-    // CSV formula injection (=, +, -, @ prefix) is intentionally not sanitized —
-    // this is a DB admin tool and users are exporting their own data.
     const escape = (v: unknown, forceQuote = false) => {
-      const s = v === null || v === undefined ? '' : String(v)
+      // Neutralise formula prefixes before quoting/escaping so the apostrophe we
+      // add is part of the value the quoting logic sees (and quotes if needed).
+      const s = neutralizeCsvCell(v)
       if (!q) {
         // QUOTE_NONE: mirrors Python csv.QUOTE_NONE — no quoting, but escape
         // the delimiter and newlines with escapechar so fields aren't split.
@@ -327,7 +367,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
         setTimeout(() => URL.revokeObjectURL(url), 1000)
       } else {
         beginNativeDownload(
-          `/api/v1/sessions/${sessionId}/export/download`,
+          api.exportDownloadUrl(sessionId),
           buildBody(),
           message => {
             const errorMessage = `Export failed: ${message}`
@@ -358,7 +398,10 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           throw new Error('Copy is limited to 16 MB. Use Download for large exports.')
         }
       } else {
-        const res = await apiFetch(`/api/v1/sessions/${sessionId}/export`, {
+        // Kept on the raw Response rather than `api.exportText`: the copy path
+        // streams the body so `responseTextWithLimit` can refuse anything over
+        // 16 MB before it lands in memory (and in the clipboard).
+        const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/export`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: buildBody(),
@@ -457,7 +500,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             </button>
             <AnimatePresence initial={false}>
             {showAdvanced && (
-              <m.div initial={{ opacity: 0, height: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, height: 'auto', y: 0, transition: surfaceTransition }} exit={{ opacity: 0, height: 0, y: -motionDistance.subtle, transition: exitTransition }} className="mt-3 flex flex-col gap-3 overflow-hidden pl-4 border-l border-surface-700">
+              <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, y: -motionDistance.subtle, transition: exitTransition }} className="mt-3 flex flex-col gap-3 overflow-hidden pl-4 border-l border-surface-700">
                 <div className="flex gap-3">
                   <Select
                     label="Delimiter"
@@ -524,13 +567,28 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             </AnimatePresence>
           </div>
         )}
-        <p className="text-xs text-slate-500">
+        <p className="text-pretty text-xs text-muted">
           {rowsOverride
             ? <>Exporting <strong className="text-slate-300">{rowsOverride.rows.length} {rowsOverrideLabel}</strong> from <code className="text-slate-300">{table}</code>.</>
             : pkValues
               ? <>Exporting <strong className="text-slate-300">{pkValues.length} selected rows</strong> from <code className="text-slate-300">{table}</code>.</>
               : <>Downloads all rows from <code className="text-slate-300">{table}</code> as a bounded-memory stream.</>
           }
+          {format === 'csv' && (
+            <>
+              <br />
+              CSV cells starting with <code className="text-slate-300">=</code>,{' '}
+              <code className="text-slate-300">+</code>, <code className="text-slate-300">-</code>,{' '}
+              <code className="text-slate-300">@</code>, tab or CR are prefixed with{' '}
+              <code className="text-slate-300">&apos;</code> so a stored value cannot run as a
+              spreadsheet formula when the file is opened; numeric values are left unchanged.
+              <br />
+              A CSV cell cannot carry both meanings at once: <code className="text-slate-300">NULL</code>{' '}
+              and an empty string are both written as an empty field, so re-importing the file
+              cannot restore which one was stored. Use the SQL format when that distinction
+              matters.
+            </>
+          )}
           {!rowsOverride && <><br />Copy is capped at 16 MB. Download handles large exports without buffering them in this page.</>}
         </p>
       </div>

@@ -77,3 +77,29 @@ class ModifyColumnRequest(BaseModel):
     default: Optional[str] = None
     default_is_literal: bool = False
     comment: Optional[str] = None
+
+
+class TableDdlResult(BaseModel):
+    """A table DDL statement that ran, with the SQL that was executed."""
+
+    ok: bool
+    sql: str
+
+
+class TableOperationResult(BaseModel):
+    """A table mutation that reports success only."""
+
+    ok: bool
+
+
+class AnalyzeTableResult(BaseModel):
+    """Whether statistics were refreshed, plus the table's current stats."""
+
+    ok: bool
+    analyzed: bool
+    row_count: Optional[int]
+    data_length: Optional[int]
+
+
+class CreateSqlResult(BaseModel):
+    create_sql: str

@@ -39,6 +39,11 @@ e2e/test-results/
 *.sqlite
 lagun.log
 
+# Test and tool residue
+/test-results/
+.pytest_cache/
+.ruff_cache/
+
 # Local only
 think
 BRANDING.md
@@ -55,5 +60,4 @@ PLAN-*.md
 TESTING.md
 TODO.md
 ldapgate.yaml
-/package-lock.json
 .gstack/

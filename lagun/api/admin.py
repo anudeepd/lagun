@@ -1,6 +1,7 @@
 """LDAP administrator API for connection inventory and audit operations."""
 
 import asyncio
+from typing import Annotated
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -10,6 +11,18 @@ from pydantic import BaseModel, Field
 from lagun.auth import admin_users, request_admin_username
 from lagun.api import presence, query
 from lagun.db import session_store
+from lagun.models.admin import (
+    AdminActivityResponse,
+    AdminConnectionsResponse,
+    AdminOverview,
+    AdminPurgeResult,
+    AdminQueriesResponse,
+    AdminRetention,
+    AdminUserAddResult,
+    AdminUserRemovalResult,
+    AdminUsersResponse,
+    AdminPresenceResponse,
+)
 from lagun.ldap_policy import (
     LDAPPolicyStore,
     PolicyConflict,
@@ -46,7 +59,7 @@ def _observed_at() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 
 
-@router.get("/overview")
+@router.get("/overview", response_model=AdminOverview)
 async def get_overview(request: Request):
     request_admin_username(request)
     connections = await session_store.list_admin_connections()
@@ -69,7 +82,7 @@ async def get_overview(request: Request):
     }
 
 
-@router.get("/connections")
+@router.get("/connections", response_model=AdminConnectionsResponse)
 async def get_connections(request: Request):
     request_admin_username(request)
     return {
@@ -123,7 +136,7 @@ def _policy_exception(exc: PolicyError) -> HTTPException:
     return HTTPException(status, str(exc))
 
 
-@router.get("/users")
+@router.get("/users", response_model=AdminUsersResponse)
 async def get_users(request: Request):
     request_admin_username(request)
     try:
@@ -132,7 +145,7 @@ async def get_users(request: Request):
         raise _policy_exception(exc) from exc
 
 
-@router.post("/users")
+@router.post("/users", response_model=AdminUserAddResult)
 async def add_user(request: Request, payload: AdminUserCreate):
     request_admin_username(request)
     username = _normalize_username(payload.username)
@@ -159,7 +172,7 @@ async def add_user(request: Request, payload: AdminUserCreate):
     }
 
 
-@router.delete("/users/{username}")
+@router.delete("/users/{username}", response_model=AdminUserRemovalResult)
 async def remove_user(
     username: str,
     request: Request,
@@ -195,37 +208,45 @@ async def remove_user(
     }
 
 
-@router.get("/activity")
+@router.get("/activity", response_model=AdminActivityResponse)
 async def get_activity(
     request: Request,
     username: str | None = None,
     path: str | None = None,
     since: str | None = None,
     search: str | None = None,
-    status_code: int | None = Query(default=None, ge=100, le=599),
-    limit: int = Query(default=100, ge=1, le=500),
+    status_code: Annotated[int | None, Query(ge=100, le=599)] = None,
+    before_id: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ):
     request_admin_username(request)
+    items = await session_store.list_audit_events(
+        username=username.strip() if username else None,
+        since=since,
+        path=path.strip() if path else None,
+        search=search.strip() if search else None,
+        status_code=status_code,
+        limit=limit,
+        before_id=before_id,
+    )
+    # Keyset pagination: the newest id on this page is the cursor for the next
+    # one, so a caller can walk the whole history instead of the newest `limit`
+    # rows. A short page means there is nothing older.
+    next_before_id = items[-1]["id"] if len(items) == limit else None
     return {
-        "items": await session_store.list_audit_events(
-            username=username.strip() if username else None,
-            since=since,
-            path=path.strip() if path else None,
-            search=search.strip() if search else None,
-            status_code=status_code,
-            limit=limit,
-        ),
+        "items": items,
+        "next_before_id": next_before_id,
         "observed_at": _observed_at(),
     }
 
 
-@router.get("/queries")
+@router.get("/queries", response_model=AdminQueriesResponse)
 async def get_queries(request: Request):
     request_admin_username(request)
     return {"items": await query.list_active_queries(), "observed_at": _observed_at()}
 
 
-@router.get("/presence")
+@router.get("/presence", response_model=AdminPresenceResponse)
 async def get_presence(request: Request):
     request_admin_username(request)
     return {
@@ -235,12 +256,12 @@ async def get_presence(request: Request):
     }
 
 
-@router.get("/retention")
+@router.get("/retention", response_model=AdminRetention)
 async def get_retention(
     request: Request,
-    older_than_days: int = Query(
-        default=30, ge=_MIN_RETENTION_DAYS, le=_MAX_RETENTION_DAYS
-    ),
+    older_than_days: Annotated[
+        int, Query(ge=_MIN_RETENTION_DAYS, le=_MAX_RETENTION_DAYS)
+    ] = 30,
 ):
     request_admin_username(request)
     return {
@@ -253,7 +274,7 @@ async def get_retention(
     }
 
 
-@router.post("/retention/purge")
+@router.post("/retention/purge", response_model=AdminPurgeResult)
 async def purge_retention(request: Request, payload: PurgeRequest):
     request_admin_username(request)
     if payload.confirmation != "PURGE":

@@ -7,11 +7,18 @@ import csv
 import io
 import os
 import re
+import time
 from typing import BinaryIO, Literal, Optional, TextIO
 
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from lagun.api.scope import effective_scope, require_db_scope
+from lagun.api.sql_analysis import (
+    statement_kind,
+    target_table,
+    unwrap_executable_comments,
+)
 from lagun.api.sql_script import SqlScriptError, iter_sql_statements
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
@@ -19,10 +26,61 @@ from lagun.db.utils import quote_ident
 
 router = APIRouter(tags=["import"])
 
+# A dump may name its own target schema, so every statement is checked, not just
+# the configured database. `USE` needs its own pattern because it is not a write
+# statement and has no table reference.
+_USE_STATEMENT_RE = re.compile(
+    r"^\s*(?:(?:--[^\n]*\n|#[^\n]*\n|/\*[\s\S]*?\*/)\s*)*"
+    r"USE\s+(?:`((?:``|[^`])+)`|([A-Za-z0-9_$]+))",
+    re.IGNORECASE,
+)
+
+
+# Statements whose target cannot be known before execution: a dump that prepares
+# or calls dynamic SQL cannot be checked, so scoped connections refuse it.
+_UNINSPECTABLE_KINDS = frozenset({"PREPARE", "EXECUTE", "DEALLOCATE", "CALL"})
+
+
+def _out_of_scope_schema(statement: str, scope: frozenset[str] | None) -> str | None:
+    """The schema a statement would touch when it falls outside *scope*."""
+    if scope is None:
+        return None
+    candidates = [statement]
+    unwrapped = unwrap_executable_comments(statement)
+    if unwrapped != statement:
+        candidates.append(unwrapped)
+    for candidate in candidates:
+        target = target_table(candidate)
+        if target is not None:
+            database, _ = target
+            if database and database not in scope:
+                return database
+            return None
+        if statement_kind(candidate) == "USE":
+            match = _USE_STATEMENT_RE.match(candidate)
+            if match:
+                database = match.group(1) or match.group(2) or ""
+                database = database.replace("``", "`")
+                if database and database not in scope:
+                    return database
+    return None
+
+
+def _uninspectable_statement(statement: str, scope: frozenset[str] | None) -> bool:
+    """True when the statement's target cannot be determined before running."""
+    if scope is None:
+        return False
+    return statement_kind(unwrap_executable_comments(statement)) in _UNINSPECTABLE_KINDS
+
+
 IMPORT_MAX_FILE_BYTES = int(
     os.getenv("LAGUN_IMPORT_MAX_FILE_BYTES", str(1024 * 1024 * 1024))
 )
 IMPORT_MAX_BATCH_BYTES = int(os.getenv("LAGUN_IMPORT_MAX_BATCH_BYTES", str(512 * 1024)))
+# An import holds a pooled connection and a global connection slot for its whole
+# duration, so one stuck file could starve every other request. There was no
+# deadline at all before this.
+IMPORT_MAX_RUNTIME_SECONDS = float(os.getenv("LAGUN_IMPORT_MAX_RUNTIME_SECONDS", "900"))
 IMPORT_PREVIEW_CELL_CHARS = 500
 
 
@@ -261,8 +319,17 @@ def _coerce_row(row: list[str], preserve_empty_strings: bool) -> list[str | None
     return [None if value == "" else value for value in row]
 
 
+class ImportTimeout(RuntimeError):
+    """The import ran past its deadline."""
+
+
+def _import_deadline() -> float:
+    return time.monotonic() + IMPORT_MAX_RUNTIME_SECONDS
+
+
 async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResult:
     staged.seek(0)
+    deadline = _import_deadline()
     text = _open_text(staged, cfg.encoding)
     rows_processed = 0
     rows_imported = 0
@@ -320,6 +387,11 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                     await cur.execute(f"USE {db_q}")
                     await cur.execute("SET autocommit=0")
                     while True:
+                        if time.monotonic() > deadline:
+                            raise ImportTimeout(
+                                f"Import exceeded the {IMPORT_MAX_RUNTIME_SECONDS:g}-second "
+                                f"limit after {rows_processed} rows"
+                            )
                         batch, pending, eof = await asyncio.to_thread(
                             _read_csv_batch,
                             reader,
@@ -417,7 +489,9 @@ def _error_line(error: BaseException) -> int | None:
     return int(match.group(1)) if match else None
 
 
-async def _mysql_dump_import(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResult:
+async def _mysql_dump_import(
+    pool, cfg: ImportConfig, staged: BinaryIO, scope: frozenset[str] | None
+) -> ImportResult:
     staged.seek(0)
     text = _open_text(staged, cfg.encoding)
     processed = succeeded = rows_imported = 0
@@ -431,7 +505,13 @@ async def _mysql_dump_import(pool, cfg: ImportConfig, staged: BinaryIO) -> Impor
                     try:
                         await cur.execute(f"USE {quote_ident(cfg.database)}")
                         iterator = iter_sql_statements(text)
+                        deadline = _import_deadline()
                         while True:
+                            if time.monotonic() > deadline:
+                                raise ImportTimeout(
+                                    f"Import exceeded the {IMPORT_MAX_RUNTIME_SECONDS:g}-second "
+                                    f"limit after {processed} statements"
+                                )
                             item = await asyncio.to_thread(
                                 _next_sql_statement, iterator
                             )
@@ -439,6 +519,21 @@ async def _mysql_dump_import(pool, cfg: ImportConfig, staged: BinaryIO) -> Impor
                                 break
                             processed += 1
                             error_line = item.line
+                            out_of_scope = _out_of_scope_schema(item.sql, scope)
+                            if out_of_scope:
+                                error = (
+                                    f"Statement targets '{out_of_scope}', which is "
+                                    "outside this connection's allowed databases."
+                                )
+                                error_statement = _statement_preview(item.sql)
+                                break
+                            if _uninspectable_statement(item.sql, scope):
+                                error = (
+                                    "Statement uses dynamic SQL, whose target cannot be "
+                                    "checked against this connection's allowed databases."
+                                )
+                                error_statement = _statement_preview(item.sql)
+                                break
                             try:
                                 await cur.execute(item.sql)
                             except Exception as exc:
@@ -496,24 +591,36 @@ async def _mysql_dump_import(pool, cfg: ImportConfig, staged: BinaryIO) -> Impor
     )
 
 
-@router.post("/sessions/{session_id}/import/preview")
+@router.post(
+    "/sessions/{session_id}/import/preview",
+    response_model=PreviewResult,
+    summary="Preview an import file",
+)
 async def import_preview(session_id: str, file: UploadFile, config: str = Form(...)):
-    if not await get_session(session_id):
+    session = await get_session(session_id)
+    if not session:
         raise HTTPException(404, "Session not found")
     cfg = _parse_config(config)
+    require_db_scope(session, cfg.database)
     staged, _ = await _open_upload(file)
     if cfg.format == "csv":
         return await asyncio.to_thread(_preview_csv, staged, cfg)
     return await _preview_dump(staged, cfg)
 
 
-@router.post("/sessions/{session_id}/import")
+@router.post(
+    "/sessions/{session_id}/import",
+    response_model=ImportResult,
+    summary="Import a CSV file or MySQL dump",
+)
 async def import_data(session_id: str, file: UploadFile, config: str = Form(...)):
-    if not await get_session(session_id):
+    session = await get_session(session_id)
+    if not session:
         raise HTTPException(404, "Session not found")
     cfg = _parse_config(config)
+    require_db_scope(session, cfg.database)
     staged, _ = await _open_upload(file)
     pool = await get_pool(session_id)
     if cfg.format == "csv":
         return await _batch_insert(pool, cfg, staged)
-    return await _mysql_dump_import(pool, cfg, staged)
+    return await _mysql_dump_import(pool, cfg, staged, effective_scope(session))

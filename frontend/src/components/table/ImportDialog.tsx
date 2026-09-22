@@ -6,7 +6,7 @@ import { LoadingState } from '../ui/Spinner'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
 import { useSchemaStore } from '../../store/schemaStore'
-import { apiFetch } from '../../api/client'
+import { api } from '../../api/client'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
@@ -35,25 +35,6 @@ interface ImportResult {
 }
 
 
-function importResponseError(body: string, statusText: string): string {
-  try {
-    const payload = JSON.parse(body) as { detail?: unknown }
-    if (typeof payload.detail === 'string') return payload.detail
-    if (Array.isArray(payload.detail)) {
-      return payload.detail
-        .map(item => {
-          if (!item || typeof item !== 'object') return String(item)
-          const issue = item as { loc?: unknown[]; msg?: unknown }
-          const location = Array.isArray(issue.loc) ? issue.loc.join('.') : ''
-          return location ? `${location}: ${String(issue.msg ?? item)}` : String(issue.msg ?? item)
-        })
-        .join('\n')
-    }
-  } catch {
-    // Keep plain response text below.
-  }
-  return body || statusText || 'Import request failed'
-}
 interface Preview {
   format?: 'csv' | 'mysql_dump'
   columns: string[]
@@ -98,7 +79,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   const dragOverlayTimerRef = useRef<number | null>(null)
   const dropDelayTimerRef = useRef<number | null>(null)
   const tables = useSchemaStore(s => s.tables[`${sessionId}/${database}`] ?? [])
-  const { loadTables } = useSchemaStore()
+  const loadTables = useSchemaStore(s => s.loadTables)
 
   useEffect(() => {
     if (!open) return
@@ -218,18 +199,10 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
       const formData = new FormData()
       formData.append('file', sample, file.name)
       formData.append('config', buildConfigJson())
-      const res = await apiFetch(`/api/v1/sessions/${sessionId}/import/preview`, {
-        method: 'POST',
-        body: formData,
-      })
+      const preview = await api.importPreview<Preview>(sessionId, formData)
       if (requestId !== previewRequestId.current) return
-      if (!res.ok) {
-        setPreviewError(importResponseError(await res.text(), res.statusText))
-        setPreview(null)
-      } else {
-        setPreview(await res.json())
-        setPreviewError(null)
-      }
+      setPreview(preview)
+      setPreviewError(null)
     } catch (error) {
       if (requestId !== previewRequestId.current) return
       setPreviewError(error instanceof Error ? error.message : String(error))
@@ -259,13 +232,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
       const formData = new FormData()
       formData.append('file', file)
       formData.append('config', buildConfigJson())
-      const res = await apiFetch(`/api/v1/sessions/${sessionId}/import`, {
-        method: 'POST',
-        body: formData,
-      })
-      const body = await res.text()
-      if (!res.ok) throw new Error(importResponseError(body, res.statusText))
-      const data: ImportResult = JSON.parse(body)
+      const data = await api.importFile<ImportResult>(sessionId, formData)
       setResult(data)
       if (data.ok) {
         onImportComplete?.()
@@ -316,7 +283,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         />
         <button
           type="button"
-          className="w-full border-2 border-dashed border-surface-700 rounded-lg p-6 text-center cursor-pointer hover:border-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-500 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full border-2 border-dashed border-surface-700 rounded-lg p-6 text-center cursor-pointer hover:border-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-400 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           onClick={() => fileInputRef.current?.click()}
           onDragOver={e => { e.preventDefault(); refreshDropFeedback() }}
           onDragLeave={e => { if (e.currentTarget === e.target) clearDropFeedback() }}
@@ -327,10 +294,10 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             <span className="block text-sm">
               <Upload size={20} className="mx-auto mb-2 text-brand-400" />
               <span className="block text-slate-200">{file.name}</span>
-              <span className="block text-xs text-slate-500 mt-1">{(file.size / 1024).toFixed(1)} KB</span>
+              <span className="block text-xs text-muted mt-1">{(file.size / 1024).toFixed(1)} KB</span>
             </span>
           ) : (
-            <span className="block text-sm text-slate-500">
+            <span className="block text-pretty text-sm text-muted">
               <Upload size={20} className="mx-auto mb-2" />
               <span className="block">Drop a CSV or MySQL dump file here or click to select</span>
               <span className="block text-xs mt-1">.csv, .tsv, .txt, .sql, .dump</span>
@@ -354,7 +321,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           </div>
         )}
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-slate-500">Preview reads at most first 1 MB. Import still reads complete file.</p>
+          <p className="text-xs text-muted">Preview reads at most first 1 MB. Import still reads complete file.</p>
           <Button variant="ghost" size="sm" onClick={fetchPreview} disabled={!file || previewLoading}>
             {previewLoading ? 'Previewing…' : preview ? 'Refresh Preview' : 'Preview'}
           </Button>
@@ -372,7 +339,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             <p className="text-xs text-slate-400 mb-2">Previewing up to 10 SQL statements</p>
             <ol className="text-xs font-mono text-slate-300 space-y-1">
               {(preview.statements ?? []).map((statement, i) => (
-                <li key={i}><span className="text-slate-500">line {statement.line}:</span> {statement.sql}</li>
+                <li key={i}><span className="text-muted">line {statement.line}:</span> {statement.sql}</li>
               ))}
             </ol>
           </div>
@@ -401,7 +368,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
               </tbody>
             </table>
             {preview.total_lines_sampled > preview.rows.length && (
-              <p className="text-xs text-slate-500 px-2 py-1">Showing {preview.rows.length} of {preview.total_lines_sampled}+ rows</p>
+              <p className="text-xs text-muted px-2 py-1">Showing {preview.rows.length} of {preview.total_lines_sampled}+ rows</p>
             )}
           </div>
         ) : null}
@@ -449,7 +416,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             type="checkbox"
             checked={firstRowHeader}
             onChange={e => setFirstRowHeader(e.target.checked)}
-            className="rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-500"
+            className="rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-400"
           />
           First row contains column names
         </label>
@@ -466,7 +433,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           </button>
           <AnimatePresence initial={false}>
           {showAdvanced && (
-            <m.div initial={{ opacity: 0, height: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, height: 'auto', y: 0, transition: surfaceTransition }} exit={{ opacity: 0, height: 0, y: -motionDistance.subtle, transition: exitTransition }} className="mt-3 flex flex-col gap-3 overflow-hidden pl-4 border-l border-surface-700">
+            <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, y: -motionDistance.subtle, transition: exitTransition }} className="mt-3 flex flex-col gap-3 overflow-hidden pl-4 border-l border-surface-700">
               <div className="flex gap-3">
                 <Select
                   label="Delimiter"
@@ -524,7 +491,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
                   type="checkbox"
                   checked={preserveEmptyStrings}
                   onChange={e => setPreserveEmptyStrings(e.target.checked)}
-                  className="rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-500"
+                  className="rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-400"
                 />
                 Preserve blank fields as empty strings instead of NULL
               </label>

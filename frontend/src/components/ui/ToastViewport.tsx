@@ -55,7 +55,7 @@ export default function ToastViewport() {
   const { toasts, dismiss, pause, resume } = useToastQueue()
 
   return (
-    <div className="pointer-events-none fixed right-4 top-4 z-toast flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2" aria-live="polite">
+    <div className="pointer-events-none fixed right-4 top-4 z-toast flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2">
       <AnimatePresence initial={false} mode="sync">
         {toasts.map(toast => (
           <ToastItem key={toast.id} toast={toast} dismiss={dismiss} pause={pause} resume={resume} />

@@ -14,6 +14,7 @@
       font-display: swap;
     }
     :root {
+      color-scheme: dark;
       --bg: #020617;
       --card: #0f172a;
       --card-border: #1e293b;
@@ -315,14 +316,25 @@
       text-decoration: none;
     }
     .powered-by a:hover { color: var(--accent-soft); }
+    .powered-by a:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    /* The error is focused on every failed sign-in (see the script below), so it
+       needs a visible indicator of its own rather than the browser default,
+       whose computed colour is near-black on this dark surface. */
+    .error:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
   
   </style>
 </head>
 <body>
-  <div class="login-shell">
+  <main class="login-shell">
     <div class="feedback-slot" aria-live="off">
       {% if error %}
-      <div class="error" id="login-error" role="alert">
+      <div class="error" id="login-error" role="alert" tabindex="-1">
         <svg class="error-icon" aria-hidden="true" width="14" height="14" viewBox="0 0 15 15" fill="none">
           <path d="M7.5 1a6.5 6.5 0 1 0 0 13A6.5 6.5 0 0 0 7.5 1ZM7 4.5a.5.5 0 0 1 1 0v4a.5.5 0 0 1-1 0v-4Zm.5 6.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" fill="currentColor"/>
         </svg>
@@ -348,7 +360,7 @@
           </g>
           <circle cx="64" cy="74" r="3" fill="#0284c7"/>
         </svg>
-        <span class="logo-text">Lagun</span>
+        <h1 class="logo-text">Lagun</h1>
       </div>
 
       <form method="POST" action="{{ login_path }}" id="login-form">
@@ -357,7 +369,7 @@
 
         <div class="field">
           <label for="username">Username</label>
-          <input type="text" id="username" name="username" autocomplete="username"{% if error %} aria-describedby="login-error"{% endif %} autofocus required>
+          <input type="text" id="username" name="username" autocomplete="username"{% if error %} aria-describedby="login-error"{% endif %}{% if not error %} autofocus{% endif %} required>
         </div>
 
         <div class="field">
@@ -394,7 +406,7 @@
         <span>Secured by <a href="https://github.com/anudeepd/ldapgate" target="_blank" rel="noopener noreferrer">LDAPGate</a></span>
       </div>
     </div>
-  </div>
+  </main>
 
 <script nonce="{{ csrf_nonce }}">
     const loginForm = document.getElementById('login-form');
@@ -421,6 +433,13 @@
       username.value = sessionStorage.getItem(storageKey) || '';
     }
 
+    // The alert is server-rendered, so a live region never announces it: move
+    // focus there instead. #username has no autofocus in that case.
+    const loginError = document.getElementById('login-error');
+    if (hasError && loginError) {
+      loginError.focus();
+    }
+
 
     if (username) {
       username.addEventListener('input', function() {
@@ -436,7 +455,7 @@
       const label = btn.querySelector('.submit-label');
 
       sessionStorage.setItem(storageKey, username.value);
-      label.textContent = 'Signing in';
+      label.textContent = 'Signing in…';
       btn.disabled = true;
       loginForm.setAttribute('aria-busy', 'true');
       btn.classList.add('loading');

@@ -39,6 +39,9 @@ class SessionRead(BaseModel):
     query_limit: int
     ssl_enabled: bool
     selected_databases: list[str]
+    # Administrator allowlist for a shared (connections.yaml) connection. The
+    # user may narrow selected_databases within it but never widen it.
+    managed_selected_databases: list[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     managed: bool = False

@@ -1,7 +1,15 @@
 import { redirectToLdapLogin } from '../utils/authRedirect'
 import type { AdminActivityFilters, AdminActivityResponse, AdminConnectionsResponse, AdminOverview, AdminRetention, AdminUsersResponse, PresenceUpdate, QueryResult, TableInfo } from '../types'
 
-const BASE = '/api/v1'
+export const API_BASE = '/api/v1'
+
+/**
+ * Outcome of a request to an endpoint that reports a database failure as HTTP
+ * 200 with `ok: false`. Returning a discriminated union makes ignoring the
+ * failure a type error instead of a silent success.
+ */
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string }
+
 function formatApiError(status: number, payload: unknown): string {
   if (payload && typeof payload === 'object' && 'detail' in payload) {
     const detail = (payload as { detail: unknown }).detail
@@ -43,13 +51,42 @@ async function errorMessageFromResponse(res: Response): Promise<string> {
   return formatApiError(res.status, payload)
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+/**
+ * Bound a request that can otherwise hold a pooled database connection until the
+ * server gives up. A caller-supplied signal (used for user cancellation) is kept
+ * alongside the deadline.
+ *
+ * The deadline must stay ABOVE the server's own bound for the endpoint, or the
+ * browser gives up on work the server is still doing and the user is told a
+ * write failed when it is about to commit. The server bounds queries and row
+ * writes at `LAGUN_QUERY_MAX_RUNTIME_SECONDS` (30s default) and bulk scripts at
+ * `LAGUN_BULK_MAX_RUNTIME_SECONDS` (120s default); 120s covers the first with
+ * room for DDL, and the bulk endpoints opt out entirely because their bound is
+ * operator-tunable and the UI offers a cancel button.
+ */
+function withTimeout(options: RequestInit | undefined, timeoutMs?: number): RequestInit | undefined {
+  if (!timeoutMs) return options
+  const deadline = AbortSignal.timeout(timeoutMs)
+  const callerSignal = options?.signal
+  const signal =
+    callerSignal && typeof AbortSignal.any === 'function'
+      ? AbortSignal.any([callerSignal, deadline])
+      : callerSignal ?? deadline
+  return { ...options, signal }
+}
+
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+  /** Client deadline in ms; `null` leaves the request unbounded (the server still bounds it). */
+  timeoutMs: number | null = 120_000,
+): Promise<T> {
   const headers: Record<string, string> = { ...options?.headers as Record<string, string> }
   if (options?.body) {
     headers['Content-Type'] ??= 'application/json'
   }
-  const res = await apiFetch(`${BASE}${path}`, {
-    ...options,
+  const res = await apiFetch(`${API_BASE}${path}`, {
+    ...withTimeout(options, options?.body && timeoutMs ? timeoutMs : undefined),
     headers,
   })
   if (!res.ok) {
@@ -57,6 +94,26 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T
   return res.json()
+}
+
+/**
+ * Like `request`, but for the endpoints that answer HTTP 200 with `ok: false`
+ * and an `error` string when the statement failed (row writes, kill, execute).
+ * A transport error and a rejected statement both land in `{ ok: false }`.
+ */
+export async function requestResult<T extends { error?: string | null }>(
+  path: string,
+  options?: RequestInit,
+): Promise<ApiResult<T>> {
+  try {
+    const data = await request<T>(path, options)
+    if (data && typeof data === 'object' && data.error) {
+      return { ok: false, error: String(data.error) }
+    }
+    return { ok: true, data }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 export const api = {
@@ -132,30 +189,41 @@ export const api = {
       signal,
     }),
   killQuery: (sessionId: string) =>
-    request<{ ok: boolean; error?: string }>(`/sessions/${sessionId}/query`, { method: 'DELETE' }),
+    requestResult<{ ok: boolean; error?: string }>(`/sessions/${sessionId}/query`, { method: 'DELETE' }),
   killQueryExecution: (sessionId: string, executionId: string) =>
-    request<{ ok: boolean; error?: string }>(
+    requestResult<{ ok: boolean; error?: string }>(
       `/sessions/${sessionId}/query/${encodeURIComponent(executionId)}`,
       { method: 'DELETE' },
     ),
   validateScriptQuery: (sessionId: string, payload: {
     execution_id: string; sql: string; database?: string; mode?: 'transaction'; tab_id?: string
   }, signal?: AbortSignal) =>
-    request<import('../types').ScriptQueryValidationResult>(`/sessions/${sessionId}/query/script/validate`, {
-      method: 'POST',
-      body: JSON.stringify({ ...payload, mode: payload.mode ?? 'transaction' }),
-      signal,
-    }),
+    request<import('../types').ScriptQueryValidationResult>(
+      `/sessions/${sessionId}/query/script/validate`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, mode: payload.mode ?? 'transaction' }),
+        signal,
+      },
+      // A bulk script may run for LAGUN_BULK_MAX_RUNTIME_SECONDS (120s default,
+      // operator-tunable), so no client deadline: the server's own limit and the
+      // caller's cancel signal are the authority.
+      null,
+    ),
   executeScriptQuery: (sessionId: string, payload: {
     execution_id: string; sql: string; database?: string; mode?: 'transaction'; tab_id?: string
   }, signal?: AbortSignal) =>
-    request<import('../types').ScriptQueryResult>(`/sessions/${sessionId}/query/script`, {
-      method: 'POST',
-      body: JSON.stringify({ ...payload, mode: payload.mode ?? 'transaction' }),
-      signal,
-    }),
+    request<import('../types').ScriptQueryResult>(
+      `/sessions/${sessionId}/query/script`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, mode: payload.mode ?? 'transaction' }),
+        signal,
+      },
+      null,
+    ),
   killScriptQuery: (sessionId: string, executionId: string) =>
-    request<{ ok: boolean; error?: string }>(
+    requestResult<{ ok: boolean; error?: string }>(
       `/sessions/${sessionId}/query/script/${encodeURIComponent(executionId)}`,
       { method: 'DELETE' }
     ),
@@ -163,7 +231,7 @@ export const api = {
     database: string; table: string; primary_key: Record<string, unknown>;
     column: string; new_value: unknown;
   }) =>
-    request<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
+    requestResult<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
       `/sessions/${sessionId}/cell-update`,
       { method: 'POST', body: JSON.stringify(payload) }
     ),
@@ -172,21 +240,21 @@ export const api = {
     primary_key: Record<string, unknown>;
     updates: Record<string, unknown>;
   }) =>
-    request<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
+    requestResult<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
       `/sessions/${sessionId}/row-update`,
       { method: 'POST', body: JSON.stringify(payload) }
     ),
   rowInsert: (sessionId: string, payload: {
     database: string; table: string; values: Record<string, unknown>;
   }) =>
-    request<{ ok: boolean; insert_id?: number; affected_rows: number; sql_executed: string; error?: string }>(
+    requestResult<{ ok: boolean; insert_id?: number; affected_rows: number; sql_executed: string; error?: string }>(
       `/sessions/${sessionId}/row-insert`,
       { method: 'POST', body: JSON.stringify(payload) }
     ),
   rowDelete: (sessionId: string, payload: {
     database: string; table: string; primary_keys: Record<string, unknown>[];
   }) =>
-    request<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
+    requestResult<{ ok: boolean; affected_rows: number; sql_executed: string; error?: string }>(
       `/sessions/${sessionId}/rows`,
       { method: 'DELETE', body: JSON.stringify(payload) }
     ),
@@ -237,7 +305,7 @@ export const api = {
       { method: 'POST', body: JSON.stringify(data) }
     ),
   modifyColumn: (sessionId: string, db: string, table: string, column: string, data: {
-    name?: string; type?: string; nullable?: boolean; default?: string | null; default_is_literal?: boolean; comment?: string
+    type: string; name?: string; nullable?: boolean; default?: string | null; default_is_literal?: boolean; comment?: string
   }) =>
     request<{ ok: boolean; sql: string }>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/columns/${column}`,
@@ -249,9 +317,49 @@ export const api = {
       { method: 'DELETE' }
     ),
 
+  // Export / import: multipart bodies and a native download, which the JSON
+  // helper cannot express. Kept here so the API prefix and the error-body
+  // parsing live in one place instead of being rebuilt at each call site.
+  exportDownloadUrl: (sessionId: string) =>
+    `${API_BASE}/sessions/${sessionId}/export/download`,
+
+  exportText: async (sessionId: string, body: unknown): Promise<string> => {
+    const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      throw new Error(await errorMessageFromResponse(res))
+    }
+    return res.text()
+  },
+
+  importPreview: async <T>(sessionId: string, form: FormData): Promise<T> => {
+    const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/import/preview`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      throw new Error(await errorMessageFromResponse(res))
+    }
+    return res.json()
+  },
+
+  importFile: async <T>(sessionId: string, form: FormData): Promise<T> => {
+    const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/import`, {
+      method: 'POST',
+      body: form,
+    })
+    if (!res.ok) {
+      throw new Error(await errorMessageFromResponse(res))
+    }
+    return res.json()
+  },
+
   // Config export/import
   exportConfig: async (passphrase: string): Promise<void> => {
-    const res = await apiFetch(`${BASE}/config/export`, {
+    const res = await apiFetch(`${API_BASE}/config/export`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ passphrase }),
@@ -275,7 +383,7 @@ export const api = {
     const form = new FormData()
     form.append('file', file)
     form.append('passphrase', passphrase)
-    const res = await apiFetch(`${BASE}/config/import`, { method: 'POST', body: form })
+    const res = await apiFetch(`${API_BASE}/config/import`, { method: 'POST', body: form })
     if (!res.ok) {
       throw new Error(await errorMessageFromResponse(res))
     }
@@ -301,8 +409,9 @@ export const api = {
     ),
   getAdminQueries: () => request<import('../types').AdminQueriesResponse>('/admin/queries'),
   getAdminPresence: () => request<import('../types').AdminPresenceResponse>('/admin/presence'),
-  getAdminActivity: (filters: AdminActivityFilters = {}) => {
+  getAdminActivity: (filters: AdminActivityFilters = {}, beforeId?: number) => {
     const params = new URLSearchParams({ limit: '100' })
+    if (beforeId !== undefined) params.set('before_id', String(beforeId))
     if (filters.username?.trim()) params.set('username', filters.username.trim())
     if (filters.path?.trim()) params.set('path', filters.path.trim())
     if (filters.search?.trim()) params.set('search', filters.search.trim())

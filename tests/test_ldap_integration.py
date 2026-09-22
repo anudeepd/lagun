@@ -1,3 +1,4 @@
+import re
 import types
 from pathlib import Path
 
@@ -5,6 +6,12 @@ import pytest
 
 from lagun.api.config import get_server_config
 from lagun.main import APP_CSP, _ensure_ldapgate_static_paths
+
+
+def _login_template() -> str:
+    return (
+        Path(__file__).resolve().parents[1] / "lagun" / "templates" / "login.html"
+    ).read_text()
 
 
 def test_app_csp_allows_self_fonts():
@@ -19,7 +26,14 @@ def test_ensure_ldapgate_static_paths_preserves_existing_paths():
     _ensure_ldapgate_static_paths(config)
 
     assert proxy.session_cookie_name == "lagun_session"
-    assert proxy.static_paths == ["/custom", "/favicon.svg", "/favicon.ico"]
+    # The notices file is public in every mode: the licence obligation does not
+    # depend on being logged in.
+    assert proxy.static_paths == [
+        "/custom",
+        "/favicon.svg",
+        "/favicon.ico",
+        "/THIRD_PARTY_LICENSES.txt",
+    ]
 
 
 @pytest.mark.asyncio
@@ -37,9 +51,7 @@ async def test_server_config_exposes_ldap_idle_timeout(monkeypatch):
 
 
 def test_login_template_uses_nonce_for_inline_assets():
-    template = (
-        Path(__file__).resolve().parents[1] / "lagun" / "templates" / "login.html"
-    ).read_text()
+    template = _login_template()
     assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg">' in template
     assert '<style nonce="{{ csrf_nonce }}">' in template
     assert '<script nonce="{{ csrf_nonce }}">' in template
@@ -75,9 +87,15 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert "padding-inline-end: 3rem;" in template
     assert "password.type = showing ? 'text' : 'password';" in template
     assert "password.focus();" in template
-    assert 'tabindex="-1"' not in template
+    # tabindex="-1" belongs to the error the server rendered (it takes focus so
+    # an AT reads it); the form controls keep their natural tab order.
+    assert 'id="login-error" role="alert" tabindex="-1"' in template
+    assert all(
+        'tabindex="-1"' not in tag
+        for tag in re.findall(r"<(?:form|input)\b[^>]*>", template)
+    )
     assert '<span class="submit-label" aria-live="polite">Sign in</span>' in template
-    assert "label.textContent = 'Signing in';" in template
+    assert "label.textContent = 'Signing in…';" in template
     # Busy state lives on the form so it does not suppress the label's live region.
     assert "loginForm.setAttribute('aria-busy', 'true');" in template
     assert 'aria-live="polite"' in template
@@ -89,3 +107,22 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert "::-webkit-textfield-decoration-container" not in template
     assert "@-moz-document" not in template
     assert 'style="' not in template
+
+
+def test_login_template_moves_focus_onto_the_error_it_rendered():
+    """A server-rendered alert is never announced by a live region.
+
+    The page has to move focus to it instead, and only when it exists: the
+    username keeps ``autofocus`` in the render that has no error, so the two
+    cannot fight over the initial focus.
+    """
+    template = _login_template()
+    script = re.search(
+        r'<script nonce="\{\{ csrf_nonce \}\}">(.*?)</script>', template, re.S
+    ).group(1)
+
+    assert "const loginError = document.getElementById('login-error');" in script
+    assert re.search(
+        r"if \(hasError && loginError\) \{\n\s*loginError\.focus\(\);", script
+    )
+    assert "{% if not error %} autofocus{% endif %}" in template

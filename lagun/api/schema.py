@@ -1,10 +1,11 @@
 """Schema browser API endpoints."""
 
 from fastapi import APIRouter, HTTPException, Query
+from lagun.api.scope import filter_databases, require_db_scope
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, SYSTEM_DBS
-from lagun.models.schema import ColumnInfo, IndexInfo, TableInfo
+from lagun.models.schema import ColumnInfo, CreateSqlResult, IndexInfo, TableInfo
 
 router = APIRouter(tags=["schema"])
 
@@ -20,20 +21,19 @@ async def _get_pool_or_404(session_id: str):
 
 @router.get("/sessions/{session_id}/databases")
 async def list_databases(session_id: str) -> list[str]:
-    pool = await _get_pool_or_404(session_id)
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("SHOW DATABASES")
             rows = await cur.fetchall()
-    return [r[0] for r in rows if r[0].lower() not in SYSTEM_DBS]
-
-
-def _require_db_scope(session, db: str) -> None:
-    if session.selected_databases and db not in session.selected_databases:
-        raise HTTPException(
-            403,
-            f"Database '{db}' is not in this connection's allowed databases.",
-        )
+    # Only offer databases this connection may actually use: an unrestricted
+    # session sees every non-system schema, a scoped one sees its scope only.
+    return filter_databases(
+        session, [r[0] for r in rows if r[0].lower() not in SYSTEM_DBS]
+    )
 
 
 async def _fetch_tables(pool, schemas: list[str]) -> dict[str, list[TableInfo]]:
@@ -82,7 +82,7 @@ async def list_tables_for_databases(
     if not requested:
         raise HTTPException(422, "No databases requested")
     for db in requested:
-        _require_db_scope(s, db)
+        require_db_scope(s, db)
     pool = await get_pool(session_id)
     return await _fetch_tables(pool, requested)
 
@@ -92,7 +92,7 @@ async def list_tables(session_id: str, db: str) -> list[TableInfo]:
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
-    _require_db_scope(s, db)
+    require_db_scope(s, db)
     pool = await get_pool(session_id)
     grouped = await _fetch_tables(pool, [db])
     return grouped[db]
@@ -103,10 +103,7 @@ async def list_columns(session_id: str, db: str, table: str) -> list[ColumnInfo]
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
-    if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(
-            403, f"Database '{db}' is not in this connection's allowed databases."
-        )
+    require_db_scope(s, db)
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -141,10 +138,7 @@ async def list_indexes(session_id: str, db: str, table: str) -> list[IndexInfo]:
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
-    if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(
-            403, f"Database '{db}' is not in this connection's allowed databases."
-        )
+    require_db_scope(s, db)
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -177,10 +171,7 @@ async def list_functions(session_id: str, db: str) -> list[str]:
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
-    if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(
-            403, f"Database '{db}' is not in this connection's allowed databases."
-        )
+    require_db_scope(s, db)
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -195,15 +186,16 @@ async def list_functions(session_id: str, db: str) -> list[str]:
     return [r[0] for r in rows]
 
 
-@router.get("/sessions/{session_id}/databases/{db}/tables/{table}/create_sql")
+@router.get(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/create_sql",
+    response_model=CreateSqlResult,
+    summary="Show a table's CREATE TABLE statement",
+)
 async def get_create_sql(session_id: str, db: str, table: str) -> dict:
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
-    if s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(
-            403, f"Database '{db}' is not in this connection's allowed databases."
-        )
+    require_db_scope(s, db)
     pool = await get_pool(session_id)
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:

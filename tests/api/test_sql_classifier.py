@@ -7,9 +7,9 @@ import pytest
 
 from lagun.api.query import (
     _is_lock_wait_timeout,
-    _strip_comments_and_literals,
     _validate_script_statements,
 )
+from lagun.api.sql_analysis import strip_comments_and_literals
 from lagun.api.sql_script import split_sql_script
 
 FIXTURE_PATH = (
@@ -80,7 +80,7 @@ def test_split_backtick_identifiers_not_split():
 
 def test_strip_comments_and_literals_handles_backslash_escaped_quotes():
     sql = "INSERT INTO t (v) VALUES ('it\\'s a SELECT test')"
-    result = _strip_comments_and_literals(sql)
+    result = strip_comments_and_literals(sql)
     assert "SELECT" not in result
     assert "''" in result
 

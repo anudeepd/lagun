@@ -3,6 +3,11 @@ import clsx from 'clsx'
 export default function Spinner({ size = 'md', className }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
   return (
     <svg
+      // The spinner is purely decorative: every loading state announces itself
+      // through the label of the surrounding `LoadingState`/status region, so
+      // exposing the graphic too would announce the same state twice.
+      aria-hidden="true"
+      focusable="false"
       className={clsx(
         'animate-spin text-brand-500',
         { 'h-3 w-3': size === 'sm', 'h-5 w-5': size === 'md', 'h-8 w-8': size === 'lg' },
@@ -23,7 +28,7 @@ export function LoadingState({ label, compact = false, className }: { label: str
       role="status"
       aria-live="polite"
       className={clsx(
-        'flex items-center justify-center text-slate-500',
+        'flex items-center justify-center text-muted',
         compact ? 'gap-2 text-xs' : 'h-full flex-col gap-3 text-sm',
         className,
       )}

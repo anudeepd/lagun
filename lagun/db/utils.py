@@ -1,18 +1,24 @@
 """Shared SQL identifier quoting and validation utilities."""
 
+import datetime
 import re
 import math
 
 SYSTEM_DBS = frozenset({"information_schema", "performance_schema", "sys", "mysql"})
 
-_IDENT_RE = re.compile(r"^[\w$]+$", re.ASCII)
-
 
 def quote_ident(name: str) -> str:
-    """Quote a SQL identifier, rejecting anything that isn't a simple name."""
-    if not _IDENT_RE.match(name):
+    """Quote a SQL identifier, escaping any backtick it contains.
+
+    MySQL allows hyphens, spaces and non-ASCII characters in identifiers, and the
+    schema tree lists whatever the server has, so rejecting them made legal
+    databases and tables unusable. Backtick-doubling is as injection-safe as an
+    allowlist here: the value is only ever interpolated as an identifier, and a
+    backtick is the only character that can escape the quoting.
+    """
+    if not name or "\x00" in name:
         raise ValueError(f"Invalid identifier: {name!r}")
-    return f"`{name}`"
+    return f"`{name.replace('`', '``')}`"
 
 
 # Allowlists for DDL values that get interpolated into SQL without parameterization.
@@ -82,6 +88,22 @@ def validate_col_type(col_type: str) -> str:
     return col_type
 
 
+def format_mysql_time(value: datetime.timedelta) -> str:
+    """Render a timedelta the way MySQL renders TIME: ``±HHH:MM:SS[.ffffff]``.
+
+    aiomysql returns every TIME column as a ``timedelta``, whose ``str()`` form
+    ("1 day, 1:00:00") is not a TIME literal — replaying an export that contained
+    one failed with ERROR 1292.
+    """
+    micros = (value.days * 86400 + value.seconds) * 1_000_000 + value.microseconds
+    sign = "-" if micros < 0 else ""
+    hours, rest = divmod(abs(micros), 3_600_000_000)
+    minutes, rest = divmod(rest, 60_000_000)
+    seconds, frac = divmod(rest, 1_000_000)
+    text = f"{sign}{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{text}.{frac:06d}" if frac else text
+
+
 def escape_value(v) -> str:
     """Serialize a Python value as a lossless MySQL literal."""
     if v is None:
@@ -94,24 +116,32 @@ def escape_value(v) -> str:
         return repr(v)
     if isinstance(v, int):
         return str(v)
+    if isinstance(v, datetime.timedelta):
+        return f"'{format_mysql_time(v)}'"
     if isinstance(v, (bytes, bytearray, memoryview)):
         return f"0x{bytes(v).hex()}"
     s = str(v)
     if "\\" in s or "\0" in s or "\x1a" in s:
-        return f"0x{s.encode('utf-8').hex()}"
+        # A bare 0x… literal is a *binary* string, so the server can no longer
+        # convert it to the target column's charset (a latin1 column stored
+        # "C:\cafÃ©"). CONVERT keeps it text while staying independent of
+        # NO_BACKSLASH_ESCAPES.
+        return f"CONVERT(0x{s.encode('utf-8').hex()} USING utf8mb4)"
     return f"'{s.replace(chr(39), chr(39) * 2)}'"
 
 
 def escape_string_literal(val: str) -> str:
     """Escape a string for embedding in a SQL single-quoted literal.
 
-    Returns the *inner* content (without surrounding quotes). Uses
-    SQL-standard quote-doubling.  Rejects values containing dangerous
-    metacharacters that should never appear in DDL string contexts.
+    Returns the *inner* content (without surrounding quotes). Backslashes are
+    doubled as well as quotes: MySQL treats ``\\`` as an escape character by
+    default (``NO_BACKSLASH_ESCAPES`` off), so a value ending in a backslash
+    would otherwise escape the closing quote and break the statement. Rejects
+    values containing metacharacters that should never appear in DDL strings.
     """
     if any(c in val for c in (";",)) or "--" in val or "/*" in val:
         raise ValueError(f"Value contains disallowed characters: {val!r}")
-    return val.replace("'", "''")
+    return val.replace("\\", "\\\\").replace("'", "''")
 
 
 _DEFAULT_EXPRESSION_RE = re.compile(

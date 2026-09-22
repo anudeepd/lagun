@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import Tooltip from '../ui/Tooltip'
 import { Shield, X, Terminal, Table, Plus, PanelLeftClose, Pencil } from 'lucide-react'
 import clsx from 'clsx'
 import { useTabStore } from '../../store/tabStore'
@@ -8,6 +9,7 @@ import type { Tab } from '../../types'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
+import Label from '../ui/Label'
 import useMenuKeyboard from '../../hooks/useMenuKeyboard'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
@@ -20,8 +22,15 @@ interface ContextMenuState {
 }
 
 export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {}) {
-  const { tabs, activeTabId, setActiveTab, closeTab, openQueryTab, closeAllTabs, moveTab, renameTab } = useTabStore()
-  const { activeSessionId } = useSessionStore()
+  const tabs = useTabStore(s => s.tabs)
+  const activeTabId = useTabStore(s => s.activeTabId)
+  const setActiveTab = useTabStore(s => s.setActiveTab)
+  const closeTab = useTabStore(s => s.closeTab)
+  const openQueryTab = useTabStore(s => s.openQueryTab)
+  const closeAllTabs = useTabStore(s => s.closeAllTabs)
+  const moveTab = useTabStore(s => s.moveTab)
+  const renameTab = useTabStore(s => s.renameTab)
+  const activeSessionId = useSessionStore(s => s.activeSessionId)
   const ldapEnabled = useServerConfigStore(s => s.ldapEnabled)
   const isAdmin = useServerConfigStore(s => s.isAdmin)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
@@ -159,7 +168,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
   return (
     <div className="flex h-[46px] items-center bg-surface-900 border-b border-surface-800">
       <div className="flex-1 h-full overflow-hidden">
-        <div ref={tabListRef} role="tablist" aria-label="Open tabs" className="flex h-full items-center flex-nowrap overflow-x-scroll overflow-y-hidden space-x-1">
+        <div ref={tabListRef} role="tablist" aria-label="Open tabs" className="flex h-full items-center flex-nowrap overflow-x-auto overflow-y-hidden space-x-1">
           <AnimatePresence initial={false} mode="sync">
           {tabs.map((tab, index) => (
             <m.div
@@ -214,19 +223,20 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
                   )}
                 </AnimatePresence>
                 {tab.type === 'table' && tab.database && (
-                  <span className="max-w-[72px] truncate text-[10px] text-slate-500">{tab.database}</span>
+                  <span className="max-w-[72px] truncate text-[10px] text-muted">{tab.database}</span>
                 )}
                 <span className="truncate max-w-[120px]">{tab.type === 'table' ? tab.table ?? tab.label : tab.label}</span>
               </button>
+              <Tooltip label={getCloseTitle(tab)}>
               <button
                 type="button"
                 onClick={() => requestCloseTab(tab.id)}
-                title={getCloseTitle(tab)}
                 aria-label={getCloseTitle(tab)}
-                className="ml-0.5 rounded p-1 opacity-0 transition-opacity hover:text-red-400 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 group-hover:opacity-100"
+                className="lagun-hit-target ml-0.5 rounded opacity-0 transition-opacity hover:text-red-400 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 group-hover:opacity-100"
               >
                 <X size={10} />
               </button>
+              </Tooltip>
             </m.div>
           ))}
           </AnimatePresence>
@@ -238,7 +248,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
           <button
             onClick={() => openQueryTab(activeSessionId)}
             title="New query tab"
-            className="flex h-full items-center gap-1 px-3 text-xs text-slate-500 hover:text-slate-200 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
+            className="flex h-full items-center gap-1 px-3 text-xs text-muted hover:text-slate-200 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
           >
             <Plus size={12} />
             <span className="hidden sm:inline">New Query</span>
@@ -248,7 +258,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
           <button
             onClick={requestCloseAll}
             title="Close all tabs"
-            className="flex h-full items-center gap-1 px-3 text-xs text-slate-500 hover:text-red-400 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
+            className="flex h-full items-center gap-1 px-3 text-xs text-muted hover:text-red-400 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
           >
             <PanelLeftClose size={12} />
             <span className="hidden sm:inline">Close All</span>
@@ -260,7 +270,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
             onClick={() => onOpenAdmin?.()}
             title="Admin console"
             aria-label="Admin console"
-            className="flex h-full items-center gap-1 px-3 text-xs text-slate-500 hover:bg-surface-800 hover:text-brand-300 transition-colors whitespace-nowrap border-l border-surface-800"
+            className="flex h-full items-center gap-1 px-3 text-xs text-muted hover:bg-surface-800 hover:text-brand-300 transition-colors whitespace-nowrap border-l border-surface-800"
           >
             <Shield size={12} />
             <span className="hidden sm:inline">Admin</span>
@@ -324,16 +334,16 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
           </>
         )}
       >
-        <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-slate-400">
+        <Label className="flex flex-col gap-1">
           Tab name
           <input
             value={renameValue}
             onChange={event => setRenameValue(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') saveRename() }}
             autoFocus
-            className="rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm font-normal normal-case text-slate-100 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500"
+            className="rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm font-normal normal-case text-slate-100 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400"
           />
-        </label>
+        </Label>
       </Modal>
       <ConfirmDialog
         open={confirmCloseAll}

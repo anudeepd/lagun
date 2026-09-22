@@ -3,6 +3,7 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import type { ScriptQueryResult, ScriptQueryValidationResult } from '../../types'
 import {
+  needsBulkConfirmation,
   splitStatements,
   shouldTryFastExecute,
   formatScriptError,
@@ -322,5 +323,18 @@ describe('shared SQL classifier fixture alignment', () => {
       const thresholdScript = Array.from({ length: 25 }, () => sql).join(';\n')
       expect(shouldTryFastExecute(splitStatements(thresholdScript)), expected_code).toBe(true)
     }
+  })
+})
+
+describe('needsBulkConfirmation', () => {
+  it('asks for confirmation when a script updates or deletes rows', () => {
+    expect(needsBulkConfirmation({ ok: true, statement_count: 25, operation_counts: { UPDATE: 25 } })).toBe(true)
+    expect(needsBulkConfirmation({ ok: true, statement_count: 3, operation_counts: { DELETE: 3 } })).toBe(true)
+    expect(needsBulkConfirmation({ ok: true, statement_count: 30, operation_counts: { INSERT: 20, UPDATE: 10 } })).toBe(true)
+  })
+
+  it('runs INSERT-only scripts without asking', () => {
+    expect(needsBulkConfirmation({ ok: true, statement_count: 30, operation_counts: { INSERT: 30 } })).toBe(false)
+    expect(needsBulkConfirmation({ ok: true, statement_count: 0, operation_counts: {} })).toBe(false)
   })
 })

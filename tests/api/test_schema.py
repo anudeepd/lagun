@@ -48,7 +48,9 @@ async def test_list_tables(client, session_id, test_db):
     assert users["engine"] == "InnoDB"
 
 
-async def test_list_tables_batch_covers_every_schema(client, session_id, test_db, mysql_container):
+async def test_list_tables_batch_covers_every_schema(
+    client, session_id, test_db, mysql_container
+):
     """One request returns the tables of every requested schema, keyed by schema."""
     await _run_ddl(
         mysql_container,
@@ -80,7 +82,9 @@ async def test_list_tables_batch_covers_every_schema(client, session_id, test_db
         await _run_ddl(mysql_container, "DROP DATABASE IF EXISTS `lagun_other`")
 
 
-async def test_list_tables_batch_deduplicates_repeated_schemas(client, session_id, test_db):
+async def test_list_tables_batch_deduplicates_repeated_schemas(
+    client, session_id, test_db
+):
     r = await client.get(
         f"/api/v1/sessions/{session_id}/tables",
         params=[("databases", test_db), ("databases", test_db)],
@@ -89,7 +93,9 @@ async def test_list_tables_batch_deduplicates_repeated_schemas(client, session_i
     assert set(r.json()) == {test_db}
 
 
-async def test_list_tables_batch_rejects_empty_and_oversized_requests(client, session_id):
+async def test_list_tables_batch_rejects_empty_and_oversized_requests(
+    client, session_id
+):
     missing = await client.get(f"/api/v1/sessions/{session_id}/tables")
     assert missing.status_code == 422
 
@@ -100,7 +106,9 @@ async def test_list_tables_batch_rejects_empty_and_oversized_requests(client, se
     assert oversized.status_code == 422
 
 
-async def test_list_tables_batch_enforces_database_scope(client, mysql_container, test_db):
+async def test_list_tables_batch_enforces_database_scope(
+    client, mysql_container, test_db
+):
     """A batch that mentions a database outside the session's scope is refused."""
     r = await client.post(
         "/api/v1/sessions",

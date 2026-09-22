@@ -96,4 +96,28 @@ describe('SessionForm', () => {
     await userEvent.click(screen.getByText('Test'))
     await waitFor(() => expect(screen.getByText('Connection refused')).toBeInTheDocument())
   })
+
+  it('announces the database fetch it is waiting on', async () => {
+    let release = () => {}
+    const arrived = new Promise<void>(resolve => { release = resolve })
+    server.use(
+      http.post('http://localhost/api/v1/sessions/probe', async () => {
+        await arrived
+        return HttpResponse.json({ ok: true, server_version: '8.0.0', latency_ms: 5, databases: ['app_db'] })
+      })
+    )
+
+    render(<SessionForm open={true} onClose={() => {}} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fetch' }))
+
+    // The Fetch button spins in place; the empty list it is filling states why.
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Fetching databases…'),
+    )
+
+    release()
+
+    await waitFor(() => expect(screen.getByText('app_db')).toBeInTheDocument())
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
 })

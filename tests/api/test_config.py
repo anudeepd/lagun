@@ -167,3 +167,93 @@ async def test_import_wrong_version_returns_400(client):
         data={"passphrase": "pass"},
     )
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Idempotent import (S-14)
+# ---------------------------------------------------------------------------
+
+
+async def _import_bytes(client, payload: bytes, passphrase="pass"):
+    return await client.post(
+        "/api/v1/config/import",
+        files={"file": ("sessions.json", payload, "application/json")},
+        data={"passphrase": passphrase},
+    )
+
+
+async def _import_json(client, payload: dict, passphrase="pass"):
+    return await _import_bytes(
+        client, json.dumps(payload).encode(), passphrase=passphrase
+    )
+
+
+async def _session_names(client) -> list[str]:
+    r = await client.get("/api/v1/sessions")
+    return [s["name"] for s in r.json()]
+
+
+async def _delete_all_sessions(client):
+    for s in (await client.get("/api/v1/sessions")).json():
+        await client.delete(f"/api/v1/sessions/{s['id']}")
+
+
+async def test_export_includes_source_id(client):
+    sid = await _create_session(client, "Sourced")
+    r = await client.post("/api/v1/config/export", json={"passphrase": "pass"})
+    entry = next(s for s in r.json()["sessions"] if s["name"] == "Sourced")
+    assert entry["source_id"] == sid
+
+
+async def test_import_into_empty_store_imports_every_session(client):
+    await _create_session(client, "Alpha")
+    await _create_session(client, "Beta")
+    export_bytes = await _make_export_file(client, "pass")
+    await _delete_all_sessions(client)
+
+    r = await _import_bytes(client, export_bytes, passphrase="pass")
+    assert r.status_code == 200
+    assert r.json() == {"imported": 2, "skipped": 0}
+    assert sorted(await _session_names(client)) == ["Alpha", "Beta"]
+
+
+async def test_reimporting_same_payload_imports_nothing(client):
+    await _create_session(client, "Idem One")
+    await _create_session(client, "Idem Two")
+    export_bytes = await _make_export_file(client, "pass")
+    await _delete_all_sessions(client)
+
+    first = await _import_bytes(client, export_bytes, passphrase="pass")
+    assert first.json() == {"imported": 2, "skipped": 0}
+    count_after_first = len(await _session_names(client))
+
+    second = await _import_bytes(client, export_bytes, passphrase="pass")
+    assert second.json() == {"imported": 0, "skipped": 2}
+    assert len(await _session_names(client)) == count_after_first == 2
+
+
+async def test_entry_matching_source_id_is_skipped_even_when_renamed(client):
+    sid = await _create_session(client, "Original Name")
+    payload = json.loads(await _make_export_file(client, "pass"))
+    entry = next(s for s in payload["sessions"] if s["name"] == "Original Name")
+    assert entry["source_id"] == sid
+    entry["name"] = "Renamed Copy"
+
+    r = await _import_json(client, payload, passphrase="pass")
+    assert r.json() == {"imported": 0, "skipped": 1}
+    assert await _session_names(client) == ["Original Name"]
+
+
+async def test_v1_payload_without_source_id_imports_then_skips_by_natural_key(client):
+    await _create_session(client, "Legacy One")
+    payload = json.loads(await _make_export_file(client, "pass"))
+    for entry in payload["sessions"]:
+        entry.pop("source_id")
+    await _delete_all_sessions(client)
+
+    first = await _import_json(client, payload, passphrase="pass")
+    assert first.json() == {"imported": 1, "skipped": 0}
+
+    second = await _import_json(client, payload, passphrase="pass")
+    assert second.json() == {"imported": 0, "skipped": 1}
+    assert await _session_names(client) == ["Legacy One"]

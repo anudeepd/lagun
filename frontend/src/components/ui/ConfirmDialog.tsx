@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useId, useRef } from 'react'
 import Modal from './Modal'
 import Button from './Button'
 
@@ -24,12 +24,18 @@ export default function ConfirmDialog({
   onClose,
 }: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null)
+  const messageId = useId()
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title={title}
+      // Destructive confirmations are announced as an alert dialog, and the
+      // consequence text is linked so it is read with the title rather than
+      // being available only by navigating into the dialog.
+      alert
+      descriptionId={messageId}
       initialFocusRef={cancelRef}
       footer={
         <>
@@ -46,7 +52,7 @@ export default function ConfirmDialog({
         </>
       }
     >
-      <p className="text-sm text-slate-300">{message}</p>
+      <p id={messageId} className="text-pretty text-sm text-slate-300">{message}</p>
     </Modal>
   )
 }

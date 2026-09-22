@@ -17,14 +17,19 @@ vi.mock('../../../api/client', () => ({
   },
 }))
 
-const { mockLoadColumns, mockInvalidateTable } = vi.hoisted(() => ({
+const { mockLoadColumns, mockInvalidateTable, schemaStoreState } = vi.hoisted(() => ({
   mockLoadColumns: vi.fn(),
   mockInvalidateTable: vi.fn(),
+  schemaStoreState: { columns: {} as Record<string, unknown> },
 }))
 
 vi.mock('../../../store/schemaStore', () => ({
-  useSchemaStore: () => ({
-    columns: {},
+  useSchemaStore: (selector: (s: {
+    columns: Record<string, unknown>
+    loadColumns: unknown
+    invalidateTable: unknown
+  }) => unknown) => selector({
+    ...schemaStoreState,
     loadColumns: mockLoadColumns,
     invalidateTable: mockInvalidateTable,
   }),
@@ -89,6 +94,7 @@ const mockColumns = [
 describe('TableSchemaView columns table', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    schemaStoreState.columns = {}
     vi.mocked(api.getColumns).mockResolvedValue(mockColumns)
     vi.mocked(api.getIndexes).mockResolvedValue([])
     vi.mocked(api.getTables).mockResolvedValue([tableInfo])
@@ -186,5 +192,149 @@ describe('TableSchemaView columns table', () => {
     expect(cells[0]).toHaveClass('sticky', 'left-0')
     expect(cells[1]).toHaveClass('sticky', 'left-10')
     expect(cells[cells.length - 1]).toHaveClass('sticky', 'right-0')
+
+    // Pinned body cells must use the project's named z-scale (no arbitrary
+    // `z-[n]`) and must stay under the header: the `thead` is itself sticky with
+    // `z-20`, so it is a stacking context and every header cell paints above the
+    // body cells regardless of their own z-index. `z-raised` (10) still wins
+    // against the static cells, which have no z-index.
+    expect(columnsTable.querySelector('thead')).toHaveClass('sticky', 'z-20')
+    expect(cells[0]).toHaveClass('z-raised')
+    expect(cells[1]).toHaveClass('z-raised')
+    expect(cells[cells.length - 1]).toHaveClass('z-raised')
+  })
+})
+
+describe('TableSchemaView failure handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    schemaStoreState.columns = {}
+    vi.mocked(api.getColumns).mockResolvedValue(mockColumns)
+    vi.mocked(api.getIndexes).mockResolvedValue([])
+    vi.mocked(api.getTables).mockResolvedValue([tableInfo])
+    vi.mocked(api.analyzeTable).mockResolvedValue({
+      ok: true,
+      analyzed: false,
+      row_count: tableInfo.row_count,
+      data_length: tableInfo.data_length,
+    })
+  })
+
+  it('surfaces a schema load failure instead of showing an empty tab', async () => {
+    vi.mocked(api.getColumns).mockRejectedValue(new Error('Unknown table users'))
+
+    render(<TableSchemaView {...baseProps} />)
+
+    expect(await screen.findByText(/Error loading schema: Unknown table users/)).toBeInTheDocument()
+  })
+
+  it('stays silent when a superseded request is aborted', async () => {
+    vi.mocked(api.getColumns).mockRejectedValue(new DOMException('Aborted', 'AbortError'))
+
+    render(<TableSchemaView {...baseProps} />)
+
+    await waitFor(() => expect(api.getColumns).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText(/Error loading schema/)).not.toBeInTheDocument())
+  })
+
+  it('stays silent when switching sessions aborts the in-flight load', async () => {
+    // The request settles only once the caller aborts it, the way `fetch`
+    // behaves — and the abort surfaces as a plain error here (browsers use an
+    // `AbortError` DOMException, but a wrapper may rethrow anything), so the
+    // reload must key off its own signal rather than the error's class.
+    vi.mocked(api.getColumns).mockImplementation((_sessionId, _db, _table, signal) =>
+      new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('The user aborted a request.')))
+      }))
+
+    const { rerender } = render(<TableSchemaView {...baseProps} />)
+    await waitFor(() => expect(api.getColumns).toHaveBeenCalledTimes(1))
+
+    rerender(<TableSchemaView {...baseProps} sessionId="session-2" />)
+
+    // Cleanup aborted the first load; its rejection must be swallowed instead of
+    // flashing "Error loading schema".
+    await waitFor(() => expect(api.getColumns).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByText(/Error loading schema/)).not.toBeInTheDocument())
+  })
+
+  it('surfaces a failed CREATE statement request instead of a dead Export button', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.getCreateSql).mockRejectedValue(new Error('permission denied'))
+
+    render(<TableSchemaView {...baseProps} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export Schema/i })).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /Export Schema/i }))
+
+    expect(await screen.findByText(/Error loading CREATE statement: permission denied/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: /CREATE statement/i })).not.toBeInTheDocument()
+  })
+
+  it('renders the CREATE statement with SQL tokens highlighted', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.getCreateSql).mockResolvedValue({
+      create_sql: 'CREATE TABLE `users` (\n  `id` int NOT NULL,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB',
+    })
+
+    render(<TableSchemaView {...baseProps} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Export Schema/i })).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /Export Schema/i }))
+
+    const dialog = await screen.findByRole('dialog', { name: /CREATE statement/i })
+    const code = dialog.querySelector('code') as HTMLElement
+    await waitFor(() => expect(code.querySelectorAll('span[style*="color"]').length).toBeGreaterThan(0))
+    const colors = [...code.querySelectorAll<HTMLElement>('span[style*="color"]')].map(span => span.style.color)
+    expect(new Set(colors).size).toBeGreaterThan(1)
+    expect(colors).toContain('rgb(198, 120, 221)')
+    expect(code.textContent).toContain('DROP TABLE IF EXISTS `users`')
+  })
+})
+
+describe('TableSchemaView primary key dialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    // Warm column cache: the view then paints (and mounts the PK dialog) before
+    // `indexes` resolves, which is exactly the state the missing reset needed —
+    // the dialog is mounted once with `currentPkColumns === []`.
+    schemaStoreState.columns = { 'session-1/app_db/users': mockColumns }
+    vi.mocked(api.getColumns).mockResolvedValue(mockColumns)
+    vi.mocked(api.getIndexes).mockResolvedValue([
+      { name: 'PRIMARY', columns: ['id'], is_unique: true, index_type: 'BTREE' },
+    ])
+    vi.mocked(api.getTables).mockResolvedValue([tableInfo])
+    vi.mocked(api.analyzeTable).mockResolvedValue({
+      ok: true,
+      analyzed: false,
+      row_count: tableInfo.row_count,
+      data_length: tableInfo.data_length,
+    })
+  })
+
+  it('preselects the existing primary key even though it arrives after mount', async () => {
+    const user = userEvent.setup()
+    render(<TableSchemaView {...baseProps} />)
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: '#' })).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /Manage PK/i }))
+
+    expect(screen.getByRole('button', { name: 'id' })).toHaveClass('bg-brand-600')
+    expect(screen.getByRole('button', { name: 'status' })).not.toHaveClass('bg-brand-600')
+  })
+
+  it('discards an abandoned selection when the dialog is reopened', async () => {
+    const user = userEvent.setup()
+    render(<TableSchemaView {...baseProps} />)
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: '#' })).toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: /Manage PK/i }))
+    await user.click(screen.getByRole('button', { name: 'status' }))
+    expect(screen.getByRole('button', { name: 'status' })).toHaveClass('bg-brand-600')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await user.click(screen.getByRole('button', { name: /Manage PK/i }))
+
+    expect(screen.getByRole('button', { name: 'id' })).toHaveClass('bg-brand-600')
+    expect(screen.getByRole('button', { name: 'status' })).not.toHaveClass('bg-brand-600')
   })
 })

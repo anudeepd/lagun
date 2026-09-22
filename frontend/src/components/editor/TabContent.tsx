@@ -10,12 +10,14 @@ import { useSessionStore } from '../../store/sessionStore'
 import QueryEditor from './QueryEditor'
 import type { DuplicateRowMode, InsertDraftAnchor, ResultGridHandle } from './ResultGrid'
 import { buildResultGridRowId } from '../../utils/rowIdentity'
+import { formatRowCount } from '../../utils/formatRows'
 import ResultToolbar from './ResultToolbar'
 import FilterHistoryDropdown from './FilterHistoryDropdown'
-import { Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown } from 'lucide-react'
+import { Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown, Plus, Trash2 } from 'lucide-react'
 import Button from '../ui/Button'
 import LimitSelect from '../ui/LimitSelect'
 import RefreshIcon from '../ui/RefreshIcon'
+import Tooltip from '../ui/Tooltip'
 import { LoadingState } from '../ui/Spinner'
 import Modal from '../ui/Modal'
 import ConfirmDialog from '../ui/ConfirmDialog'
@@ -33,6 +35,7 @@ import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 import { useHandoff } from '../../motion/useHandoff'
 import TransitionVeil from '../ui/TransitionVeil'
+import Label from '../ui/Label'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const loadResultGrid = () => import('./ResultGrid')
@@ -134,6 +137,18 @@ function statementFirstToken(statement: string): string {
     .replace(/^\s*(?:#[^\n]*\n\s*)+/g, '')
     .replace(/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/g, '')
   return stripped.trim().match(/^[A-Za-z]+/)?.[0].toUpperCase() ?? ''
+}
+
+/**
+ * Whether a validated script needs the confirmation dialog before it runs.
+ *
+ * `run()` uses this instead of reading the `bulkConfirm` state in its `finally`
+ * block: that state is set asynchronously, so the value captured by the closure
+ * was always falsy and the results the dialog was about to show got wiped.
+ */
+export function needsBulkConfirmation(validation: ScriptQueryValidationResult): boolean {
+  const counts = validation.operation_counts ?? {}
+  return (counts.UPDATE ?? 0) > 0 || (counts.DELETE ?? 0) > 0
 }
 
 export function shouldTryFastExecute(statements: string[]): boolean {
@@ -327,8 +342,74 @@ export const buildEmptyRowDraftValues = (columns: ColumnInfo[]): Record<string, 
   return values
 }
 
+/** Row-id set for the rows a delete/update request just committed. */
+const deletedRowKeys = (
+  rows: Record<string, unknown>[],
+  rowKeyColumns: string[],
+): Set<string> => new Set(
+  rows.map(row => rowKeyColumns.map(pk => String(row[pk])).join('\x00')),
+)
+
+/**
+ * Optimistic local removal of `deletedRows` from a result set, mirroring what
+ * `DELETE` did server-side. Rows are matched by their key columns, which are
+ * rendered as a `\x00`-joined string on both sides.
+ */
+export function filterDeletedRows(
+  result: QueryResult | null,
+  deletedRows: Record<string, unknown>[],
+  rowKeyColumns: string[],
+): QueryResult | null {
+  if (!result) return result
+  const deletedKeys = deletedRowKeys(deletedRows, rowKeyColumns)
+  const newRows = result.rows.filter(row => {
+    const key = rowKeyColumns.map(pk => String(row[result.columns.indexOf(pk)])).join('\x00')
+    return !deletedKeys.has(key)
+  })
+  return { ...result, rows: newRows, row_count: newRows.length }
+}
+
+/**
+ * Optimistic local application of committed cell edits, mirroring what
+ * `UPDATE` did server-side. `pendingChanges` is keyed by the grid row id
+ * (`buildResultGridRowId`) exactly as the grid reports it.
+ */
+export function applyEditsToRows(
+  result: QueryResult | null,
+  pendingChanges: Map<string, { changes: Record<string, unknown> }>,
+  rowKeyColumns: string[],
+  primaryKeyColumns: string[],
+): QueryResult | null {
+  if (!result) return result
+  const keyCols = rowKeyColumns.length > 0 ? rowKeyColumns : result.columns
+  const newRows = result.rows.map((row, rowIdx) => {
+    const rowObj: Record<string, unknown> = {}
+    result.columns.forEach((col, colIdx) => { rowObj[col] = row[colIdx] })
+    const rowId = buildResultGridRowId(rowObj, rowIdx, keyCols, primaryKeyColumns.length === 0)
+    const edit = pendingChanges.get(rowId)
+    if (!edit) return row
+    const updatedRow = [...row]
+    for (const [col, newValue] of Object.entries(edit.changes)) {
+      const colIndex = result.columns.indexOf(col)
+      if (colIndex >= 0) updatedRow[colIndex] = newValue
+    }
+    return updatedRow
+  })
+  return { ...result, rows: newRows }
+}
+
 const MIN_EDITOR_HEIGHT = 100
 const MAX_EDITOR_HEIGHT_FRACTION = 0.7
+
+/** Promote a view panel for the duration of its opacity transition only.
+    `lagun-view-panel` surfaces stay mounted for the life of a tab, so leaving
+    `will-change` on them (see index.css) would keep a composited layer alive
+    for every panel of every tab even while idle. Safari can drop the animation
+    of a panel that was just switched in, so the promotion is added when the
+    opacity transition starts and removed when it settles. */
+function markPanelAnimating(node: HTMLElement | null, animating: boolean) {
+  node?.classList.toggle('is-animating', animating)
+}
 
 interface DataExportContext {
   rowsOverride?: ExportOverrideData
@@ -390,7 +471,12 @@ function QueryTab({ tab }: Props) {
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<ResultGridHandle>(null)
   const editorRef = useRef<ReactCodeMirrorRef>(null)
-  const { tables, columns, databases, loadDatabases, loadTables, loadColumns } = useSchemaStore()
+  const tables = useSchemaStore(s => s.tables)
+  const columns = useSchemaStore(s => s.columns)
+  const databases = useSchemaStore(s => s.databases)
+  const loadDatabases = useSchemaStore(s => s.loadDatabases)
+  const loadTables = useSchemaStore(s => s.loadTables)
+  const loadColumns = useSchemaStore(s => s.loadColumns)
   const setTabDatabase = useTabStore(s => s.setTabDatabase)
   const pendingSql = useTabStore(s => s.pendingSqls[tab.id])
   const consumePendingSql = useTabStore(s => s.consumePendingSql)
@@ -550,6 +636,12 @@ function QueryTab({ tab }: Props) {
     setBulkValidation(null)
     const newResults: ExecutedQueryResult[] = []
     const executionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    // Set when this run hands off to the bulk confirmation dialog. It must be a
+    // local, not the `bulkConfirm` state: the state value captured by this
+    // closure is the one from before `setBulkConfirm` was called, so reading it
+    // in `finally` was always falsy and wiped the results the dialog was about
+    // to show.
+    let awaitingConfirmation = false
     try {
       if (shouldTryFastExecute(statements)) {
         const controller = new AbortController()
@@ -590,9 +682,8 @@ function QueryTab({ tab }: Props) {
 
         setBulkValidation(validation)
 
-        const updates = validation.operation_counts.UPDATE ?? 0
-        const deletes = validation.operation_counts.DELETE ?? 0
-        if (updates > 0 || deletes > 0) {
+        if (needsBulkConfirmation(validation)) {
+          awaitingConfirmation = true
           setBulkConfirm({ validation, sql: toRun, toRun })
           return
         }
@@ -632,7 +723,7 @@ function QueryTab({ tab }: Props) {
     } finally {
       abortControllerRef.current = null
       activeScriptExecutionRef.current = null
-      if (!bulkConfirm) {
+      if (!awaitingConfirmation) {
         setResults(newResults)
         setResultIdx(0)
       }
@@ -784,7 +875,7 @@ function QueryTab({ tab }: Props) {
       </div>
       <div
         onMouseDown={handleEditorDividerMouseDown}
-        className="h-1.5 flex-shrink-0 bg-surface-800 hover:bg-brand-500 cursor-row-resize transition-colors"
+        className="h-1.5 flex-shrink-0 bg-surface-800 hover:bg-brand-700 cursor-row-resize transition-colors"
       />
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {results.length > 1 && (
@@ -803,7 +894,7 @@ function QueryTab({ tab }: Props) {
                 {entry.result.error
                   ? `✗ Result ${i + 1}`
                   : entry.result.columns.length > 0
-                    ? `Result ${i + 1} (${entry.result.row_count} rows)`
+                    ? `Result ${i + 1} (${formatRowCount(entry.result.row_count)})`
                     : `Result ${i + 1} (${entry.result.affected_rows ?? 0} affected)`}
               </button>
             ))}
@@ -834,7 +925,7 @@ function QueryTab({ tab }: Props) {
             )}
             </div>
           ) : (
-            <m.div key="no-results" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex items-center justify-center h-full text-slate-600 text-sm">
+            <m.div key="no-results" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex items-center justify-center h-full text-muted text-sm">
               Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
             </m.div>
           )}
@@ -853,7 +944,7 @@ function QueryTab({ tab }: Props) {
               className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors disabled:cursor-default ${
                 resultSortActive
                   ? 'text-brand-400 hover:text-brand-300'
-                  : 'text-slate-600'
+                  : 'text-muted'
               }`}
               title="Clear result sorting"
             >
@@ -863,7 +954,7 @@ function QueryTab({ tab }: Props) {
               onClick={() => {
                 setQueryExportContext(buildQueryExportContext(results[resultIdx], gridRef.current))
               }}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-muted hover:text-slate-300 transition-colors"
               title="Export result"
             >
               <Download size={11} /> Export
@@ -970,10 +1061,14 @@ function TableTab({ tab, active = true }: Props) {
   const loadExecutionIdRef = useRef<string | null>(null)
   const loadCancellationRef = useRef<Promise<void>>(Promise.resolve())
   const colPickerRef = useRef<HTMLDivElement>(null)
+  const schemaPanelRef = useRef<HTMLDivElement | null>(null)
+  const dataPanelRef = useRef<HTMLDivElement | null>(null)
   const addEntry = useQueryLogStore(s => s.addEntry)
   const setTableDataState = useTabStore(s => s.setTableDataState)
   const setTabDirty = useTabStore(s => s.setTabDirty)
-  const { invalidateTablesForDb, loadTables, loadColumns } = useSchemaStore()
+  const invalidateTablesForDb = useSchemaStore(s => s.invalidateTablesForDb)
+  const loadTables = useSchemaStore(s => s.loadTables)
+  const loadColumns = useSchemaStore(s => s.loadColumns)
 
   const pkColumns = useMemo(() =>
     columns.filter(c => c.is_primary_key).map(c => c.name),
@@ -1359,12 +1454,12 @@ function TableTab({ tab, active = true }: Props) {
       })
       try {
         addEntry({
-          sql: r.sql_executed || `UPDATE ${tab.database}.${tab.table}`,
+          sql: (r.ok ? r.data.sql_executed : '') || `UPDATE ${tab.database}.${tab.table}`,
           sessionId: tab.sessionId,
           database: tab.database,
-          affectedRows: r.affected_rows ?? undefined,
+          affectedRows: r.ok ? r.data.affected_rows : undefined,
           execTimeMs: Date.now() - start,
-          error: r.error ?? undefined,
+          error: r.ok ? r.data.error ?? undefined : r.error,
         })
       } catch { /* ignore */ }
       if (!r.ok) {
@@ -1372,7 +1467,7 @@ function TableTab({ tab, active = true }: Props) {
         setTimeout(() => setStatusMsg(null), 4000)
         return
       }
-      if (r.affected_rows === 0) {
+      if (r.data.affected_rows === 0) {
         setStatusMsg(`✗ Update matched 0 rows — the row may have been modified or deleted since it was loaded.`)
         setTimeout(() => setStatusMsg(null), 6000)
         return
@@ -1387,12 +1482,12 @@ function TableTab({ tab, active = true }: Props) {
       })
       try {
         addEntry({
-          sql: r.sql_executed || `INSERT INTO \`${tab.database}\`.\`${tab.table}\``,
+          sql: (r.ok ? r.data.sql_executed : '') || `INSERT INTO \`${tab.database}\`.\`${tab.table}\``,
           sessionId: tab.sessionId,
           database: tab.database,
-          affectedRows: r.affected_rows ?? (r.ok ? 1 : 0),
+          affectedRows: r.ok ? r.data.affected_rows ?? 1 : 0,
           execTimeMs: Date.now() - start,
-          error: r.error ?? undefined,
+          error: r.ok ? r.data.error ?? undefined : r.error,
         })
       } catch { /* ignore */ }
       if (!r.ok) {
@@ -1411,24 +1506,7 @@ function TableTab({ tab, active = true }: Props) {
 
     // Optimistically apply changes to local result state
     if (normalizedPending.size > 0) {
-      setResult(prev => {
-        if (!prev) return prev
-        const keyCols = rowKeyColumns.length > 0 ? rowKeyColumns : prev.columns
-        const newRows = prev.rows.map((row, rowIdx) => {
-          const rowObj: Record<string, unknown> = {}
-          prev.columns.forEach((col, colIdx) => { rowObj[col] = row[colIdx] })
-          const rowId = buildResultGridRowId(rowObj, rowIdx, keyCols, pkColumns.length === 0)
-          const edit = normalizedPending.get(rowId)
-          if (!edit) return row
-          const updatedRow = [...row]
-          for (const [col, newValue] of Object.entries(edit.changes)) {
-            const colIndex = prev.columns.indexOf(col)
-            if (colIndex >= 0) updatedRow[colIndex] = newValue
-          }
-          return updatedRow
-        })
-        return { ...prev, rows: newRows }
-      })
+      setResult(prev => applyEditsToRows(prev, normalizedPending, rowKeyColumns, pkColumns))
     }
 
     invalidateTablesForDb(tab.sessionId!, tab.database!)
@@ -1451,50 +1529,28 @@ function TableTab({ tab, active = true }: Props) {
   const handleDeleteRows = async (rows: Record<string, unknown>[]) => {
     if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     const primary_keys = rows.map(row => Object.fromEntries(rowKeyColumns.map(pk => [pk, row[pk]])))
-    let r: Awaited<ReturnType<typeof api.rowDelete>>
-    try {
-      r = await api.rowDelete(tab.sessionId, {
-        database: tab.database,
-        table: tab.table,
-        primary_keys,
-      })
-    } catch (e) {
-      setStatusMsg(`✗ ${e instanceof Error ? e.message : String(e)}`)
-      setTimeout(() => setStatusMsg(null), 4000)
-      return
-    }
+    // `rowDelete` no longer throws: a transport error and a rejected statement
+    // both come back as `{ ok: false, error }`, so both reach the status line.
+    const r = await api.rowDelete(tab.sessionId, {
+      database: tab.database,
+      table: tab.table,
+      primary_keys,
+    })
     if (r.ok) {
-      if (r.affected_rows === 0) {
+      if (r.data.affected_rows === 0) {
         setStatusMsg('✗ Delete matched 0 rows — the row may have changed since it was loaded.')
-        try { addEntry({ sql: r.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: 0, execTimeMs: 0 }) } catch { /* ignore */ }
+        try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: 0, execTimeMs: 0 }) } catch { /* ignore */ }
         loadData()
         setTimeout(() => setStatusMsg(null), 6000)
         return
       }
 
       // Optimistically remove deleted rows from the local result state
-      setResult(prev => {
-        if (!prev) return prev
-        // Build a set of deleted row keys for O(1) lookup
-        const deletedKeys = new Set(
-          rows.map(row => rowKeyColumns.map(pk => String(row[pk])).join('\x00'))
-        )
-        // Filter out deleted rows using column index lookup
-        const newRows = prev.rows.filter(row => {
-          const key = rowKeyColumns.map(pk => {
-            const colIndex = prev.columns.indexOf(pk)
-            return String(row[colIndex])
-          }).join('\x00')
-          return !deletedKeys.has(key)
-        })
-        return { ...prev, rows: newRows, row_count: newRows.length }
-      })
+      setResult(prev => filterDeletedRows(prev, rows, rowKeyColumns))
 
       // Clear selected rows for deleted items (both React state and AG Grid internal selection)
       setSelectedRows(prev => {
-        const deletedKeys = new Set(
-          rows.map(row => rowKeyColumns.map(pk => String(row[pk])).join('\x00'))
-        )
+        const deletedKeys = deletedRowKeys(rows, rowKeyColumns)
         return prev.filter(row => {
           const key = rowKeyColumns.map(pk => String(row[pk])).join('\x00')
           return !deletedKeys.has(key)
@@ -1502,8 +1558,8 @@ function TableTab({ tab, active = true }: Props) {
       })
       gridRef.current?.deselectAll()
 
-      setStatusMsg(`✓ Deleted ${r.affected_rows} row${r.affected_rows !== 1 ? 's' : ''}`)
-      try { addEntry({ sql: r.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
+      setStatusMsg(`✓ Deleted ${r.data.affected_rows} row${r.data.affected_rows !== 1 ? 's' : ''}`)
+      try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.data.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
       invalidateTablesForDb(tab.sessionId!, tab.database!)
       loadTables(tab.sessionId!, tab.database!)
       loadData()
@@ -1665,7 +1721,7 @@ function TableTab({ tab, active = true }: Props) {
             className="relative flex items-center min-w-40 rounded origin-center"
           >
             <span className="absolute left-2 z-10 pointer-events-none">
-                <Search size={11} className={`${searchFocused ? 'text-brand-400 scale-112' : 'text-slate-500'} transition-colors duration-200`} />
+                <Search size={11} className={`${searchFocused ? 'text-brand-400 scale-112' : 'text-muted'} transition-colors duration-200`} />
             </span>
             <input
               type="text"
@@ -1689,7 +1745,8 @@ function TableTab({ tab, active = true }: Props) {
               onFocus={() => setSearchFocused(true)}
               onBlur={() => setSearchFocused(false)}
               placeholder="Search all columns…"
-              className="bg-surface-800 border border-surface-700 rounded pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500 w-44 max-w-full"
+              aria-label="Search all columns"
+              className="bg-surface-800 border border-surface-700 rounded pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-1 focus:ring-brand-400 w-44 max-w-full"
             />
             <AnimatePresence>
             {globalSearch && (
@@ -1698,7 +1755,7 @@ function TableTab({ tab, active = true }: Props) {
                 animate={{ opacity: 1, scale: 1, rotate: 0, transition: surfaceTransition }}
                 exit={{ opacity: 0, scale: 0.65, rotate: 25, transition: exitTransition }}
                 onClick={handleClearSearch}
-                className="absolute right-1.5 text-slate-500 hover:text-slate-300"
+                className="absolute right-1.5 text-muted hover:text-slate-300"
                 aria-label="Clear column search"
               >
                 <X size={10} />
@@ -1707,11 +1764,41 @@ function TableTab({ tab, active = true }: Props) {
             </AnimatePresence>
           </m.div>
         )}
+        {/* Row affordances: insert and delete were right-click-only, which the
+            README describes as "directly in the grid". */}
+        {view === 'data' && (
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleCreateEmptyRow}
+              disabled={!(columns.length > 0 && !initialLoading && !refreshing)}
+              title="Add a row to insert"
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors text-muted hover:text-slate-200 disabled:opacity-40 disabled:hover:text-muted"
+            >
+              <Plus size={11} aria-hidden="true" />
+              Add row
+            </button>
+            <button
+              type="button"
+              onClick={() => requestDeleteRows(selectedRows)}
+              disabled={!(columns.length > 0 && !initialLoading && !refreshing) || selectedRows.length === 0}
+              title={
+                selectedRows.length > 0
+                  ? `Delete ${formatRowCount(selectedRows.length)}`
+                  : 'Select rows to delete'
+              }
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors text-muted hover:text-red-400 disabled:opacity-40 disabled:hover:text-muted"
+            >
+              <Trash2 size={11} aria-hidden="true" />
+              Delete{selectedRows.length > 0 ? ` ${selectedRows.length}` : ''}
+            </button>
+          </div>
+        )}
         {/* Filter toggle button */}
         {view === 'data' && (
           <button
             onClick={() => setShowFilterBar(v => !v)}
-            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${showFilterBar || appliedWhere ? 'text-brand-400 bg-brand-950 border border-brand-800' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${showFilterBar || appliedWhere ? 'text-brand-400 bg-brand-950 border border-brand-800' : 'text-muted hover:text-slate-300'}`}
             title="Toggle WHERE filter"
           >
             <Filter size={11} />
@@ -1726,7 +1813,7 @@ function TableTab({ tab, active = true }: Props) {
               className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
                 hiddenColumns.size > 0
                   ? 'text-brand-400 bg-brand-950 border border-brand-800'
-                  : 'text-slate-500 hover:text-slate-300'
+                  : 'text-muted hover:text-slate-300'
               }`}
               title="Select visible columns"
             >
@@ -1743,7 +1830,7 @@ function TableTab({ tab, active = true }: Props) {
                     onChange={e => setColSearch(e.target.value)}
                     placeholder="Filter columns…"
                     autoFocus
-                    className="w-full bg-surface-800 border border-surface-700 rounded px-2 py-0.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full bg-surface-800 border border-surface-700 rounded px-2 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-1 focus:ring-brand-400"
                   />
                 </div>
                 <label className="flex items-center gap-2 px-3 py-1 hover:bg-surface-800 cursor-pointer border-b border-surface-700">
@@ -1798,7 +1885,7 @@ function TableTab({ tab, active = true }: Props) {
             className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors disabled:cursor-default ${
               dataSortActive
                 ? 'text-brand-400 bg-brand-950 border border-brand-800 hover:text-brand-300'
-                : 'text-slate-500'
+                : 'text-muted'
             }`}
             title="Clear data sorting"
           >
@@ -1814,7 +1901,7 @@ function TableTab({ tab, active = true }: Props) {
             whileHover={{ scale: 1.025 }}
             whileTap={{ scale: 0.96 }}
             transition={surfaceTransition}
-            className="flex items-center gap-1 text-xs text-slate-500 rounded"
+            className="flex items-center gap-1 text-xs text-muted rounded"
           >
             <span>Limit</span>
             <LimitSelect value={limit} options={LIMIT_OPTIONS} onChange={handleLimitChange} />
@@ -1831,7 +1918,7 @@ function TableTab({ tab, active = true }: Props) {
             </button>
             <button
               onClick={handleDiscardChanges}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors"
             >
               Discard
             </button>
@@ -1857,7 +1944,7 @@ function TableTab({ tab, active = true }: Props) {
         {view === 'data' && (
           <button
             onClick={() => setShowImport(true)}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            className="flex items-center gap-1 px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors"
             title="Import data"
           >
             <Upload size={11} /> Import
@@ -1877,34 +1964,35 @@ function TableTab({ tab, active = true }: Props) {
                 rowsOverride: buildTableDataExportData(result, gridRef.current, columns),
               })
             }}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            className="flex items-center gap-1 px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors"
             title="Export data"
           >
             <Download size={11} /> Export
           </button>
         )}
         {view === 'data' && (
+          <Tooltip label={refreshing ? 'Refreshing data' : 'Refresh data'}>
           <button
             type="button"
             onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); loadData() }}
-            title={refreshing ? 'Refreshing data' : 'Refresh data'}
             aria-label={refreshing ? 'Refreshing data' : 'Refresh data'}
             disabled={initialLoading || refreshing}
-            className={`rounded p-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-wait ${refreshing ? 'text-slate-400' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`lagun-hit-target rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-wait ${refreshing ? 'text-slate-400' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <RefreshIcon refreshing={refreshing} size={12} />
           </button>
+          </Tooltip>
         )}
       </div>
 
       {/* WHERE filter bar */}
       <AnimatePresence initial={false}>
       {view === 'data' && showFilterBar && (
-        <m.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto', transition: surfaceTransition }} exit={{ opacity: 0, height: 0, transition: exitTransition }} className="overflow-hidden border-b border-surface-700 bg-surface-900">
+        <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="overflow-hidden border-b border-surface-700 bg-surface-900">
         <div className="flex items-center flex-wrap gap-2 px-3 py-1.5">
-          <span className="inline-flex h-[34px] self-start items-center text-xs leading-none text-slate-500 font-mono shrink-0">WHERE</span>
+          <span className="inline-flex h-[34px] self-start items-center text-xs leading-none text-muted font-mono shrink-0">WHERE</span>
           <FilterHistoryDropdown history={filterHistory} activeFilter={appliedWhere} onSelect={handleSelectFilterHistory} />
-          <div className="flex-1 min-w-[220px] rounded overflow-visible border border-surface-700 focus-within:ring-1 focus-within:ring-brand-500">
+          <div className="flex-1 min-w-[220px] rounded overflow-visible border border-surface-700 focus-within:ring-1 focus-within:ring-brand-400">
             <ReactCodeMirror
               value={whereFilter}
               onChange={val => {
@@ -1938,12 +2026,12 @@ function TableTab({ tab, active = true }: Props) {
             >
               <WrapText size={12} />
             </Button>
-            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-surface-800 border border-surface-700 rounded">
+            <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted bg-surface-800 border border-surface-700 rounded">
               {isMac ? '⌘↵' : 'Ctrl+↵'}
             </kbd>
             <button
               onClick={handleApplyFilter}
-              className="px-2.5 py-0.5 text-xs bg-brand-600 hover:bg-brand-500 text-white rounded transition-colors"
+              className="px-2.5 py-0.5 text-xs bg-brand-600 hover:bg-brand-700 text-white rounded transition-colors"
             >
               Apply
             </button>
@@ -1951,7 +2039,7 @@ function TableTab({ tab, active = true }: Props) {
           {appliedWhere && (
             <button
               onClick={handleClearFilter}
-              className="px-2 py-0.5 text-xs text-slate-500 hover:text-slate-300 transition-colors shrink-0"
+              className="px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors shrink-0"
             >
               Clear
             </button>
@@ -1977,7 +2065,10 @@ function TableTab({ tab, active = true }: Props) {
             }}
             className={`lagun-view-panel absolute inset-0 ${view === 'schema' ? 'pointer-events-auto' : 'pointer-events-none'}`}
             aria-hidden={view !== 'schema' || undefined}
+            onAnimationStart={() => markPanelAnimating(schemaPanelRef.current, true)}
+            onAnimationComplete={() => markPanelAnimating(schemaPanelRef.current, false)}
             ref={node => {
+              schemaPanelRef.current = node
               if (node) (node as HTMLDivElement & { inert: boolean }).inert = view !== 'schema'
             }}
           >
@@ -2000,7 +2091,10 @@ function TableTab({ tab, active = true }: Props) {
             }}
             className={`lagun-view-panel absolute inset-0 ${view === 'data' ? 'pointer-events-auto' : 'pointer-events-none'}`}
             aria-hidden={view !== 'data' || undefined}
+            onAnimationStart={() => markPanelAnimating(dataPanelRef.current, true)}
+            onAnimationComplete={() => markPanelAnimating(dataPanelRef.current, false)}
             ref={node => {
+              dataPanelRef.current = node
               if (node) (node as HTMLDivElement & { inert: boolean }).inert = view !== 'data'
             }}
           >
@@ -2037,7 +2131,7 @@ function TableTab({ tab, active = true }: Props) {
             </div>
           </Suspense>
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-slate-600">
+            <div className="flex h-full items-center justify-center text-pretty text-sm text-muted">
               No data loaded
             </div>
           )
@@ -2109,12 +2203,12 @@ function TableTab({ tab, active = true }: Props) {
         <div className="space-y-4 text-sm text-slate-300">
           <p>Changes run one row at a time. Lagun stops at first failed row; already applied rows remain changed.</p>
           <dl className="grid grid-cols-2 gap-2 rounded-md border border-surface-700 bg-surface-800 p-3 text-xs">
-            <div><dt className="text-slate-500">Rows to update</dt><dd className="mt-1 font-mono text-slate-100">{pendingChanges.size}</dd></div>
-            <div><dt className="text-slate-500">Rows to insert</dt><dd className="mt-1 font-mono text-slate-100">{insertDrafts.size}</dd></div>
+            <div><dt className="text-muted">Rows to update</dt><dd className="mt-1 font-mono text-slate-100">{pendingChanges.size}</dd></div>
+            <div><dt className="text-muted">Rows to insert</dt><dd className="mt-1 font-mono text-slate-100">{insertDrafts.size}</dd></div>
           </dl>
           {pendingChanges.size > 0 && (
             <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">Changed columns</p>
+              <Label as="p" className="mb-2">Changed columns</Label>
               <div className="flex flex-wrap gap-1.5">
                 {[...new Set([...pendingChanges.values()].flatMap(change => Object.keys(change.changes)))].map(column => (
                   <span key={column} className="rounded border border-surface-700 bg-surface-800 px-2 py-1 font-mono text-xs text-slate-200">{column}</span>

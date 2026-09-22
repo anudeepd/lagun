@@ -360,7 +360,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           const base = {
             fontFamily: 'var(--lagun-data-font)',
             fontSize: '12px',
-            ...(params.value === null ? { color: '#64748b', fontStyle: 'italic' } : {}),
+            ...(params.value === null ? { color: 'var(--lagun-muted-text)', fontStyle: 'italic' } : {}),
           }
           const rowId = params.data?.__ag_rowId as string | undefined
           if (params.data?.__lagun_insertDraft) {
@@ -560,6 +560,12 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // `inert` (set by AppLayout on every inactive tab panel) means this grid
+      // is mounted but not reachable. The handlers below are window-global, so
+      // a hidden grid must bail out unconditionally: otherwise a single Ctrl+F
+      // opens the find bar in every mounted grid, and Ctrl+C / Shift+Enter
+      // would act on a grid the user cannot see.
+      if (rootRef.current?.closest('[inert]')) return
       // Ctrl/Cmd+F always opens the in-grid search. The check is intentionally
       // unconditional — even when focus sits inside a text input such as the
       // find bar's own input — so the browser's native find never takes over
@@ -607,6 +613,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     // there accepts a completion instead of jumping to the next find match.
     const handleNavKey = (e: KeyboardEvent) => {
       if (!findOpen) return
+      // Same gate as handleKeyDown: a find bar left open in a grid that has
+      // since become inert (tab switched away) must not step matches there.
+      if (rootRef.current?.closest('[inert]')) return
       if (e.target instanceof HTMLInputElement && e.target.type === 'search' && e.target.closest('[role="search"]')) return
       // Never steal keys from text editing surfaces: plain Enter accepts
       // autocomplete / commits text and Escape dismisses completions first.
@@ -636,7 +645,12 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       }
     }
 
-    const handleOpenFind = () => setFindOpen(true)
+    // Same gate: opening a find bar in a grid the user cannot see is the bug
+    // this whole guard exists for, whatever triggered it.
+    const handleOpenFind = () => {
+      if (rootRef.current?.closest('[inert]')) return
+      setFindOpen(true)
+    }
 
     window.addEventListener('keydown', handleKeyDown, { capture: true })
     window.addEventListener('keydown', handleNavKey, { capture: true })
@@ -647,6 +661,24 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       window.removeEventListener('lagun:open-find', handleOpenFind)
     }
   }, [findOpen, handleNext, handlePrev, handleClose])
+
+  // A grid can turn inert while its find bar is open (AppLayout keeps every tab
+  // mounted and marks the inactive panels `inert`). Key handling is gated on
+  // inertness, so the stale bar could not be used — it would simply reappear,
+  // already open, the next time the tab is activated, showing a find bar the
+  // user never opened there. Close it when an ancestor turns inert instead.
+  useEffect(() => {
+    if (!findOpen) return
+    const observer = new MutationObserver(() => {
+      if (rootRef.current?.closest('[inert]')) handleClose()
+    })
+    observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['inert'] })
+    // The grid may already be inert by the time this observer attaches (the bar
+    // opens and the tab is switched away in the same tick), and pre-existing
+    // mutations are not replayed — so check once up front as well.
+    if (rootRef.current?.closest('[inert]')) handleClose()
+    return () => observer.disconnect()
+  }, [findOpen, handleClose])
 
   const handleSelectionChanged = useCallback((e: { api: { getSelectedRows: () => Record<string, unknown>[] } }) => {
     onSelectionChange?.(e.api.getSelectedRows())
@@ -862,7 +894,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     if (!cellEditor) return
     onCellEdit?.({
       column: cellEditor.columnName,
-      newValue: cellEditor.value,
+      // The editor opens a NULL cell as an empty textarea and shows a NULL
+      // badge; applying it unchanged must write NULL back, not ''.
+      newValue: cellEditor.wasNull && cellEditor.value === '' ? null : cellEditor.value,
       oldValue: cellEditor.oldValue,
       data: cellEditor.data,
     })
@@ -965,7 +999,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
             <textarea
               ref={focusTextareaAtEnd}
               aria-label={`Edit ${cellEditor.columnName}`}
-              className="min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              className="min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400"
               value={cellEditor.value}
               onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
               spellCheck={false}

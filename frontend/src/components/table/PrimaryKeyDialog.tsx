@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import { api } from '../../api/client'
+import Label from '../ui/Label'
 
 interface Props {
   open: boolean
@@ -22,9 +23,23 @@ export default function PrimaryKeyDialog({
   columns,
   currentPkColumns,
 }: Props) {
+  // Callers keep this dialog mounted so Modal can play its exit animation, so a
+  // fresh open no longer remounts and re-runs the initialiser — and at first
+  // mount `currentPkColumns` is still `[]` (the indexes have not loaded yet), so
+  // an existing primary key was never shown. Reset on open instead; the reset
+  // lands while the dialog is still fully transparent.
   const [selectedCols, setSelectedCols] = useState<string[]>(currentPkColumns)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const currentPkKey = currentPkColumns.join('\u0000')
+
+  useEffect(() => {
+    if (!open) return
+    // `currentPkColumns` is a fresh array on most parent renders (the caller
+    // falls back to `?? []`), so key the reset on its contents instead.
+    setSelectedCols(currentPkKey === '' ? [] : currentPkKey.split('\u0000'))
+    setError(null)
+  }, [open, currentPkKey])
 
   const toggleCol = (col: string) => {
     setSelectedCols(prev =>
@@ -85,7 +100,7 @@ export default function PrimaryKeyDialog({
         {error && <p className="text-xs text-red-400">{error}</p>}
 
         <div>
-          <label className="text-xs font-medium text-slate-400 uppercase tracking-wide">Columns</label>
+          <Label as="span">Columns</Label>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {columns.map(col => (
               <button

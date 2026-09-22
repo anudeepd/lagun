@@ -16,7 +16,8 @@ const MIN_SIDEBAR = 160
 const MAX_SIDEBAR = 520
 
 export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () => void } = {}) {
-  const { tabs, activeTabId } = useTabStore()
+  const tabs = useTabStore(s => s.tabs)
+  const activeTabId = useTabStore(s => s.activeTabId)
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const saved = localStorage.getItem('lagun-sidebar-width')
     return saved ? Number(saved) : 256
@@ -85,25 +86,25 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
           aria-orientation="vertical"
           className="group absolute inset-y-0 right-0 z-10 hidden w-2 translate-x-1/2 cursor-col-resize lg:block"
         >
-          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-brand-500" />
+          <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-brand-700" />
         </div>
       </div>
 
       {/* Main area */}
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
         <div className="flex min-h-[46px] items-center border-b border-surface-800 lg:hidden">
-          <button type="button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open navigation" className="lagun-icon-button m-1 rounded p-2 text-slate-300 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+          <button type="button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open navigation" className="lagun-icon-button m-1 rounded p-2 text-slate-300 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
             <Menu size={18} />
           </button>
           <span className="text-sm font-medium text-slate-300">Lagun</span>
-          <button type="button" onClick={() => setCommandPaletteOpen(true)} aria-label="Open command palette" className="lagun-icon-button ml-auto mr-2 rounded p-2 text-slate-400 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+          <button type="button" onClick={() => setCommandPaletteOpen(true)} aria-label="Open command palette" className="lagun-icon-button ml-auto mr-2 rounded p-2 text-slate-400 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
             <Command size={18} />
           </button>
         </div>
         <TabBar onOpenAdmin={navigateToAdmin} />
         <main id="main-content" tabIndex={-1} className="relative flex-1 overflow-hidden min-h-0 focus:outline-none">
           {tabs.length === 0 ? (
-            <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex h-full flex-col items-center justify-center gap-4 text-slate-500">
+            <m.div initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex h-full flex-col items-center justify-center gap-4 text-muted">
               <Logo size="lg" showText={false} className="opacity-40" />
               <p className="text-sm">Select a table from the sidebar or open a query tab</p>
             </m.div>

@@ -68,3 +68,64 @@ def test_decrypt_with_wrong_salt_raises():
     enc = encrypt_with_passphrase("secret", "pass", b"\x03" * 16)
     with pytest.raises(InvalidToken):
         decrypt_with_passphrase(enc, "pass", b"\x04" * 16)
+
+
+# ---------------------------------------------------------------------------
+# Master key file permissions (S-13)
+# ---------------------------------------------------------------------------
+
+
+def _break_keyring(monkeypatch):
+    """Force the file fallback by making the OS keyring unusable."""
+    import sys
+    import types
+
+    fake = types.ModuleType("keyring")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("no keyring backend")
+
+    fake.get_password = _boom
+    fake.set_password = _boom
+    monkeypatch.setitem(sys.modules, "keyring", fake)
+
+
+def test_fallback_key_file_is_private_from_creation(monkeypatch, tmp_path):
+    import stat
+
+    import lagun.db.crypto as crypto
+
+    _break_keyring(monkeypatch)
+    key_path = tmp_path / "nested" / "master.key"
+    monkeypatch.setattr(crypto, "_FALLBACK_PATH", key_path)
+
+    key = crypto._get_or_create_master_key()
+
+    assert key_path.read_bytes().strip() == key
+    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(key_path.parent.stat().st_mode) == 0o700
+
+
+def test_existing_world_readable_key_file_is_tightened(monkeypatch, tmp_path):
+    import stat
+
+    import lagun.db.crypto as crypto
+
+    _break_keyring(monkeypatch)
+    key_path = tmp_path / "master.key"
+    key_path.write_bytes(b"existing-key")
+    key_path.chmod(0o644)
+    monkeypatch.setattr(crypto, "_FALLBACK_PATH", key_path)
+
+    assert crypto._get_or_create_master_key() == b"existing-key"
+    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+
+
+def test_decrypt_failure_is_reported_as_a_typed_error():
+    """A changed master key must not surface as an opaque InvalidToken."""
+    import lagun.db.crypto as crypto
+    from lagun.db.crypto import CredentialDecryptError
+
+    other = crypto.Fernet(crypto.Fernet.generate_key()).encrypt(b"secret").decode()
+    with pytest.raises(CredentialDecryptError):
+        decrypt_password(other)

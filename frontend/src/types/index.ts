@@ -12,6 +12,11 @@ export interface Session {
   updated_at: string
   managed?: boolean
   is_default?: boolean
+  /**
+   * Administrator allowlist for a shared (managed) connection. The user may
+   * narrow this list but never widen it. Empty/absent for unmanaged sessions.
+   */
+  managed_selected_databases?: string[]
 }
 
 export interface SessionCreate {
@@ -151,7 +156,7 @@ export interface CreateTableRequest {
 export interface CreateIndexRequest {
   name: string
   columns: string[]
-  is_unique: boolean
+  unique: boolean
   index_type: string
 }
 
@@ -303,6 +308,8 @@ export interface AdminActivityFilters {
 
 export interface AdminActivityResponse {
   items: AdminActivityEvent[]
+  /** Keyset cursor: pass as `beforeId` to read the next (older) page. Null when the page was the last one. */
+  next_before_id?: number | null
   observed_at: number
 }
 

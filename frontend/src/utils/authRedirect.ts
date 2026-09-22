@@ -31,6 +31,13 @@ export function submitLdapLogout(form: HTMLFormElement): void {
   window.setTimeout(() => form.submit(), AUTH_REDIRECT_DELAY_MS)
 }
 
+/**
+ * Test-only latch reset. Guarded on the build mode so the shipped bundle can
+ * never clear `redirectInProgress` (which would allow an auth-redirect storm);
+ * Vite statically replaces `import.meta.env.MODE`, so the body is dropped from
+ * production output entirely.
+ */
 export function resetAuthRedirectForTests(): void {
+  if (import.meta.env.MODE !== 'test') return
   redirectInProgress = false
 }

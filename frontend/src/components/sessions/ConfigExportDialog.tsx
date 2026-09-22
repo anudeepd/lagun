@@ -3,6 +3,7 @@ import { Download, Loader2 } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
+import { LoadingState } from '../ui/Spinner'
 import { api } from '../../api/client'
 
 interface Props {
@@ -61,7 +62,10 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
         </>
       }
     >
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4" aria-busy={loading}>
+        {/* The footer button spins but keeps its "Download" label, so the busy
+            state needs exactly one announcement of its own. */}
+        {loading && <LoadingState label="Exporting connections…" compact className="sr-only" />}
         <p className="text-xs text-slate-400">
           Export all saved connections to an encrypted JSON file. You will need this
           passphrase to import the file on any Lagun instance.

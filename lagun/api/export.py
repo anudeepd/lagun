@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import csv
+import datetime
 import io
 import logging
+import os
 import re
+import time
 from typing import Literal, Optional
 
 import aiomysql
@@ -14,19 +17,32 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from lagun.db.pool import get_pool
+from lagun.api.scope import require_db_scope
 from lagun.db.session_store import get_session
-from lagun.db.utils import escape_value, quote_ident
+from lagun.db.utils import escape_value, format_mysql_time, quote_ident
 from lagun.api.sql_script import SqlScriptError, split_sql_script
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["export"])
 
-_BLOCKED_SQL = re.compile(
-    r"\b(INTO\s+OUTFILE|INTO\s+DUMPFILE|LOAD_FILE\s*\(|SLEEP\s*\(|BENCHMARK\s*\()\b",
-    re.IGNORECASE,
+# `/*! … */` bodies are executed by the server, so their contents are real SQL
+# and must not be treated as a comment.
+_EXECUTABLE_COMMENT = re.compile(r"/\*!")
+# Ordinary comments are removed before keyword scanning, or `INTO/**/OUTFILE`
+# slips past a pattern that expects whitespace between the two words.
+_COMMENT = re.compile(r"/\*.*?\*/|--[^\n]*|#[^\n]*", re.DOTALL)
+_SERVER_FILE_WRITE = re.compile(r"\bINTO\s+(?:OUTFILE|DUMPFILE)\b", re.IGNORECASE)
+_DISALLOWED_FUNCTION = re.compile(
+    r"\b(?:LOAD_FILE|SLEEP|BENCHMARK)\s*\(", re.IGNORECASE
 )
 _SAFE_FILENAME = re.compile(r"[^\w.\-]")
 _EXPORT_FETCH_ROWS = 100
+# Streaming a whole table had no deadline; the response body is produced after
+# the handler returns, so the bound has to be enforced inside the generator.
+_EXPORT_MAX_RUNTIME_SECONDS = float(
+    os.getenv("LAGUN_EXPORT_MAX_RUNTIME_SECONDS", "300")
+)
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 _EXPORT_STREAM_CHARS = 256 * 1024
 
 
@@ -47,6 +63,87 @@ def _target_table_label(
     database: str, table_name: str, include_schema: bool = False
 ) -> str:
     return f"{database}.{table_name}" if include_schema else table_name
+
+
+class _ExportTimeout(RuntimeError):
+    """The export ran past its deadline."""
+
+
+def _is_numeric_literal(value: str) -> bool:
+    try:
+        float(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _csv_neutralize(value: str) -> str:
+    """Prefix a formula-looking cell so a spreadsheet reads it as text.
+
+    CSV injection guard (S-8): a cell starting with = + - @ TAB or CR is
+    executable content in Excel/LibreOffice/Sheets. A leading - or + on a number
+    is a sign rather than a formula, so numeric literals are left alone.
+    """
+    if not value or value[0] not in _CSV_FORMULA_PREFIXES:
+        return value
+    if _is_numeric_literal(value):
+        return value
+    return "'" + value
+
+
+def _csv_cell(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        # str(bytes) is a Python repr ("b'\x00\xff'") that no importer can turn
+        # back into the original bytes.
+        return "0x" + bytes(value).hex()
+    if isinstance(value, datetime.timedelta):
+        # str(timedelta) is "1 day, 1:00:00", which is not a valid TIME literal.
+        return format_mysql_time(value)
+    return _csv_neutralize(str(value))
+
+
+def _kept_indexes(cols: list[str], cols_filtered: list[str]) -> list[int]:
+    """Positions of the surviving columns, so values never go through a name map."""
+    dropped = set(cols) - set(cols_filtered)
+    return [index for index, name in enumerate(cols) if name not in dropped]
+
+
+def _where_clause(cols: list[str], row: tuple, where_cols: list[str]) -> str:
+    """Build a WHERE clause, resolving each key column by position.
+
+    A name lookup silently used the wrong column's value when a result set
+    contained the same name twice (a self-join), which made the DELETE half of an
+    export match nothing.
+    """
+    parts = []
+    for name in where_cols:
+        try:
+            index = cols.index(name)
+        except ValueError:
+            continue
+        parts.append(_where_value(name, row[index]))
+    return " AND ".join(parts)
+
+
+def _completion_marker(rows: int) -> str:
+    """Final line of a streamed SQL export, so truncation is detectable.
+
+    The status is already 200 by the time the first chunk is written, so a
+    mid-stream failure cannot change it; a client that checks for this marker can
+    tell a complete file from a truncated one.
+    """
+    return f"-- Lagun export complete: {rows} rows\n"
+
+
+async def _next_batch(cur, fetch_size: int, deadline: float, exported: int):
+    if time.monotonic() > deadline:
+        raise _ExportTimeout(
+            f"Export exceeded the {_EXPORT_MAX_RUNTIME_SECONDS:g}-second limit "
+            f"after {exported} rows"
+        )
+    return await cur.fetchmany(fetch_size)
 
 
 def _where_value(column: str, value) -> str:
@@ -163,12 +260,37 @@ class ExportRequest(BaseModel):
         return self
 
 
-@router.post("/sessions/{session_id}/export")
+# The body is a streamed file, not JSON: the schema documents that, since a
+# JSON `response_model` cannot describe it.
+_STREAM_RESPONSES = {
+    200: {
+        "description": (
+            "The exported file. The body ends with `-- Lagun export complete: N rows` "
+            "for the SQL formats, so a truncated stream is detectable."
+        ),
+        # A file stream, so the schema is a string body rather than a JSON model.
+        "content": {
+            "text/plain": {"schema": {"type": "string"}},
+            "text/csv": {"schema": {"type": "string"}},
+        },
+    }
+}
+
+
+@router.post(
+    "/sessions/{session_id}/export",
+    response_class=StreamingResponse,
+    responses=_STREAM_RESPONSES,
+)
 async def export_data(session_id: str, req: ExportRequest):
     return await _export_response(session_id, req)
 
 
-@router.post("/sessions/{session_id}/export/download")
+@router.post(
+    "/sessions/{session_id}/export/download",
+    response_class=StreamingResponse,
+    responses=_STREAM_RESPONSES,
+)
 async def download_export(session_id: str, config: str = Form(...)):
     try:
         req = ExportRequest.model_validate_json(config)
@@ -183,6 +305,8 @@ async def _export_response(session_id: str, req: ExportRequest):
         raise HTTPException(404, "Session not found")
     if req.sql and req.table:
         raise HTTPException(400, "Provide either 'table' or 'sql', not both")
+    # Same rule as every other data path: refuse before opening a connection.
+    require_db_scope(s, req.database)
 
     if req.sql:
         try:
@@ -192,9 +316,20 @@ async def _export_response(session_id: str, req: ExportRequest):
         if len(statements) != 1:
             raise HTTPException(400, "Export query must contain one SELECT statement")
         stripped = statements[0].strip()
+        if _EXECUTABLE_COMMENT.search(stripped):
+            raise HTTPException(
+                400, "Export query must not contain an executable comment"
+            )
         if not re.match(r"^SELECT\b", stripped, re.IGNORECASE):
             raise HTTPException(400, "Only SELECT statements are allowed for export")
-        if _BLOCKED_SQL.search(stripped):
+        uncommented = _COMMENT.sub(" ", stripped)
+        if _SERVER_FILE_WRITE.search(uncommented):
+            raise HTTPException(
+                400,
+                "Export query must not write server-side files "
+                "(INTO OUTFILE / INTO DUMPFILE)",
+            )
+        if _DISALLOWED_FUNCTION.search(uncommented):
             raise HTTPException(400, "SQL contains disallowed functions")
         select_sql = stripped
     elif req.table:
@@ -214,12 +349,17 @@ async def _export_response(session_id: str, req: ExportRequest):
     fetch_size = min(req.batch_size, _EXPORT_FETCH_ROWS)
 
     async def _generate_insert():
+        exported = 0
+        deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
                 await cur.execute(f"USE {quote_ident(req.database)}")
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
                 cols_filtered = await _apply_ai_filter(pool, req, cols)
+                # Values are taken by position: two result columns can share a
+                # name (a self-join) and a name-keyed dict kept only the last.
+                keep = _kept_indexes(cols, cols_filtered)
                 cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
                 tbl = req.table or "exported_data"
                 tbl_q = _target_table_sql(req.database, tbl, req.include_schema)
@@ -230,14 +370,12 @@ async def _export_response(session_id: str, req: ExportRequest):
                 buf = io.StringIO()
                 if req.insert_mode == "single":
                     while True:
-                        rows = await cur.fetchmany(fetch_size)
+                        rows = await _next_batch(cur, fetch_size, deadline, exported)
                         if not rows:
                             break
+                        exported += len(rows)
                         for row in rows:
-                            row_dict = dict(zip(cols, row))
-                            vals = ", ".join(
-                                escape_value(row_dict[c]) for c in cols_filtered
-                            )
+                            vals = ", ".join(escape_value(row[i]) for i in keep)
                             buf.write(
                                 f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
                             )
@@ -248,18 +386,16 @@ async def _export_response(session_id: str, req: ExportRequest):
                 else:
                     rows_in_statement = 0
                     while True:
-                        rows = await cur.fetchmany(fetch_size)
+                        rows = await _next_batch(cur, fetch_size, deadline, exported)
                         if not rows:
                             break
+                        exported += len(rows)
                         for row in rows:
                             if rows_in_statement == 0:
                                 buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
                             else:
                                 buf.write(",\n")
-                            row_dict = dict(zip(cols, row))
-                            vals = ", ".join(
-                                escape_value(row_dict[c]) for c in cols_filtered
-                            )
+                            vals = ", ".join(escape_value(row[i]) for i in keep)
                             buf.write(f"({vals})")
                             rows_in_statement += 1
                             if rows_in_statement == req.batch_size:
@@ -273,8 +409,11 @@ async def _export_response(session_id: str, req: ExportRequest):
                         buf.write(";\n")
                 if buf.tell():
                     yield buf.getvalue()
+                yield _completion_marker(exported)
 
     async def _generate_delete():
+        exported = 0
+        deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
                 await cur.execute(f"USE {quote_ident(req.database)}")
@@ -296,14 +435,12 @@ async def _export_response(session_id: str, req: ExportRequest):
                 yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE\n\n"
                 buf = io.StringIO()
                 while True:
-                    rows = await cur.fetchmany(fetch_size)
+                    rows = await _next_batch(cur, fetch_size, deadline, exported)
                     if not rows:
                         break
+                    exported += len(rows)
                     for row in rows:
-                        row_dict = dict(zip(cols, row))
-                        where = " AND ".join(
-                            _where_value(c, row_dict[c]) for c in where_cols
-                        )
+                        where = _where_clause(cols, row, where_cols)
                         buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
                         if buf.tell() >= _EXPORT_STREAM_CHARS:
                             yield buf.getvalue()
@@ -311,8 +448,11 @@ async def _export_response(session_id: str, req: ExportRequest):
                             buf.truncate(0)
                 if buf.tell():
                     yield buf.getvalue()
+                yield _completion_marker(exported)
 
     async def _generate_delete_insert():
+        exported = 0
+        deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
         async with pool.acquire() as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
                 await cur.execute(f"USE {quote_ident(req.database)}")
@@ -330,6 +470,7 @@ async def _export_response(session_id: str, req: ExportRequest):
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
                 cols_filtered = await _apply_ai_filter(pool, req, cols)
+                keep = _kept_indexes(cols, cols_filtered)
                 cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
                 where_cols = pk_cols if pk_cols else cols
 
@@ -337,17 +478,13 @@ async def _export_response(session_id: str, req: ExportRequest):
                 if req.insert_mode == "single":
                     buf = io.StringIO()
                     while True:
-                        rows = await cur.fetchmany(fetch_size)
+                        rows = await _next_batch(cur, fetch_size, deadline, exported)
                         if not rows:
                             break
+                        exported += len(rows)
                         for row in rows:
-                            row_dict = dict(zip(cols, row))
-                            where = " AND ".join(
-                                _where_value(c, row_dict[c]) for c in where_cols
-                            )
-                            vals = ", ".join(
-                                escape_value(row_dict[c]) for c in cols_filtered
-                            )
+                            where = _where_clause(cols, row, where_cols)
+                            vals = ", ".join(escape_value(row[i]) for i in keep)
                             buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
                             buf.write(
                                 f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
@@ -360,27 +497,25 @@ async def _export_response(session_id: str, req: ExportRequest):
                         yield buf.getvalue()
                 else:
                     while True:
-                        rows = await cur.fetchmany(fetch_size)
+                        rows = await _next_batch(cur, fetch_size, deadline, exported)
                         if not rows:
                             break
+                        exported += len(rows)
                         buf = io.StringIO()
                         for row in rows:
-                            row_dict = dict(zip(cols, row))
-                            where = " AND ".join(
-                                _where_value(c, row_dict[c]) for c in where_cols
-                            )
+                            where = _where_clause(cols, row, where_cols)
                             buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
                         buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
                         for index, row in enumerate(rows):
-                            row_dict = dict(zip(cols, row))
-                            vals = ", ".join(
-                                escape_value(row_dict[c]) for c in cols_filtered
-                            )
+                            vals = ", ".join(escape_value(row[i]) for i in keep)
                             buf.write((",\n" if index else "") + f"({vals})")
                         buf.write(";\n")
                         yield buf.getvalue()
+                yield _completion_marker(exported)
 
     async def _generate_csv():
+        exported = 0
+        deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
         writer_kwargs: dict = {
             "delimiter": req.csv_delimiter,
             "lineterminator": req.csv_lineterminator,
@@ -407,22 +542,20 @@ async def _export_response(session_id: str, req: ExportRequest):
                 await cur.execute(select_sql)
                 cols = [d[0] for d in cur.description]
                 cols_filtered = await _apply_ai_filter(pool, req, cols)
+                keep = _kept_indexes(cols, cols_filtered)
                 if req.csv_encoding == "utf-8-sig":
                     yield b"\xef\xbb\xbf"
 
                 buf = io.StringIO()
                 writer = csv.writer(buf, **writer_kwargs)
-                writer.writerow(cols_filtered)
+                writer.writerow(_csv_neutralize(c) for c in cols_filtered)
                 while True:
-                    rows = await cur.fetchmany(fetch_size)
+                    rows = await _next_batch(cur, fetch_size, deadline, exported)
                     if not rows:
                         break
+                    exported += len(rows)
                     for row in rows:
-                        row_dict = dict(zip(cols, row))
-                        writer.writerow(
-                            "" if row_dict[c] is None else row_dict[c]
-                            for c in cols_filtered
-                        )
+                        writer.writerow(_csv_cell(row[i]) for i in keep)
                         if buf.tell() >= _EXPORT_STREAM_CHARS:
                             yield buf.getvalue().encode(byte_enc, errors=enc_errors)
                             buf.seek(0)

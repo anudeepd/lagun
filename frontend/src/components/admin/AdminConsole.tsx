@@ -83,6 +83,10 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
   const [queries, setQueries] = useState<AdminQuery[]>([])
   const [presence, setPresence] = useState<AdminPresence[]>([])
   const [activityFilters, setActivityFilters] = useState<AdminActivityFilters>({})
+  // Keyset cursor for the audit list: the newest id of the last page, or null
+  // when the page was the final one.
+  const [activityCursor, setActivityCursor] = useState<number | null>(null)
+  const [loadingOlderActivity, setLoadingOlderActivity] = useState(false)
   const [retention, setRetention] = useState<AdminRetention | null>(null)
   const [retentionDays, setRetentionDays] = useState(DEFAULT_RETENTION_DAYS)
   const [loading, setLoading] = useState(true)
@@ -120,6 +124,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       setUsers(userData.items)
       setUserPolicyFingerprint(userData.fingerprint)
       setActivity(activityData.items)
+      setActivityCursor(activityData.next_before_id ?? null)
       setRetention(retentionData)
       setQueries(queryData.items)
       setPresence(presenceData.items)
@@ -141,6 +146,26 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     filtersRef.current = filters
     setActivityFilters(filters)
     void refresh(filters)
+  }
+
+  /**
+   * Read the next page of audit history with the keyset cursor. The list used to
+   * stop at the newest 100 events, which made older ones unreachable from the UI
+   * even though retention keeps them for years.
+   */
+  const loadOlderActivity = async () => {
+    if (activityCursor === null || loadingOlderActivity) return
+    setLoadingOlderActivity(true)
+    setError(null)
+    try {
+      const page = await api.getAdminActivity(filtersRef.current, activityCursor)
+      setActivity(previous => [...previous, ...page.items])
+      setActivityCursor(page.next_before_id ?? null)
+    } catch (cause) {
+      setError(requestError(cause))
+    } finally {
+      setLoadingOlderActivity(false)
+    }
   }
 
   const purge = async () => {
@@ -202,8 +227,8 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
         <section className="w-full max-w-md rounded-lg border border-surface-800 bg-surface-900 p-6 text-center" aria-labelledby="admin-access-title">
           <Shield className="mx-auto mb-3 h-7 w-7 text-brand-400" />
           <h1 id="admin-access-title" className="text-base font-semibold">Admin access required</h1>
-          <p className="mt-2 whitespace-pre-line text-sm text-slate-500">{error.message}</p>
-          <a className="mt-5 inline-flex min-h-10 items-center rounded-md bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" href={`/_auth/login?next=${encodeURIComponent('/admin')}`}>Authenticate</a>
+          <p className="mt-2 whitespace-pre-line text-sm text-muted">{error.message}</p>
+          <a className="mt-5 inline-flex min-h-10 items-center rounded-md bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" href={`/_auth/login?next=${encodeURIComponent('/admin')}`}>Authenticate</a>
         </section>
       </div>
     )
@@ -218,19 +243,19 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     >
       <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 px-4 sm:px-5">
         {onClose && (
-          <button type="button" onClick={onClose} className="lagun-icon-button rounded-md p-1.5 text-slate-500 hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" aria-label="Back to workspace">
+          <button type="button" onClick={onClose} className="lagun-icon-button rounded-md p-1.5 text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" aria-label="Back to workspace">
             <ArrowLeft className="h-4 w-4" />
           </button>
         )}
         <Shield className="h-4 w-4 text-brand-400" />
         <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold">Admin console</h1>
-          <p className="hidden text-[11px] text-slate-500 sm:block">Connection inventory, live workspaces, and query audit</p>
+          <p className="hidden text-[11px] text-muted sm:block">Connection inventory, live workspaces, and query audit</p>
         </div>
-        <span className="hidden text-[11px] text-slate-500 sm:inline" aria-live="polite">
+        <span className="sr-only text-[11px] text-muted sm:not-sr-only" aria-live="polite">
           {lastUpdated ? `Updated ${age(lastUpdated / 1000)}` : 'Loading'}
         </span>
-        <button type="button" onClick={() => void refresh()} disabled={loading} className="lagun-interactive flex min-h-9 items-center gap-1.5 rounded-md border border-surface-700 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200 disabled:opacity-50">
+        <button type="button" onClick={() => void refresh()} disabled={loading} className="lagun-interactive flex min-h-9 items-center gap-1.5 rounded-md border border-surface-700 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50">
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Refresh</span>
         </button>
@@ -238,20 +263,20 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
 
       <div className="flex min-h-0 flex-1">
         <nav className="hidden w-56 shrink-0 border-r border-surface-800 bg-surface-900 p-3 sm:block" aria-label="Admin views">
-          <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-widest text-slate-600">Control plane</p>
+          <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted">Control plane</p>
           {views.map(([key, Icon, label]) => (
-            <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => selectView(key)} className={`lagun-interactive mb-1 flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-slate-500 hover:bg-surface-800 hover:text-slate-300'}`}>
+            <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => selectView(key)} className={`lagun-interactive mb-1 flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-muted hover:bg-surface-800 hover:text-slate-300'}`}>
               <Icon className="h-3.5 w-3.5" /> {label}
             </button>
           ))}
-          <div className="mt-6 rounded-md border border-surface-800 bg-surface-950/60 p-3 text-[11px] leading-relaxed text-slate-600">LDAP and connections.yaml remain source of truth for access policy. This console never reveals stored database passwords.</div>
+          <div className="mt-6 rounded-md border border-surface-800 bg-surface-950/60 p-3 text-[11px] leading-relaxed text-muted">LDAP and connections.yaml remain source of truth for access policy. This console never reveals stored database passwords.</div>
         </nav>
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6" aria-live="polite">
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
           <div className="mx-auto max-w-6xl">
             <div className="mb-4 flex flex-wrap gap-1 sm:hidden" role="tablist" aria-label="Admin views">
               {views.map(([key, , label]) => (
-                <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => selectView(key)} className={`min-h-10 rounded-md px-3 py-1.5 text-xs transition-colors ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-slate-500 hover:bg-surface-800'}`}>{label}</button>
+                <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => selectView(key)} className={`min-h-10 rounded-md px-3 py-1.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-muted hover:bg-surface-800'}`}>{label}</button>
               ))}
             </div>
             {notice && <div className="mb-3 flex items-center gap-2 rounded-md border border-green-900/50 bg-green-950/30 px-3 py-2 text-xs text-green-300" role="status"><Shield className="h-3.5 w-3.5" /> {notice}</div>}
@@ -262,7 +287,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
                 {view === 'live' && <LiveWorkspacePanel presence={presence} queries={queries} connections={connections} />}
                 {view === 'connections' && <ConnectionsPanel connections={connections} presence={presence} />}
                 {view === 'users' && <UsersPanel users={users} onAdd={addUser} onRequestRemove={setConfirmRemoveUser} busyUsername={userAction} />}
-                {view === 'activity' && <ActivityPanel events={activity} filters={activityFilters} onApply={applyActivityFilters} />}
+                {view === 'activity' && <ActivityPanel events={activity} filters={activityFilters} onApply={applyActivityFilters} onLoadOlder={loadOlderActivity} hasOlder={activityCursor !== null} loadingOlder={loadingOlderActivity} />}
                 {view === 'retention' && <RetentionPanel retention={retention} days={retentionDays} onDaysChange={setRetentionDays} onRefresh={() => void refresh()} onPurge={() => setConfirmPurge(true)} />}
               </m.div>
             </AnimatePresence>
@@ -303,12 +328,18 @@ function UsersPanel({
   busyUsername: string | null
 }) {
   const [username, setUsername] = useState('')
+  const [usernameError, setUsernameError] = useState('')
   const allowedCount = users.filter(user => user.policy_state === 'allowed').length
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
+    if (busyUsername) return
     const value = username.trim()
-    if (!value || busyUsername) return
+    if (!value) {
+      setUsernameError('Enter an LDAP username.')
+      return
+    }
+    setUsernameError('')
     await onAdd(value)
     setUsername('')
   }
@@ -319,35 +350,45 @@ function UsersPanel({
         <div>
           <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Access policy / live</p>
           <h2 id="users-title" className="text-xl font-semibold tracking-tight text-slate-100">Users &amp; policy</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">Manage LDAP users allowed to sign in. Changes are written atomically and apply without restarting Lagun.</p>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">Manage LDAP users allowed to sign in. Changes are written atomically and apply without restarting Lagun.</p>
         </div>
         <span className="rounded-full border border-brand-800/60 bg-brand-950/20 px-2.5 py-1 text-[11px] font-mono text-brand-300">{allowedCount} allowed</span>
       </div>
 
       <form onSubmit={submit} className="mb-4 rounded-lg border border-surface-800 bg-surface-900 p-4" aria-label="Add LDAP user">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="min-w-0 flex-1 text-xs text-slate-400">
-            LDAP username
-            <input
-              value={username}
-              onChange={event => setUsername(event.target.value)}
-              placeholder="e.g. analyst"
-              autoComplete="off"
-              className="mt-1.5 min-h-10 w-full rounded-md border border-surface-700 bg-surface-950 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-700 focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-            />
-          </label>
-          <button type="submit" disabled={!username.trim() || Boolean(busyUsername)} className="min-h-10 rounded-md bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-50">
+          <div className="min-w-0 flex-1">
+            <label className="block text-xs text-slate-400">
+              LDAP username
+              <input
+                id="admin-username"
+                name="username"
+                value={username}
+                onChange={event => {
+                  setUsername(event.target.value)
+                  if (usernameError) setUsernameError('')
+                }}
+                placeholder="e.g. analyst"
+                autoComplete="off"
+                aria-invalid={usernameError ? true : undefined}
+                aria-describedby={usernameError ? 'admin-username-error' : undefined}
+                className={`mt-1.5 min-h-10 w-full rounded-md border bg-surface-950 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-700 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 ${usernameError ? 'border-red-500' : 'border-surface-700'}`}
+              />
+            </label>
+            {usernameError && <p id="admin-username-error" role="alert" className="mt-1.5 text-[11px] text-red-400">{usernameError}</p>}
+          </div>
+          <button type="submit" disabled={Boolean(busyUsername)} className="min-h-10 rounded-md bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-50">
             {busyUsername ? 'Applying…' : 'Allow user'}
           </button>
         </div>
-        <p className="mt-2 text-[11px] text-slate-600">User must also exist in LDAP. Existing sessions are not changed when access is added.</p>
+        <p className="mt-2 text-[11px] text-muted">User must also exist in LDAP. Existing sessions are not changed when access is added.</p>
       </form>
 
       <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">LDAP access policy and live workspace activity</caption>
           <colgroup><col className="w-[32%]" /><col className="w-[18%]" /><col className="w-[16%]" /><col className="w-[14%]" /><col className="w-[20%]" /></colgroup>
-          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600">
+          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted">
             <tr>
               <th scope="col" className="px-4 py-2">User</th>
               <th scope="col" className="px-4 py-2">Policy</th>
@@ -361,7 +402,7 @@ function UsersPanel({
               <tr key={user.username} className="border-b border-surface-800/70 last:border-0">
                 <td className="align-top break-words px-4 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
                 <td className="align-top px-4 py-3">
-                  <span className={`rounded-full px-2 py-1 text-[10px] ${user.policy_state === 'allowed' ? 'bg-green-950/40 text-green-300' : 'bg-slate-800 text-slate-500'}`}>
+                  <span className={`rounded-full px-2 py-1 text-[10px] ${user.policy_state === 'allowed' ? 'bg-green-950/40 text-green-300' : 'bg-slate-800 text-muted'}`}>
                     {user.policy_state === 'allowed' ? 'Allowed' : 'Observed only'}
                   </span>
                 </td>
@@ -369,14 +410,14 @@ function UsersPanel({
                 <td className="align-top px-4 py-3 font-mono tabular-nums text-slate-400">{user.active_tabs}</td>
                 <td className="align-top px-4 py-3 text-right">
                   {user.policy_state === 'allowed' && (
-                    <button type="button" disabled={Boolean(busyUsername)} onClick={() => onRequestRemove(user.username)} className="min-h-8 rounded border border-red-900/60 px-2.5 py-1.5 text-[11px] text-red-300 hover:bg-red-950/40 disabled:opacity-50">
+                    <button type="button" disabled={Boolean(busyUsername)} onClick={() => onRequestRemove(user.username)} className="min-h-8 rounded border border-red-900/60 px-2.5 py-1.5 text-[11px] text-red-300 hover:bg-red-950/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50">
                       {busyUsername === user.username ? 'Applying…' : 'Remove'}
                     </button>
                   )}
                 </td>
               </tr>
             ))}
-            {users.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-xs text-slate-600">No users in LDAP access policy.</td></tr>}
+            {users.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-xs text-muted">No users in LDAP access policy.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -401,34 +442,34 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
         <div>
           <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Operations</p>
           <h2 id="overview-title" className="text-xl font-semibold tracking-tight text-slate-100">Workspace overview</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">See which connection profiles exist, who has workspaces open, and which queries are running now.</p>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">See which connection profiles exist, who has workspaces open, and which queries are running now.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onViewLive} className="min-h-9 rounded border border-brand-800/60 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-brand-950/40">Open live view</button>
-          <span className="rounded-full border border-surface-700 px-2.5 py-1 text-[11px] font-mono text-slate-500">LDAP protected</span>
+          <button type="button" onClick={onViewLive} className="min-h-9 rounded border border-brand-800/60 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-brand-950/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">Open live view</button>
+          <span className="rounded-full border border-surface-700 px-2.5 py-1 text-[11px] font-mono text-muted">LDAP protected</span>
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map(([label, value, hint]) => (
-          <article key={label} className="flex min-h-28 flex-col rounded-lg border border-surface-800 bg-gradient-to-br from-surface-800/90 to-surface-900 p-4 shadow-lg shadow-black/10">
-            <span className="text-xs text-slate-500">{label}</span>
+          <article key={label} className="flex min-h-28 flex-col rounded-lg border border-surface-800 bg-surface-900 p-4 shadow-lg shadow-black/10">
+            <span className="text-xs text-muted">{label}</span>
             <strong className="mt-auto font-mono text-2xl font-semibold tabular-nums tracking-tight text-slate-100">{value}</strong>
-            <small className="mt-2 text-[11px] leading-snug text-slate-600">{hint}</small>
+            <small className="mt-2 text-[11px] leading-snug text-muted">{hint}</small>
           </article>
         ))}
       </div>
       <div className="relative mt-4 max-h-[24rem] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <div className="flex items-center justify-between gap-3 border-b border-surface-800 px-4 py-3">
-          <div><h3 className="text-sm font-semibold">Connection posture</h3><p className="mt-1 text-xs text-slate-600">Managed profiles are read-only here; edit connections.yaml and restart Lagun.</p></div>
-          <button type="button" onClick={onViewConnections} className="min-h-9 shrink-0 rounded border border-surface-700 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-surface-800">View all</button>
+          <div><h3 className="text-sm font-semibold">Connection posture</h3><p className="mt-1 text-xs text-muted">Managed profiles are read-only here; edit connections.yaml and restart Lagun.</p></div>
+          <button type="button" onClick={onViewConnections} className="min-h-9 shrink-0 rounded border border-surface-700 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">View all</button>
         </div>
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Connection posture preview</caption>
           <colgroup><col className="w-[36%]" /><col className="w-[14%]" /><col className="w-[28%]" /><col className="w-[22%]" /></colgroup>
-        <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-4 py-2">Connection</th><th scope="col" className="px-4 py-2">Type</th><th scope="col" className="px-4 py-2">Access</th><th scope="col" className="px-4 py-2">Scope</th></tr></thead>
+        <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-4 py-2">Connection</th><th scope="col" className="px-4 py-2">Type</th><th scope="col" className="px-4 py-2">Access</th><th scope="col" className="px-4 py-2">Scope</th></tr></thead>
           <tbody>
             {connections.slice(0, 5).map(connection => <ConnectionRow key={connection.id} connection={connection} />)}
-            {connections.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-slate-600">No saved connections.</td></tr>}
+            {connections.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-muted">No saved connections.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -439,11 +480,11 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
 function ConnectionRow({ connection }: { connection: AdminConnection }) {
   return (
     <tr className="border-b border-surface-800/70 last:border-0">
-      <td className="align-top break-words px-4 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
+      <td className="align-top break-words px-4 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
       <td className="align-top break-words px-4 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
 
       <td className="align-top break-words px-4 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
-      <td className="align-top break-words px-4 py-3 text-slate-500 [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
+      <td className="align-top break-words px-4 py-3 text-muted [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
     </tr>
   )
 }
@@ -475,7 +516,7 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
         <div>
           <p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Realtime / 45s TTL</p>
           <h2 id="live-title" className="text-xl font-semibold tracking-tight text-slate-100">Live workspace</h2>
-          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">Choose a user to inspect connected sessions, open tabs, and queries running now.</p>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">Choose a user to inspect connected sessions, open tabs, and queries running now.</p>
         </div>
         <span className="rounded-full border border-green-900/60 bg-green-950/20 px-2.5 py-1 text-[11px] font-mono text-green-300">{presence.length} client{presence.length === 1 ? '' : 's'} online</span>
       </div>
@@ -490,7 +531,7 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
         <section className="rounded-lg border border-surface-800 bg-surface-900" aria-labelledby="users-title">
           <div className="border-b border-surface-800 px-4 py-3">
             <h3 id="users-title" className="text-sm font-semibold">Users online</h3>
-            <p className="mt-1 text-xs text-slate-600">Select a user for workspace details.</p>
+            <p className="mt-1 text-xs text-muted">Select a user for workspace details.</p>
           </div>
           <div className="divide-y divide-surface-800/70">
             {liveUsers.map(username => {
@@ -510,11 +551,11 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                     <strong className="break-words text-sm [overflow-wrap:anywhere]">{username}</strong>
                     {userQueries > 0 && <span className="rounded-full bg-amber-950/50 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">{userQueries} running</span>}
                   </span>
-                  <span className="mt-1 block text-[10px] text-slate-600">{userSessions} session{userSessions === 1 ? '' : 's'} · {userTabs} tab{userTabs === 1 ? '' : 's'}</span>
+                  <span className="mt-1 block text-[10px] text-muted">{userSessions} session{userSessions === 1 ? '' : 's'} · {userTabs} tab{userTabs === 1 ? '' : 's'}</span>
                 </button>
               )
             })}
-            {liveUsers.length === 0 && <p className="px-4 py-10 text-center text-xs text-slate-600">No active users.</p>}
+            {liveUsers.length === 0 && <p className="px-4 py-10 text-center text-xs text-muted">No active users.</p>}
           </div>
         </section>
 
@@ -522,7 +563,7 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
           <section className="rounded-lg border border-surface-800 bg-surface-900" aria-labelledby="presence-title">
             <div className="border-b border-surface-800 px-4 py-3">
               <h3 id="presence-title" className="text-sm font-semibold">{activeUser ? `${activeUser}'s sessions and tabs` : 'Sessions and tabs'}</h3>
-              <p className="mt-1 text-xs text-slate-600">Connected session identity and current browser tabs.</p>
+              <p className="mt-1 text-xs text-muted">Connected session identity and current browser tabs.</p>
             </div>
             <div className="divide-y divide-surface-800/70">
               {[...sessionTabs.entries()].map(([sessionId, tabs]) => {
@@ -535,9 +576,9 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <strong className="block break-words text-sm text-slate-200 [overflow-wrap:anywhere]">{connection?.name || sessionId}</strong>
-                          <p className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection ? `${connection.host}:${connection.port} · ${connection.username}` : sessionId}</p>
+                          <p className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection ? `${connection.host}:${connection.port} · ${connection.username}` : sessionId}</p>
                         </div>
-                        <span className="shrink-0 font-mono text-[10px] text-slate-600">{tabs.length} tab{tabs.length === 1 ? '' : 's'}</span>
+                        <span className="shrink-0 font-mono text-[10px] text-muted">{tabs.length} tab{tabs.length === 1 ? '' : 's'}</span>
                       </div>
                     </div>
                     <ul className="grid gap-1.5 px-4 pb-3" aria-label={`${connection?.name || sessionId} tabs`}>
@@ -554,7 +595,7 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                             else next.add(sessionId)
                             return next
                           })}
-                          className="inline-flex min-h-8 items-center rounded px-1.5 text-[10px] text-brand-300 hover:bg-surface-800 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                          className="inline-flex min-h-8 items-center rounded px-1.5 text-[10px] text-brand-300 hover:bg-surface-800 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                         >
                           {isExpanded ? 'Show fewer tabs' : `Show all ${tabs.length} tabs`}
                         </button>
@@ -563,15 +604,15 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                   </div>
                 )
               })}
-              {activeUser && sessionTabs.size === 0 && <p className="px-4 py-10 text-center text-xs text-slate-600">No open tabs currently reported.</p>}
-              {!activeUser && <p className="px-4 py-10 text-center text-xs text-slate-600">Select a user to inspect their workspace.</p>}
+              {activeUser && sessionTabs.size === 0 && <p className="px-4 py-10 text-center text-xs text-muted">No open tabs currently reported.</p>}
+              {!activeUser && <p className="px-4 py-10 text-center text-xs text-muted">Select a user to inspect their workspace.</p>}
             </div>
           </section>
 
           <section className="rounded-lg border border-surface-800 bg-surface-900" aria-labelledby="queries-title">
             <div className="border-b border-surface-800 px-4 py-3">
               <h3 id="queries-title" className="text-sm font-semibold">{activeUser ? `${activeUser}'s active queries` : 'Active queries'}</h3>
-              <p className="mt-1 text-xs text-slate-600">Complete SQL is shown while it is running, including literals and multi-statement text.</p>
+              <p className="mt-1 text-xs text-muted">Complete SQL is shown while it is running, including literals and multi-statement text.</p>
             </div>
             <div className="divide-y divide-surface-800/70">
               {selectedQueries.map(item => {
@@ -579,10 +620,10 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                 const isLargeQuery = sql.length > LIVE_QUERY_COLLAPSE_THRESHOLD
                 return (
                   <article key={`${item.session_id}-${item.execution_id}`} className="px-4 py-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><span className={`h-2 w-2 shrink-0 rounded-full ${item.state === 'running' ? 'bg-amber-400' : 'bg-slate-500'}`} aria-hidden="true" /><span className="break-words text-[10px] text-slate-600 [overflow-wrap:anywhere]">{item.kind} · {item.state}</span></div><span className="shrink-0 font-mono text-[10px] text-slate-500">{formatDuration(item.elapsed_ms)}</span></div>
+                    <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-2"><span className={`h-2 w-2 shrink-0 rounded-full ${item.state === 'running' ? 'bg-amber-400' : 'bg-slate-500'}`} aria-hidden="true" /><span className="break-words text-[10px] text-muted [overflow-wrap:anywhere]">{item.kind} · {item.state}</span></div><span className="shrink-0 font-mono text-[10px] text-muted">{formatDuration(item.elapsed_ms)}</span></div>
                     {isLargeQuery ? (
                       <>
-                        <p className="mt-2 line-clamp-2 rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-500">{sql.slice(0, 200)}…</p>
+                        <p className="mt-2 line-clamp-2 rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-muted">{sql.slice(0, 200)}…</p>
                         <details className="mt-2">
                           <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200">Show full SQL ({sql.length} characters)</summary>
                           <pre className="mt-2 max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-400 [overflow-wrap:anywhere]">{sql}</pre>
@@ -591,12 +632,12 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                     ) : (
                       <pre className="mt-2 max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-400 [overflow-wrap:anywhere]">{sql}</pre>
                     )}
-                    <p className="mt-1 break-words text-[10px] text-slate-600 [overflow-wrap:anywhere]">{item.session_name || item.session_id}{item.database ? ` · ${item.database}` : ''}{item.tab_id ? ` · tab ${item.tab_id}` : ''}</p>
+                    <p className="mt-1 break-words text-[10px] text-muted [overflow-wrap:anywhere]">{item.session_name || item.session_id}{item.database ? ` · ${item.database}` : ''}{item.tab_id ? ` · tab ${item.tab_id}` : ''}</p>
                   </article>
                 )
               })}
-              {activeUser && selectedQueries.length === 0 && <p className="px-4 py-10 text-center text-xs text-slate-600">No active queries for this user.</p>}
-              {!activeUser && <p className="px-4 py-10 text-center text-xs text-slate-600">Select a user to inspect running queries.</p>}
+              {activeUser && selectedQueries.length === 0 && <p className="px-4 py-10 text-center text-xs text-muted">No active queries for this user.</p>}
+              {!activeUser && <p className="px-4 py-10 text-center text-xs text-muted">Select a user to inspect running queries.</p>}
             </div>
           </section>
         </div>
@@ -613,8 +654,8 @@ function LivePresenceTab({ tab, active, defaultDatabase }: { tab: AdminPresence[
 
   return (
     <li className="min-w-0 rounded border border-surface-800 bg-surface-950/50 px-2.5 py-2 text-[11px] text-slate-400">
-      <div className="flex min-w-0 items-start gap-1.5"><PanelsTopLeft className="mt-0.5 h-3 w-3 shrink-0 text-slate-600" /><span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{tab.label}</span>{active && <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-brand-300">active</span>}</div>
-      <div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{tab.database || defaultDatabase || 'No database'}{tab.table ? ` · ${tab.table}` : ''}{isTable ? ` · ${viewLabel}` : ''}</div>
+      <div className="flex min-w-0 items-start gap-1.5"><PanelsTopLeft className="mt-0.5 h-3 w-3 shrink-0 text-muted" /><span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{tab.label}</span>{active && <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-brand-300">active</span>}</div>
+      <div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{tab.database || defaultDatabase || 'No database'}{tab.table ? ` · ${tab.table}` : ''}{isTable ? ` · ${viewLabel}` : ''}</div>
       {isTable && (tab.global_search || tab.where_filter) && (
         <div className="mt-2 grid min-w-0 gap-1.5 border-t border-surface-800/80 pt-2">
           {tab.global_search && <div className="min-w-0"><span className="text-[9px] font-semibold uppercase tracking-wider text-brand-400">Partial match</span><code className="ml-2 break-words font-mono text-[10px] text-slate-300 [overflow-wrap:anywhere]">{tab.global_search}</code></div>}
@@ -626,19 +667,19 @@ function LivePresenceTab({ tab, active, defaultDatabase }: { tab: AdminPresence[
 }
 
 function LiveMetric({ icon: Icon, label, value }: { icon: typeof Users; label: string; value: number }) {
-  return <article className="flex items-center gap-3 rounded-lg border border-surface-800 bg-surface-900 p-4"><Icon className="h-4 w-4 text-brand-400" /><div><div className="font-mono text-xl font-semibold tabular-nums text-slate-100">{value}</div><div className="text-[11px] text-slate-600">{label}</div></div></article>
+  return <article className="flex items-center gap-3 rounded-lg border border-surface-800 bg-surface-900 p-4"><Icon className="h-4 w-4 text-brand-400" /><div><div className="font-mono text-xl font-semibold tabular-nums text-slate-100">{value}</div><div className="text-[11px] text-muted">{label}</div></div></article>
 }
 
 function ConnectionsPanel({ connections, presence }: { connections: AdminConnection[]; presence: AdminPresence[] }) {
   const [expandedTabLists, setExpandedTabLists] = useState<Set<string>>(new Set())
   return (
     <section aria-labelledby="connections-title">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-slate-500">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner.</p></div>
+      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-muted">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner.</p></div>
       <div id="connection-inventory-table" className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Saved connection inventory and active users</caption>
           <colgroup><col className="w-[25%]" /><col className="w-[17%]" /><col className="w-[12%]" /><col className="w-[15%]" /><col className="w-[16%]" /><col className="w-[15%]" /></colgroup>
-          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Owner / access</th><th scope="col" className="px-3 py-2">Database identity</th><th scope="col" className="px-3 py-2">Scope</th><th scope="col" className="px-3 py-2">Connected users / tabs</th><th scope="col" className="px-3 py-2">Updated</th></tr></thead>
+          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Owner / access</th><th scope="col" className="px-3 py-2">Database identity</th><th scope="col" className="px-3 py-2">Scope</th><th scope="col" className="px-3 py-2">Connected users / tabs</th><th scope="col" className="px-3 py-2">Updated</th></tr></thead>
           <tbody>
             {connections.map(connection => {
               const activeUsers = new Map<string, string[]>()
@@ -648,8 +689,8 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
               })
               return (
                 <tr key={connection.id} className="border-b border-surface-800/70 last:border-0">
-                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-slate-600 [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
-                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-slate-600 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
+                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
+                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-muted [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
                   <td className="align-top break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
                   <td className="align-top break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
                   <td className="align-top px-3 py-3">
@@ -661,9 +702,9 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
                           const visibleLabels = isExpanded ? labels : labels.slice(0, CONNECTION_TAB_PREVIEW_LIMIT)
                           return (
                             <div key={username} className="min-w-0">
-                              <div className="font-medium text-slate-300">{username} <span className="font-mono text-[10px] text-slate-600">· {labels.length} tab{labels.length === 1 ? '' : 's'}</span></div>
+                              <div className="font-medium text-slate-300">{username} <span className="font-mono text-[10px] text-muted">· {labels.length} tab{labels.length === 1 ? '' : 's'}</span></div>
                               <ul className="mt-1 grid min-w-0 gap-0.5 pl-2" aria-label={`${username} tabs`}>
-                                {visibleLabels.map((label, index) => <li key={`${username}-${index}`} className="break-words text-[10px] leading-relaxed text-slate-600 [overflow-wrap:anywhere]">{label}</li>)}
+                                {visibleLabels.map((label, index) => <li key={`${username}-${index}`} className="break-words text-[10px] leading-relaxed text-muted [overflow-wrap:anywhere]">{label}</li>)}
                               </ul>
                               {labels.length > CONNECTION_TAB_PREVIEW_LIMIT && (
                                 <button
@@ -675,7 +716,7 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
                                     else next.add(tabListKey)
                                     return next
                                   })}
-                                  className="mt-1 inline-flex min-h-8 items-center rounded px-1.5 text-[10px] text-brand-300 hover:bg-surface-800 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  className="mt-1 inline-flex min-h-8 items-center rounded px-1.5 text-[10px] text-brand-300 hover:bg-surface-800 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                                 >
                                   {isExpanded ? 'Show fewer tabs' : `Show all ${labels.length} tabs`}
                                 </button>
@@ -684,13 +725,13 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
                           )
                         })}
                       </div>
-                    ) : <span className="text-slate-600">No active users</span>}
+                    ) : <span className="text-muted">No active users</span>}
                   </td>
-                  <td className="align-top break-words px-3 py-3 text-slate-500 [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
+                  <td className="align-top break-words px-3 py-3 text-muted [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
                 </tr>
               )
             })}
-            {connections.length === 0 && <tr><td colSpan={6} className="px-3 py-12 text-center text-slate-600">No saved connections.</td></tr>}
+            {connections.length === 0 && <tr><td colSpan={6} className="px-3 py-12 text-center text-muted">No saved connections.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -698,7 +739,7 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
   )
 }
 
-function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEvent[]; filters: AdminActivityFilters; onApply: (filters: AdminActivityFilters) => void }) {
+function ActivityPanel({ events, filters, onApply, onLoadOlder, hasOlder, loadingOlder }: { events: AdminActivityEvent[]; filters: AdminActivityFilters; onApply: (filters: AdminActivityFilters) => void; onLoadOlder: () => void; hasOlder: boolean; loadingOlder: boolean }) {
   const [username, setUsername] = useState(filters.username || '')
   const [path, setPath] = useState(filters.path || '')
   const [search, setSearch] = useState(filters.search || '')
@@ -735,7 +776,7 @@ function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEven
 
   return (
     <section aria-labelledby="activity-title">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Audit trail</p><h2 id="activity-title" className="text-xl font-semibold tracking-tight">Query &amp; API audit</h2><p className="mt-1 text-sm leading-relaxed text-slate-500">Request targets include query parameters. Search performs a case-insensitive partial match across user, method, path, SQL, filters, and raw JSON. Press Enter to apply.</p></div>
+      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Audit trail</p><h2 id="activity-title" className="text-xl font-semibold tracking-tight">Query &amp; API audit</h2><p className="mt-1 text-pretty text-sm leading-relaxed text-muted">Request targets include query parameters. Search performs a case-insensitive partial match across user, method, path, SQL, filters, and raw JSON. Press Enter to apply. The list loads the <strong className="font-medium text-slate-300">latest 100</strong> matching events; use <strong className="font-medium text-slate-300">Load 100 older</strong> to page further back through the same filters, or narrow the filters first.</p></div>
       <form onSubmit={submit} onKeyDown={submitOnEnter} className="mb-4 grid gap-2 rounded-lg border border-surface-800 bg-surface-900 p-3 sm:grid-cols-2 xl:grid-cols-[0.9fr_1.15fr_1.4fr_0.8fr_0.6fr_auto] xl:items-end">
         <FilterInput id="admin-activity-user" label="User contains" value={username} onChange={setUsername} placeholder="ali" />
         <FilterInput id="admin-activity-path" label="Path contains" value={path} onChange={setPath} placeholder="/sessions" />
@@ -748,13 +789,25 @@ function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEven
         <table className="block w-full table-fixed text-left text-xs lg:table">
           <caption className="sr-only">Lagun API audit events with raw request targets and bodies</caption>
           <colgroup className="hidden lg:table-column-group"><col className="w-44" /><col className="w-36" /><col /><col className="w-20" /><col className="w-24" /></colgroup>
-          <thead className="hidden sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-slate-600 lg:table-header-group"><tr><th scope="col" className="px-3 py-2">When</th><th scope="col" className="px-3 py-2">Actor</th><th scope="col" className="px-3 py-2">Request</th><th scope="col" className="px-3 py-2">Status</th><th scope="col" className="px-3 py-2 text-right">Duration</th></tr></thead>
+          <thead className="hidden sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted lg:table-header-group"><tr><th scope="col" className="px-3 py-2">When</th><th scope="col" className="px-3 py-2">Actor</th><th scope="col" className="px-3 py-2">Request</th><th scope="col" className="px-3 py-2">Status</th><th scope="col" className="px-3 py-2 text-right">Duration</th></tr></thead>
           <tbody className="block lg:table-row-group">
             {events.map(event => <ActivityEventRow key={`${event.occurred_at}-${event.path}-${event.duration_ms}`} event={event} />)}
-            {events.length === 0 && <tr className="block lg:table-row"><td colSpan={5} className="block px-3 py-12 text-center text-slate-600 lg:table-cell">No matching audit events.</td></tr>}
+            {events.length === 0 && <tr className="block lg:table-row"><td colSpan={5} className="block px-3 py-12 text-center text-muted lg:table-cell">No matching audit events.</td></tr>}
           </tbody>
         </table>
       </div>
+      {hasOlder && (
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={onLoadOlder}
+            disabled={loadingOlder}
+            className="min-h-10 rounded border border-surface-700 px-4 py-2 text-xs text-slate-300 hover:bg-surface-800 hover:text-slate-100 disabled:opacity-60"
+          >
+            {loadingOlder ? 'Loading…' : 'Load 100 older'}
+          </button>
+        </div>
+      )}
     </section>
   )
 }
@@ -762,26 +815,26 @@ function ActivityPanel({ events, filters, onApply }: { events: AdminActivityEven
 function ActivityEventRow({ event }: { event: AdminActivityEvent }) {
   return (
     <tr className="block border-b border-surface-800/70 px-3 py-3 last:border-0 lg:table-row lg:px-0 lg:py-0">
-      <td className="flex justify-between gap-3 py-1 text-slate-500 lg:table-cell lg:px-3 lg:py-3 lg:align-top lg:whitespace-nowrap"><span className="text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">When</span><span>{formatDate(event.occurred_at)}</span></td>
-      <td className="flex min-w-0 justify-between gap-3 py-1 font-medium text-slate-200 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] font-normal uppercase tracking-wider text-slate-600 lg:hidden">Actor</span><span className="break-words [overflow-wrap:anywhere]">{event.username}</span></td>
+      <td className="flex justify-between gap-3 py-1 text-muted lg:table-cell lg:px-3 lg:py-3 lg:align-top lg:whitespace-nowrap"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">When</span><span>{formatDate(event.occurred_at)}</span></td>
+      <td className="flex min-w-0 justify-between gap-3 py-1 font-medium text-slate-200 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] font-normal uppercase tracking-wider text-muted lg:hidden">Actor</span><span className="break-words [overflow-wrap:anywhere]">{event.username}</span></td>
       <td className="block min-w-0 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top">
-        <span className="mb-1 block text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">Request</span>
+        <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted lg:hidden">Request</span>
         <div className="break-words font-mono text-[11px] leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{event.method} {event.path}</div>
         {event.details && (
           <details className="mt-2 min-w-0">
-            <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">Show raw request body ({event.details.length} characters)</summary>
+            <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">Show raw request body ({event.details.length} characters)</summary>
             <pre tabIndex={0} aria-label={`Raw request body for ${event.method} ${event.path}`} className="mt-2 max-h-[60vh] w-full min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[10px] leading-relaxed text-slate-400 [overflow-wrap:anywhere] lg:max-h-[32rem]">{event.details}</pre>
           </details>
         )}
       </td>
-      <td className="flex justify-between gap-3 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-slate-600 lg:hidden">Status</span><span className={`rounded-full px-2 py-1 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-emerald-950/40 text-emerald-300'}`}>{event.status_code}</span></td>
-      <td className="flex justify-between gap-3 py-1 font-mono text-[10px] text-slate-500 lg:table-cell lg:px-3 lg:py-3 lg:text-right lg:align-top"><span className="font-sans uppercase tracking-wider text-slate-600 lg:hidden">Duration</span><span>{event.duration_ms} ms</span></td>
+      <td className="flex justify-between gap-3 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">Status</span><span className={`rounded-full px-2 py-1 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-emerald-950/40 text-emerald-300'}`}>{event.status_code}</span></td>
+      <td className="flex justify-between gap-3 py-1 font-mono text-[10px] text-muted lg:table-cell lg:px-3 lg:py-3 lg:text-right lg:align-top"><span className="font-sans uppercase tracking-wider text-muted lg:hidden">Duration</span><span>{event.duration_ms} ms</span></td>
     </tr>
   )
 }
 
 function FilterInput({ id, label, value, onChange, placeholder, type = 'search', inputMode }: { id: string; label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: 'search' | 'date'; inputMode?: 'numeric' }) {
-  return <label htmlFor={id} className="flex min-w-0 flex-col gap-1 text-[11px] font-medium text-slate-400">{label}<input id={id} type={type} inputMode={inputMode} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} className="min-h-10 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-700 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30" /></label>
+  return <label htmlFor={id} className="flex min-w-0 flex-col gap-1 text-[11px] font-medium text-slate-400">{label}<input id={id} type={type} inputMode={inputMode} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} className="min-h-10 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-700 focus:border-brand-400 focus:ring-2 focus:ring-brand-400/30" /></label>
 }
 
 function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: { retention: AdminRetention | null; days: number; onDaysChange: (days: number) => void; onRefresh: () => void; onPurge: () => void }) {
@@ -803,7 +856,7 @@ function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: {
 
   return (
     <section aria-labelledby="retention-title" className="max-w-2xl">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Lifecycle</p><h2 id="retention-title" className="text-xl font-semibold tracking-tight">Audit retention</h2><p className="mt-1 text-sm leading-relaxed text-slate-500">Remove old API audit events from Lagun's local SQLite store. Connection profiles and encrypted credentials are not affected.</p></div>
+      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Lifecycle</p><h2 id="retention-title" className="text-xl font-semibold tracking-tight">Audit retention</h2><p className="mt-1 text-sm leading-relaxed text-muted">Remove old API audit events from Lagun's local SQLite store. Connection profiles and encrypted credentials are not affected.</p></div>
       <div className="rounded-lg border border-surface-800 bg-surface-900 p-4 sm:p-5">
         <label htmlFor="admin-retention-days" className="text-xs font-medium text-slate-300">Delete events older than</label>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -823,12 +876,12 @@ function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: {
                 commitDays()
               }
             }}
-            className="min-h-10 w-28 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-sm text-slate-200 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"
+            className="min-h-10 w-28 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-sm text-slate-200 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/30"
           />
-          <span className="text-xs text-slate-500">days</span>
+          <span className="text-xs text-muted">days</span>
           <button type="button" onClick={onRefresh} className="ml-auto min-h-10 rounded border border-surface-700 px-3 py-2 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200">Check eligibility</button>
         </div>
-        <dl className="mt-5 grid gap-3 border-t border-surface-800 pt-4 text-xs sm:grid-cols-3"><div><dt className="text-slate-600">Eligible events</dt><dd className="mt-1 font-mono text-lg text-slate-200">{retention?.eligible_count ?? '—'}</dd></div><div><dt className="text-slate-600">Minimum age</dt><dd className="mt-1 font-mono text-lg text-slate-200">{minimumAge} days</dd></div><div><dt className="text-slate-600">Scope</dt><dd className="mt-1 text-slate-400">Audit events only</dd></div></dl>
+        <dl className="mt-5 grid gap-3 border-t border-surface-800 pt-4 text-xs sm:grid-cols-3"><div><dt className="text-muted">Eligible events</dt><dd className="mt-1 font-mono text-lg text-slate-200">{retention?.eligible_count ?? '—'}</dd></div><div><dt className="text-muted">Minimum age</dt><dd className="mt-1 font-mono text-lg text-slate-200">{minimumAge} days</dd></div><div><dt className="text-muted">Scope</dt><dd className="mt-1 text-slate-400">Audit events only</dd></div></dl>
         <button type="button" disabled={!retention?.eligible_count} onClick={onPurge} className="mt-5 min-h-10 rounded border border-red-900/60 px-3 py-2 text-xs text-red-300 hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-40">Review purge</button>
       </div>
     </section>

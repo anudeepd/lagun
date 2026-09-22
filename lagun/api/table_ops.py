@@ -4,6 +4,7 @@ import time
 
 from fastapi import APIRouter, HTTPException, Query
 
+from lagun.api.scope import require_db_scope
 from lagun.db.pool import get_pool
 from lagun.db.session_store import get_session
 from lagun.db.utils import (
@@ -17,11 +18,14 @@ from lagun.db.utils import (
     format_default_clause,
 )
 from lagun.models.schema import (
-    CreateTableRequest,
-    CreateIndexRequest,
-    SetPrimaryKeyRequest,
     AddColumnRequest,
+    AnalyzeTableResult,
+    CreateIndexRequest,
+    CreateTableRequest,
     ModifyColumnRequest,
+    SetPrimaryKeyRequest,
+    TableDdlResult,
+    TableOperationResult,
 )
 
 router = APIRouter(tags=["table_ops"])
@@ -46,14 +50,16 @@ async def _pool(session_id: str, db: str | None = None):
     s = await get_session(session_id)
     if not s:
         raise HTTPException(404, "Session not found")
-    if db and s.selected_databases and db not in s.selected_databases:
-        raise HTTPException(
-            403, f"Database '{db}' is not in this connection's allowed databases."
-        )
+    require_db_scope(s, db)
     return await get_pool(session_id)
 
 
-@router.post("/sessions/{session_id}/databases/{db}/tables", status_code=201)
+@router.post(
+    "/sessions/{session_id}/databases/{db}/tables",
+    response_model=TableDdlResult,
+    status_code=201,
+    summary="Create a table",
+)
 async def create_table(session_id: str, db: str, req: CreateTableRequest):
     pool = await _pool(session_id, db)
     db_q = quote_ident(db)
@@ -95,7 +101,11 @@ async def create_table(session_id: str, db: str, req: CreateTableRequest):
     return {"ok": True, "sql": sql}
 
 
-@router.delete("/sessions/{session_id}/databases/{db}/tables/{table}")
+@router.delete(
+    "/sessions/{session_id}/databases/{db}/tables/{table}",
+    response_model=TableOperationResult,
+    summary="Drop a table",
+)
 async def drop_table(session_id: str, db: str, table: str):
     pool = await _pool(session_id, db)
     sql = f"DROP TABLE {quote_ident(db)}.{quote_ident(table)}"
@@ -105,7 +115,11 @@ async def drop_table(session_id: str, db: str, table: str):
     return {"ok": True}
 
 
-@router.post("/sessions/{session_id}/databases/{db}/tables/{table}/analyze")
+@router.post(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/analyze",
+    response_model=AnalyzeTableResult,
+    summary="Refresh one table's statistics",
+)
 async def analyze_table(
     session_id: str, db: str, table: str, force: bool = Query(False)
 ) -> dict:
@@ -124,7 +138,10 @@ async def analyze_table(
     key = (session_id, db, table)
     now = time.monotonic()
 
-    if not force and now - _last_analyze.get(key, float("-inf")) < _ANALYZE_THROTTLE_SECONDS:
+    if (
+        not force
+        and now - _last_analyze.get(key, float("-inf")) < _ANALYZE_THROTTLE_SECONDS
+    ):
         analyzed = False
     else:
         async with pool.acquire() as conn:
@@ -136,7 +153,11 @@ async def analyze_table(
                 )
                 row = await cur.fetchone()
                 data_length = row[0] if row else None
-                if not force and data_length is not None and data_length >= _ANALYZE_SIZE_LIMIT_BYTES:
+                if (
+                    not force
+                    and data_length is not None
+                    and data_length >= _ANALYZE_SIZE_LIMIT_BYTES
+                ):
                     analyzed = False
                 else:
                     await cur.execute(f"ANALYZE TABLE {qualified}")
@@ -163,7 +184,11 @@ async def _table_stats(pool, db: str, table: str) -> dict:
     }
 
 
-@router.post("/sessions/{session_id}/databases/{db}/tables/{table}/truncate")
+@router.post(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/truncate",
+    response_model=TableOperationResult,
+    summary="Truncate a table",
+)
 async def truncate_table(session_id: str, db: str, table: str):
     pool = await _pool(session_id, db)
     sql = f"TRUNCATE TABLE {quote_ident(db)}.{quote_ident(table)}"
@@ -174,7 +199,10 @@ async def truncate_table(session_id: str, db: str, table: str):
 
 
 @router.post(
-    "/sessions/{session_id}/databases/{db}/tables/{table}/indexes", status_code=201
+    "/sessions/{session_id}/databases/{db}/tables/{table}/indexes",
+    response_model=TableDdlResult,
+    status_code=201,
+    summary="Create an index",
 )
 async def create_index(session_id: str, db: str, table: str, req: CreateIndexRequest):
     pool = await _pool(session_id, db)
@@ -191,7 +219,9 @@ async def create_index(session_id: str, db: str, table: str, req: CreateIndexReq
 
 
 @router.delete(
-    "/sessions/{session_id}/databases/{db}/tables/{table}/indexes/{index_name}"
+    "/sessions/{session_id}/databases/{db}/tables/{table}/indexes/{index_name}",
+    response_model=TableOperationResult,
+    summary="Drop an index",
 )
 async def drop_index(session_id: str, db: str, table: str, index_name: str):
     pool = await _pool(session_id, db)
@@ -203,7 +233,10 @@ async def drop_index(session_id: str, db: str, table: str, index_name: str):
 
 
 @router.post(
-    "/sessions/{session_id}/databases/{db}/tables/{table}/primary-key", status_code=201
+    "/sessions/{session_id}/databases/{db}/tables/{table}/primary-key",
+    response_model=TableDdlResult,
+    status_code=201,
+    summary="Set the primary key",
 )
 async def set_primary_key(
     session_id: str, db: str, table: str, req: SetPrimaryKeyRequest
@@ -238,7 +271,11 @@ async def set_primary_key(
     return {"ok": True, "sql": sql}
 
 
-@router.delete("/sessions/{session_id}/databases/{db}/tables/{table}/primary-key")
+@router.delete(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/primary-key",
+    response_model=TableDdlResult,
+    summary="Drop the primary key",
+)
 async def drop_primary_key(session_id: str, db: str, table: str):
     pool = await _pool(session_id, db)
     sql = f"ALTER TABLE {quote_ident(db)}.{quote_ident(table)} DROP PRIMARY KEY"
@@ -249,7 +286,10 @@ async def drop_primary_key(session_id: str, db: str, table: str):
 
 
 @router.post(
-    "/sessions/{session_id}/databases/{db}/tables/{table}/columns", status_code=201
+    "/sessions/{session_id}/databases/{db}/tables/{table}/columns",
+    response_model=TableDdlResult,
+    status_code=201,
+    summary="Add a column",
 )
 async def add_column(session_id: str, db: str, table: str, req: AddColumnRequest):
     pool = await _pool(session_id, db)
@@ -268,7 +308,11 @@ async def add_column(session_id: str, db: str, table: str, req: AddColumnRequest
     return {"ok": True, "sql": sql}
 
 
-@router.put("/sessions/{session_id}/databases/{db}/tables/{table}/columns/{column}")
+@router.put(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/columns/{column}",
+    response_model=TableDdlResult,
+    summary="Modify a column",
+)
 async def modify_column(
     session_id: str, db: str, table: str, column: str, req: ModifyColumnRequest
 ):
@@ -302,7 +346,11 @@ async def modify_column(
     return {"ok": True, "sql": sql}
 
 
-@router.delete("/sessions/{session_id}/databases/{db}/tables/{table}/columns/{column}")
+@router.delete(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/columns/{column}",
+    response_model=TableOperationResult,
+    summary="Drop a column",
+)
 async def drop_column(session_id: str, db: str, table: str, column: str):
     pool = await _pool(session_id, db)
     sql = (

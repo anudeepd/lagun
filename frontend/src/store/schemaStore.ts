@@ -20,6 +20,10 @@ interface SchemaState {
   // Loading states
   loadingDbs: Set<string>
   loadingTables: Set<string>
+  // Why a database listing failed, per session. A failed listing used to be
+  // swallowed and rendered as an empty tree, which looks identical to a
+  // connection that simply has no schemas.
+  dbErrors: Record<string, string>
 
   loadDatabases: (sessionId: string) => Promise<string[]>
   loadTables: (sessionId: string, db: string) => Promise<TableInfo[]>
@@ -36,6 +40,7 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
   columns: {},
   loadingDbs: new Set(),
   loadingTables: new Set(),
+  dbErrors: {},
 
   loadDatabases: async (sessionId) => {
     const { databases } = get()
@@ -44,13 +49,19 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
 
     set(s => ({ loadingDbs: new Set([...s.loadingDbs, sessionId]) }))
     const promise = api.getDatabases(sessionId).then(dbs => {
-      set(s => ({
-        databases: { ...s.databases, [sessionId]: dbs },
-        loadingDbs: new Set([...s.loadingDbs].filter(x => x !== sessionId)),
-      }))
+      set(s => {
+        const dbErrors = { ...s.dbErrors }
+        delete dbErrors[sessionId]
+        return {
+          databases: { ...s.databases, [sessionId]: dbs },
+          dbErrors,
+          loadingDbs: new Set([...s.loadingDbs].filter(x => x !== sessionId)),
+        }
+      })
       return dbs
-    }).catch(() => {
+    }).catch((error: unknown) => {
       set(s => ({
+        dbErrors: { ...s.dbErrors, [sessionId]: error instanceof Error ? error.message : String(error) },
         loadingDbs: new Set([...s.loadingDbs].filter(x => x !== sessionId)),
       }))
       return [] as string[]
@@ -132,13 +143,15 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
     set(s => {
       const databases = { ...s.databases }
       delete databases[sessionId]
+      const dbErrors = { ...s.dbErrors }
+      delete dbErrors[sessionId]
       const tables = Object.fromEntries(
         Object.entries(s.tables).filter(([k]) => !k.startsWith(`${sessionId}/`))
       )
       const columns = Object.fromEntries(
         Object.entries(s.columns).filter(([k]) => !k.startsWith(`${sessionId}/`))
       )
-      return { databases, tables, columns }
+      return { databases, dbErrors, tables, columns }
     })
   },
 

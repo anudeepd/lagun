@@ -4,6 +4,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
 import * as m from 'motion/react-m'
 import { surfaceTransition } from '../../motion/tokens'
+import Label from './Label'
 
 interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'multiple'> {
   label?: string
@@ -79,7 +80,7 @@ export default function Select({ label, error, className, containerClassName, co
 
   return (
     <div ref={rootRef} className={clsx('flex min-w-0 flex-col gap-1', containerClassName)}>
-      {label && <label htmlFor={controlId} className="text-xs font-medium text-slate-400 uppercase tracking-wide">{label}</label>}
+      {label && <Label htmlFor={controlId}>{label}</Label>}
       <m.button
         id={controlId}
         type="button"
@@ -95,7 +96,7 @@ export default function Select({ label, error, className, containerClassName, co
         className={clsx(
           'lagun-interactive flex w-full items-center justify-between rounded-md border border-surface-700 bg-surface-800 text-left text-slate-100',
           compact ? 'gap-2 px-2 py-0.5 text-xs' : 'gap-3 px-3 py-1.5 text-sm',
-          'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-50',
+          'focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-50',
           error && 'border-red-500', className,
         )}
       >

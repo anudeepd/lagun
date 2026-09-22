@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Pencil, Trash2, Plus, Download, AlertTriangle, Loader2, Copy, Code2, Key } from 'lucide-react'
-import SyntaxHighlighter from 'react-syntax-highlighter'
+// Light build + the one grammar this view needs. The default build imports
+// `lowlight/lib/all` and drags all 195 highlight.js grammars (~900 KB decoded)
+// into this lazy chunk just to colour a CREATE TABLE statement.
+import SyntaxHighlighter from 'react-syntax-highlighter/dist/esm/light'
+import sqlGrammar from 'react-syntax-highlighter/dist/esm/languages/hljs/sql'
 import atomOneDark from 'react-syntax-highlighter/dist/esm/styles/hljs/atom-one-dark'
 import Button from '../ui/Button'
 import RefreshIcon from '../ui/RefreshIcon'
@@ -15,6 +19,8 @@ import PrimaryKeyDialog from './PrimaryKeyDialog'
 import Modal from '../ui/Modal'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { showToast } from '../../utils/toast'
+
+SyntaxHighlighter.registerLanguage('sql', sqlGrammar)
 
 interface Props {
   sessionId: string
@@ -32,7 +38,9 @@ function fmtBytes(bytes: number | null) {
 }
 
 export default function TableSchemaView({ sessionId, database, table, refreshTrigger = 0 }: Props) {
-  const { columns: colCache, loadColumns, invalidateTable } = useSchemaStore()
+  const colCache = useSchemaStore(s => s.columns)
+  const loadColumns = useSchemaStore(s => s.loadColumns)
+  const invalidateTable = useSchemaStore(s => s.invalidateTable)
   const colKey = `${sessionId}/${database}/${table}`
   const cachedCols = colCache[colKey]
 
@@ -56,12 +64,6 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
   const formatSchemaSql = (rawSql: string, tbl: string) => {
     const withIfNotExists = rawSql.replace(/^CREATE TABLE\b/i, 'CREATE TABLE IF NOT EXISTS')
     return `DROP TABLE IF EXISTS \`${tbl}\`;\n${withIfNotExists};`
-  }
-
-  const openSchemaExport = async () => {
-    const { create_sql } = await api.getCreateSql(sessionId, database, table)
-    setCopied(false)
-    setSchemaSql(formatSchemaSql(create_sql, table))
   }
 
   const handleCopy = async () => {
@@ -88,6 +90,18 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
     setTimeout(() => setStatusMsg(null), 3000)
   }, [])
 
+  // `getCreateSql` used to reject out of an async click handler, which left the
+  // Export Schema modal silently unopened.
+  const openSchemaExport = async () => {
+    try {
+      const { create_sql } = await api.getCreateSql(sessionId, database, table)
+      setCopied(false)
+      setSchemaSql(formatSchemaSql(create_sql, table))
+    } catch (error) {
+      flash(`Error loading CREATE statement: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   const reload = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
     try {
@@ -102,14 +116,20 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
       // bust store cache so autocomplete and sidebar see fresh data
       invalidateTable(sessionId, database, table)
       loadColumns(sessionId, database, table)
+    } catch (error) {
+      // Every session/db/table change and every unmount aborts the previous
+      // request; those are expected. A real failure used to leave the tab
+      // looking simply empty, with no error and an unhandled rejection.
+      if (signal?.aborted || (error instanceof DOMException && error.name === 'AbortError')) return
+      flash(`Error loading schema: ${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setLoading(false)
     }
-  }, [sessionId, database, table, invalidateTable, loadColumns])
+  }, [sessionId, database, table, invalidateTable, loadColumns, flash])
 
   useEffect(() => {
     const controller = new AbortController()
-    reload(controller.signal)
+    void reload(controller.signal)
     return () => controller.abort()
   }, [sessionId, database, table, reload])
 
@@ -142,7 +162,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
   useEffect(() => {
     if (refreshTrigger === lastRefreshTriggerRef.current) return
     lastRefreshTriggerRef.current = refreshTrigger
-    reload()
+    void reload()
   }, [refreshTrigger, reload])
 
   const handleTruncate = async () => {
@@ -157,7 +177,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
     try {
       await api.dropColumn(sessionId, database, table, col)
       flash(`Column ${col} dropped.`)
-      reload()
+      void reload()
     } catch (e) { flash(String(e)) }
     setConfirmDropCol(null)
   }
@@ -188,7 +208,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
             <span>~Rows: <span className="text-slate-200">{tableInfo.row_count.toLocaleString()}</span></span>
           )}
           <span>Data: <span className="text-slate-200">{fmtBytes(tableInfo.data_length)}</span></span>
-          {tableInfo.comment && <span className="text-slate-500 italic">{tableInfo.comment}</span>}
+          {tableInfo.comment && <span className="text-muted italic">{tableInfo.comment}</span>}
           <div className="flex-1" />
           <Button
             variant="ghost"
@@ -242,8 +262,8 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
             <tbody>
               {columns.map((col, idx) => (
                 <tr key={col.name} className="border-t border-surface-700 hover:bg-surface-800/50 group">
-                  <td className="sticky left-0 z-[1] bg-surface-900 group-hover:bg-surface-800/50 w-10 text-right px-2 py-1.5 text-slate-500 tabular-nums">{idx + 1}</td>
-                  <td className="sticky left-10 z-[1] bg-surface-900 group-hover:bg-surface-800/50 min-w-[10rem] px-2 py-1.5 font-mono text-slate-200">
+                  <td className="sticky left-0 z-raised bg-surface-900 group-hover:bg-surface-800/50 w-10 text-right px-2 py-1.5 text-muted tabular-nums">{idx + 1}</td>
+                  <td className="sticky left-10 z-raised bg-surface-900 group-hover:bg-surface-800/50 min-w-[10rem] px-2 py-1.5 font-mono text-slate-200">
                     <span className="block truncate max-w-[12rem]" title={col.name}>{col.name}</span>
                   </td>
                   <td className="px-2 py-1.5 text-slate-300 min-w-[8rem]">
@@ -251,18 +271,18 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
                   </td>
                   <td className="px-2 py-1.5 text-slate-400 min-w-[5rem]">{col.is_nullable ? 'YES' : 'NO'}</td>
                   <td className="px-2 py-1.5 text-slate-400 font-mono min-w-[8rem]">
-                    <span className="block truncate max-w-[12rem]" title={col.column_default ?? 'NULL'}>{col.column_default ?? <span className="italic text-slate-600">NULL</span>}</span>
+                    <span className="block truncate max-w-[12rem]" title={col.column_default ?? 'NULL'}>{col.column_default ?? <span className="italic text-muted">NULL</span>}</span>
                   </td>
                   <td className="px-2 py-1.5 text-slate-400 min-w-[4rem]">{col.is_primary_key ? 'PRI' : ''}</td>
                   <td className="px-2 py-1.5 text-slate-400 min-w-[6rem]">{col.extra}</td>
-                  <td className="px-2 py-1.5 text-slate-500 italic min-w-[10rem]">
+                  <td className="px-2 py-1.5 text-muted italic min-w-[10rem]">
                     <span className="block truncate max-w-[16rem]" title={col.comment}>{col.comment}</span>
                   </td>
-                  <td className="sticky right-0 z-[1] bg-surface-900 group-hover:bg-surface-800/50 w-16 px-2 py-1.5">
+                  <td className="sticky right-0 z-raised bg-surface-900 group-hover:bg-surface-800/50 w-16 px-2 py-1.5">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => setEditCol(col)}
-                        className="p-0.5 text-slate-500 hover:text-slate-200 transition-colors"
+                        className="p-0.5 text-muted hover:text-slate-200 transition-colors"
                         title="Edit column"
                       >
                         <Pencil size={11} />
@@ -270,7 +290,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
                       {!col.is_primary_key && (
                         <button
                           onClick={() => setConfirmDropCol(col.name)}
-                          className="p-1 text-slate-500 hover:text-red-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                          className="p-1 text-muted hover:text-red-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                           title={`Drop column ${col.name}`}
                           aria-label={`Drop column ${col.name}`}
                         >
@@ -314,7 +334,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
                     {idx.name !== 'PRIMARY' && (
                       <button
                         onClick={() => setConfirmDropIdx(idx.name)}
-                        className="p-1 text-slate-500 hover:text-red-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                        className="p-1 text-muted hover:text-red-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                         title={`Drop index ${idx.name}`}
                         aria-label={`Drop index ${idx.name}`}
                       >
@@ -326,7 +346,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
               ))}
               {indexes.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-2 py-3 text-center text-slate-600 italic">No indexes</td>
+                  <td colSpan={5} className="px-2 py-3 text-center text-muted italic">No indexes</td>
                 </tr>
               )}
             </tbody>
@@ -363,7 +383,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
 
       <IndexDialog
         open={showAddIndex}
-        onClose={() => { setShowAddIndex(false); reload() }}
+        onClose={() => { setShowAddIndex(false); void reload() }}
         sessionId={sessionId}
         database={database}
         table={table}
@@ -372,7 +392,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
 
       <PrimaryKeyDialog
         open={showManagePK}
-        onClose={() => { setShowManagePK(false); reload() }}
+        onClose={() => { setShowManagePK(false); void reload() }}
         sessionId={sessionId}
         database={database}
         table={table}

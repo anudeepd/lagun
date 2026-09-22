@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
+import Tooltip from '../ui/Tooltip'
 import { Terminal, ChevronUp, Copy, CornerDownLeft, Ban } from 'lucide-react'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import type { QueryLogEntry } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
 import { clipboardWrite } from '../../utils/clipboard'
+import { formatRowCount } from '../../utils/formatRows'
 import * as m from 'motion/react-m'
 import { AnimatePresence } from 'motion/react'
 import { exitTransition, motionDistance, motionDuration, motionEase, surfaceTransition } from '../../motion/tokens'
@@ -25,14 +27,27 @@ function formatRows(entry: QueryLogEntry): string {
     return parts.length > 0 ? parts.join(', ') : `${entry.bulk.statementCount} stmts`
   }
   if (entry.affectedRows != null) return `${entry.affectedRows} affected`
-  if (entry.rowCount != null) return `${entry.rowCount} rows`
+  if (entry.rowCount != null) return formatRowCount(entry.rowCount)
   return '—'
 }
 
 export default function QueryLogPanel() {
   const [expanded, setExpanded] = useState(false)
-  const { entries, clearLog } = useQueryLogStore()
-  const { tabs, activeTabId, injectSqlToTab, openQueryTabWithSql } = useTabStore()
+  const bodyId = useId()
+  const bodyRef = useRef<HTMLDivElement>(null)
+
+  // The body stays mounted so the height animation has something to animate,
+  // but while collapsed it must not be reachable: `aria-hidden` alone leaves its
+  // buttons in the tab order (an aria-hidden-focus violation).
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.inert = !expanded
+  }, [expanded])
+  const entries = useQueryLogStore(s => s.entries)
+  const clearLog = useQueryLogStore(s => s.clearLog)
+  const tabs = useTabStore(s => s.tabs)
+  const activeTabId = useTabStore(s => s.activeTabId)
+  const injectSqlToTab = useTabStore(s => s.injectSqlToTab)
+  const openQueryTabWithSql = useTabStore(s => s.openQueryTabWithSql)
   const activeTab = tabs.find(t => t.id === activeTabId)
   const hasQueryTab = activeTab?.type === 'query'
 
@@ -44,35 +59,48 @@ export default function QueryLogPanel() {
       className="flex-shrink-0 overflow-hidden border-t border-surface-800 bg-surface-950"
     >
       {/* Header bar — always visible */}
-      <div className="flex items-center gap-2 px-3 h-7 cursor-pointer select-none" onClick={() => setExpanded(e => !e)}>
-        <Terminal size={12} className="text-slate-500" />
-        <span className="text-xs text-slate-400 font-medium">Query Log</span>
-        {entries.length > 0 && (
-          <span className="text-xs bg-surface-800 text-slate-400 rounded px-1 py-0.5 leading-none">
-            {entries.length}
-          </span>
-        )}
-        <div className="flex-1" />
+      <div className="flex items-center gap-2 pl-1 pr-3 h-7">
+        <button
+          type="button"
+          onClick={() => setExpanded(e => !e)}
+          aria-expanded={expanded}
+          aria-controls={bodyId}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-0.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+        >
+          <Terminal size={12} className="text-muted" aria-hidden="true" />
+          <span className="text-xs text-slate-400 font-medium">Query Log</span>
+          {entries.length > 0 && (
+            <span className="text-xs bg-surface-800 text-slate-400 rounded px-1 py-0.5 leading-none">
+              {entries.length}
+            </span>
+          )}
+        </button>
         <AnimatePresence initial={false}>
         {expanded && entries.length > 0 && (
           <m.button
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1, transition: surfaceTransition }}
             exit={{ opacity: 0, scale: 0.8, transition: exitTransition }}
-            onClick={e => { e.stopPropagation(); clearLog() }}
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-1"
+            onClick={clearLog}
+            aria-label="Clear query log"
+            className="text-xs text-muted hover:text-slate-300 transition-colors px-1"
           >
             Clear
           </m.button>
         )}
         </AnimatePresence>
-        <m.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: motionDuration.micro }} className="text-slate-500">
+        <m.span aria-hidden="true" animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: motionDuration.micro }} className="text-muted">
           <ChevronUp size={12} />
         </m.span>
       </div>
 
       {/* Log table — visible when expanded */}
-      <div className={`h-[180px] overflow-y-auto ${expanded ? '' : 'pointer-events-none'}`} aria-hidden={!expanded || undefined}>
+      <div
+        id={bodyId}
+        ref={bodyRef}
+        className={`h-[180px] overflow-y-auto ${expanded ? '' : 'pointer-events-none'}`}
+        aria-hidden={!expanded || undefined}
+      >
         <AnimatePresence initial={false} mode="wait">
           {entries.length === 0 ? (
             <m.div
@@ -80,7 +108,7 @@ export default function QueryLogPanel() {
               initial={{ opacity: 0, y: motionDistance.subtle }}
               animate={{ opacity: 1, y: 0, transition: surfaceTransition }}
               exit={{ opacity: 0, transition: exitTransition }}
-              className="flex items-center justify-center h-full text-slate-600 text-xs"
+              className="flex items-center justify-center h-full text-muted text-xs"
             >
               No queries logged yet
             </m.div>
@@ -93,7 +121,7 @@ export default function QueryLogPanel() {
             >
             <table className="w-full text-xs border-collapse">
               <thead className="sticky top-0 bg-surface-900">
-                <tr className="text-slate-500">
+                <tr className="text-muted">
                   <th className="text-left px-2 py-1 font-medium w-16">Time</th>
                   <th className="text-left px-2 py-1 font-medium">SQL</th>
                   <th className="text-left px-2 py-1 font-medium w-24">Rows</th>
@@ -111,13 +139,13 @@ export default function QueryLogPanel() {
                       key={entry.id}
                       className={`border-t border-surface-800 ${entry.error ? 'bg-red-950/30' : entry.cancelled ? 'bg-amber-950/20' : ''}`}
                     >
-                      <td className="px-2 py-0.5 text-slate-500 tabular-nums whitespace-nowrap">{formatTime(entry.timestamp)}</td>
+                      <td className="px-2 py-0.5 text-muted tabular-nums whitespace-nowrap">{formatTime(entry.timestamp)}</td>
                       <td className="px-2 py-0.5 font-mono text-slate-300 w-full break-all">
                         {entry.bulk ? (
                           <span className="text-brand-400">
                             Bulk write script: {entry.bulk.statementCount.toLocaleString()} statements
                             {entry.bulk.operationCounts && (
-                              <span className="text-slate-500 ml-1">
+                              <span className="text-muted ml-1">
                                 ({Object.entries(entry.bulk.operationCounts).map(([op, n]) => `${n} ${op}`).join(', ')})
                               </span>
                             )}
@@ -137,14 +165,18 @@ export default function QueryLogPanel() {
                       </td>
                       <td className="px-2 py-0.5 whitespace-nowrap">
                         <div className="flex items-center gap-1">
+                          <Tooltip label="Copy SQL">
                           <button
                             onClick={() => { if (replaySql) clipboardWrite(replaySql).catch(() => {}) }}
                             disabled={!canReplay}
                             title={canReplay ? 'Copy SQL' : 'Full write script unavailable after reload'}
-                            className="p-0.5 text-slate-600 hover:text-slate-300 transition-colors disabled:opacity-40 disabled:hover:text-slate-600"
+                            aria-label="Copy SQL"
+                            className="lagun-hit-target text-muted hover:text-slate-300 transition-colors disabled:opacity-40 disabled:hover:text-muted"
                           >
-                            <Copy size={10} />
+                            <Copy size={10} aria-hidden="true" />
                           </button>
+                          </Tooltip>
+                          <Tooltip label={hasQueryTab ? 'Load into editor' : 'Open in new query tab'}>
                           <button
                             onClick={() => {
                               if (!replaySql) return
@@ -156,10 +188,12 @@ export default function QueryLogPanel() {
                             }}
                             disabled={!canReplay}
                             title={canReplay ? (hasQueryTab ? 'Load into editor' : 'Open in new query tab') : 'Full write script unavailable after reload'}
-                            className="p-0.5 text-slate-600 hover:text-brand-400 transition-colors disabled:opacity-40 disabled:hover:text-slate-600"
+                            aria-label={hasQueryTab ? 'Load into editor' : 'Open in new query tab'}
+                            className="lagun-hit-target text-muted hover:text-brand-400 transition-colors disabled:opacity-40 disabled:hover:text-muted"
                           >
-                            <CornerDownLeft size={10} />
+                            <CornerDownLeft size={10} aria-hidden="true" />
                           </button>
+                          </Tooltip>
                         </div>
                       </td>
                     </tr>

@@ -3,6 +3,8 @@ import { Upload, Loader2, CheckCircle } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
+import Label from '../ui/Label'
+import { LoadingState } from '../ui/Spinner'
 import { api } from '../../api/client'
 import { useSessionStore } from '../../store/sessionStore'
 
@@ -73,48 +75,60 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
             {result.imported} connection{result.imported !== 1 ? 's' : ''} imported
             {result.skipped > 0 ? `, ${result.skipped} skipped` : ''}.
           </p>
+          {result.skipped > 0 && (
+            <p className="text-xs text-muted text-center">
+              Skipped entries duplicate a connection that already exists or are invalid — nothing
+              was overwritten or re-created.
+            </p>
+          )}
         </div>
       ) : (
-        <fieldset disabled={loading} className="flex flex-col gap-4">
-          <p className="text-xs text-slate-400">
-            Select a Lagun export file (.json) to restore saved connections.
-          </p>
-          <div>
-            <label htmlFor="config-import-file" className="text-xs font-medium text-slate-400 uppercase tracking-wide block mb-1">
-              Export file
-            </label>
-            <input
-              id="config-import-file"
-              type="file"
-              accept=".json,application/json"
-              onChange={e => {
-                const selected = e.target.files?.[0] ?? null
-                if (selected && selected.size > 5 * 1024 * 1024) {
-                  setFile(null)
-                  setError('Export file exceeds 5 MB limit.')
-                  e.target.value = ''
-                  return
-                }
-                setFile(selected)
-                setError(null)
-              }}
-              className="text-sm text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0
-                         file:text-xs file:font-medium file:bg-surface-700 file:text-slate-200
-                         hover:file:bg-surface-600 cursor-pointer"
+        <>
+          {/* Outside the disabled fieldset so the announcement is not inside an
+              inert group, and single, because the footer button spins but keeps
+              its "Import" label. */}
+          {loading && <LoadingState label="Importing connections…" compact className="sr-only" />}
+          <fieldset disabled={loading} aria-busy={loading} className="flex flex-col gap-4">
+            <p className="text-xs text-slate-400">
+              Select a Lagun export file (.json) to restore saved connections.
+            </p>
+            <div>
+              <Label htmlFor="config-import-file" className="block mb-1">
+                Export file
+              </Label>
+              <input
+                id="config-import-file"
+                type="file"
+                accept=".json,application/json"
+                onChange={e => {
+                  const selected = e.target.files?.[0] ?? null
+                  if (selected && selected.size > 5 * 1024 * 1024) {
+                    setFile(null)
+                    setError('Export file exceeds 5 MB limit.')
+                    e.target.value = ''
+                    return
+                  }
+                  setFile(selected)
+                  setError(null)
+                }}
+                className="text-sm text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0
+                           file:text-xs file:font-medium file:bg-surface-700 file:text-slate-200
+                           hover:file:bg-surface-600 cursor-pointer"
+              />
+            </div>
+            <Input
+              label="Passphrase"
+              type="password"
+              value={passphrase}
+              onChange={e => setPassphrase(e.target.value)}
+              placeholder="Passphrase used during export"
+              autoComplete="current-password"
+              disabled={loading}
+              onKeyDown={e => e.key === 'Enter' && !loading && handleImport()}
             />
-          </div>
-          <Input
-            label="Passphrase"
-            type="password"
-            value={passphrase}
-            onChange={e => setPassphrase(e.target.value)}
-            placeholder="Passphrase used during export"
-            autoComplete="current-password"
-            disabled={loading}
-            onKeyDown={e => e.key === 'Enter' && !loading && handleImport()}
-          />
-          {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
-        </fieldset>
+            {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+          </fieldset>
+        </>
       )}
     </Modal>
   )

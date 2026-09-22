@@ -4,6 +4,7 @@ import Button from '../ui/Button'
 import Input from '../ui/Input'
 import Select from '../ui/Select'
 import { api } from '../../api/client'
+import Label from '../ui/Label'
 
 interface Props {
   open: boolean
@@ -39,7 +40,7 @@ export default function IndexDialog({ open, onClose, sessionId, database, table,
       await api.createIndex(sessionId, database, table, {
         name,
         columns: selectedCols,
-        is_unique: unique,
+        unique,
         index_type: indexType,
       })
       onClose()
@@ -69,7 +70,7 @@ export default function IndexDialog({ open, onClose, sessionId, database, table,
         <Input label="Index Name" value={name} onChange={e => setName(e.target.value)} placeholder="idx_column" />
 
         <div>
-          <label className="text-xs font-medium text-slate-400 uppercase tracking-wide">Columns</label>
+          <Label as="span">Columns</Label>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {columns.map(col => (
               <button

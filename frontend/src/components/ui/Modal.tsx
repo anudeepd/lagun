@@ -15,6 +15,12 @@ interface ModalProps {
   width?: string
   initialFocusRef?: RefObject<HTMLElement>
   restoreFocus?: boolean
+  /** Destructive/irreversible confirmations: `role="alertdialog"` so assistive
+      tech announces the prompt immediately instead of as a plain dialog. */
+  alert?: boolean
+  /** id of the element describing the dialog's consequence, linked with
+      `aria-describedby`. */
+  descriptionId?: string
 }
 
 const FOCUSABLE_SELECTORS = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
@@ -24,7 +30,7 @@ interface ModalShellProps extends Omit<ModalProps, 'open' | 'restoreFocus'> {
   titleId: string
 }
 
-const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShell({ onClose, title, children, footer, width = 'max-w-lg', dialogRef, titleId }, presenceRef) {
+const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShell({ onClose, title, children, footer, width = 'max-w-lg', dialogRef, titleId, alert, descriptionId }, presenceRef) {
   const isPresent = useIsPresent()
 
   useEffect(() => {
@@ -34,25 +40,29 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
   return (
     <m.div
       ref={presenceRef}
-      className={`fixed inset-0 z-modal flex items-center justify-center p-4 ${isPresent ? '' : 'pointer-events-none'}`}
+      className={`fixed inset-0 z-modal flex items-center justify-center lagun-safe-area ${isPresent ? '' : 'pointer-events-none'}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1, transition: spatialTransition }}
       exit={{ opacity: 0, transition: exitSpring }}
       aria-hidden={!isPresent || undefined}
     >
+      {/* Full-viewport backdrop: only the fade animates. The blur lives in a
+          class so it is identical at rest but never interpolated - animating
+          backdrop-filter repaints the entire viewport on every frame. */}
       <m.div
-        initial={{ opacity: 0, backdropFilter: 'blur(0px)' }}
-        animate={{ opacity: 1, backdropFilter: 'blur(5px)', transition: surfaceTransition }}
-        exit={{ opacity: 0, backdropFilter: 'blur(0px)', transition: exitSpring }}
-        className="absolute inset-0 bg-black/60"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1, transition: surfaceTransition }}
+        exit={{ opacity: 0, transition: exitSpring }}
+        className="absolute inset-0 bg-black/60 backdrop-blur-[5px]"
         aria-hidden="true"
         onClick={isPresent ? onClose : undefined}
       />
       <m.div
         ref={dialogRef}
-        role={isPresent ? 'dialog' : undefined}
+        role={isPresent ? (alert ? 'alertdialog' : 'dialog') : undefined}
         aria-modal={isPresent ? 'true' : undefined}
         aria-labelledby={isPresent ? titleId : undefined}
+        aria-describedby={isPresent ? descriptionId : undefined}
         tabIndex={isPresent ? -1 : undefined}
         initial={{ opacity: 0, y: motionDistance.subtle, scale: 0.96, rotateX: -1 }}
         animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0, transition: { ...spatialTransition, delay: 0.05 } }}
@@ -60,7 +70,7 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
         className={`relative flex max-h-[90vh] w-full flex-col rounded-lg border border-surface-700 bg-surface-900 shadow-2xl ${width}`}
       >
         <div className="flex items-center justify-between border-b border-surface-700 px-4 py-3">
-          <h2 id={titleId} className="text-sm font-semibold text-slate-100">{title}</h2>
+          <h2 id={titleId} className="text-balance text-sm font-semibold text-slate-100">{title}</h2>
           <Button variant="ghost" size="sm" onClick={onClose} className="p-1" aria-label="Close dialog" disabled={!isPresent}>
             <X size={14} />
           </Button>
@@ -72,7 +82,7 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
   )
 })
 
-export default function Modal({ open, onClose, title, children, footer, width = 'max-w-lg', initialFocusRef, restoreFocus = true }: ModalProps) {
+export default function Modal({ open, onClose, title, children, footer, width = 'max-w-lg', initialFocusRef, restoreFocus = true, alert, descriptionId }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
   const onCloseRef = useRef(onClose)
@@ -94,8 +104,12 @@ export default function Modal({ open, onClose, title, children, footer, width = 
       if (dialog.contains(document.activeElement)) return
       initialFocusRef?.current?.focus()
       if (!dialog.contains(document.activeElement)) {
-        const focusables = getFocusables()
-        focusables[0]?.focus() ?? dialog.focus()
+        // HTMLElement.focus() returns undefined, so `focusables[0]?.focus() ?? dialog.focus()`
+        // always fell through and moved focus to the dialog container instead of
+        // the first control.
+        const first = getFocusables()[0]
+        if (first) first.focus()
+        else dialog.focus()
       }
     })
 
@@ -149,6 +163,8 @@ export default function Modal({ open, onClose, title, children, footer, width = 
           initialFocusRef={initialFocusRef}
           dialogRef={dialogRef}
           titleId={titleId}
+          alert={alert}
+          descriptionId={descriptionId}
         >
           {children}
         </ModalShell>

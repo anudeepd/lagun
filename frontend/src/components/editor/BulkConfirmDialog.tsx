@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
+import Label from '../ui/Label'
 import type { ScriptQueryValidationResult } from '../../types'
 
 interface BulkConfirmDialogProps {
@@ -59,23 +60,23 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
     >
       <div className="space-y-3 text-sm text-slate-300">
         <div className="bg-surface-800 rounded p-3 space-y-1">
-          <div className="text-xs text-slate-500 uppercase tracking-wide font-medium">Operation mix</div>
+          <Label as="div">Operation mix</Label>
           <div className="flex gap-4">
             {inserts > 0 && <span><span className="text-green-400 font-mono">{inserts.toLocaleString()}</span> INSERT</span>}
             {updates > 0 && <span><span className="text-amber-400 font-mono">{updates.toLocaleString()}</span> UPDATE</span>}
             {deletes > 0 && <span><span className="text-red-400 font-mono">{deletes.toLocaleString()}</span> DELETE</span>}
           </div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-xs text-muted mt-1">
             Total: {total.toLocaleString()} statements — one transaction, all-or-nothing.
           </div>
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-muted">
             Database: <span className="text-slate-300 font-mono">{database || 'selected connection default'}</span>
           </div>
         </div>
 
         {statements.length > 0 && (
           <div className="bg-surface-800 rounded p-3 space-y-2">
-            <div className="text-xs text-slate-500 uppercase tracking-wide font-medium">Statement preview</div>
+            <Label as="div">Statement preview</Label>
             <div className="space-y-1">
               {firstStatements.map((statement, i) => (
                 <pre key={`first-${i}`} className="max-h-20 overflow-auto rounded bg-surface-900 p-2 text-xs text-slate-400 whitespace-pre-wrap break-all">
@@ -83,7 +84,7 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
                 </pre>
               ))}
               {lastStatements.length > 0 && (
-                <div className="text-xs text-slate-600">...</div>
+                <div className="text-xs text-muted">...</div>
               )}
               {lastStatements.map((statement, i) => {
                 const index = statements.length - lastStatements.length + i + 1

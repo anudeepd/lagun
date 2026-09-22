@@ -73,7 +73,7 @@ export default function FilterHistoryDropdown({ history, disabled, activeFilter,
               key={`${filter}-${i}`}
               role="menuitem"
               aria-current={filter === activeFilter || undefined}
-              className={`block w-full truncate px-3 py-1.5 text-left font-mono text-xs hover:bg-surface-800 focus-visible:bg-surface-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-brand-500 ${
+              className={`block w-full truncate px-3 py-1.5 text-left font-mono text-xs hover:bg-surface-800 focus-visible:bg-surface-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-brand-400 ${
                 filter === activeFilter ? 'text-brand-400' : 'text-slate-300'
               }`}
               title={filter}
@@ -105,7 +105,7 @@ export default function FilterHistoryDropdown({ history, disabled, activeFilter,
         className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border transition-colors ${
           open
             ? 'border-brand-800 bg-brand-950 text-brand-400'
-            : 'border-surface-700 text-slate-500 hover:bg-surface-800 hover:text-slate-300'
+            : 'border-surface-700 text-muted hover:bg-surface-800 hover:text-slate-300'
         } disabled:pointer-events-none disabled:opacity-40`}
       >
         <History size={13} />

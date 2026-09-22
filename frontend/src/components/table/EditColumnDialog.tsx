@@ -256,7 +256,7 @@ export default function EditColumnDialog({
         )}
 
         {defaultMode !== 'none' && defaultMode !== 'literal' && (
-          <p className="text-[11px] text-slate-500">
+          <p className="text-[11px] text-muted">
             Expression defaults require compatible column types. UUID() and RAND() may be blocked by statement-based replication.
           </p>
         )}

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from lagun.auth import request_username
+from lagun.models.presence import PresenceAck, PresenceRemovalResult
 
 router = APIRouter(tags=["presence"])
 _PRESENCE_TTL_SECONDS = 45
@@ -52,7 +53,9 @@ def _username(request: Request) -> str:
     return request_username(request) or "local"
 
 
-@router.post("/presence")
+@router.post(
+    "/presence", response_model=PresenceAck, summary="Report a client workspace"
+)
 async def update_presence(payload: PresenceUpdate, request: Request):
     now = time.time()
     username = _username(request)
@@ -69,7 +72,11 @@ async def update_presence(payload: PresenceUpdate, request: Request):
     return {"ok": True, "seen_at": record.seen_at}
 
 
-@router.delete("/presence/{client_id}")
+@router.delete(
+    "/presence/{client_id}",
+    response_model=PresenceRemovalResult,
+    summary="Drop a client workspace",
+)
 async def delete_presence(client_id: str, request: Request):
     async with _lock:
         _records.pop((_username(request), client_id), None)

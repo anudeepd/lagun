@@ -110,4 +110,54 @@ describe('SchemaTree search', () => {
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(requested).toEqual([['app_db', 'analytics']])
   })
+
+  it('announces the schema list while it loads', async () => {
+    let release = () => {}
+    const arrived = new Promise<void>(resolve => { release = resolve })
+
+    server.use(
+      http.get(`${BASE}/sessions/:id/databases`, async () => {
+        await arrived
+        return HttpResponse.json(['app_db'])
+      }),
+    )
+
+    render(<SchemaTree sessionId={SESSION} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Loading databases…'),
+    )
+
+    release()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'app_db' })).toBeInTheDocument())
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('announces the loading schema without renaming its toggle button', async () => {
+    let releaseTables = () => {}
+    const tablesArrived = new Promise<void>(resolve => { releaseTables = resolve })
+
+    server.use(
+      http.get(`${BASE}/sessions/:id/databases/:db/tables`, async () => {
+        await tablesArrived
+        return HttpResponse.json([table('users')])
+      }),
+    )
+
+    render(<SchemaTree sessionId={SESSION} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'app_db' }))
+
+    // The spinner in the row keeps the schema's button name intact, so the
+    // group announces the load once, next to the name it belongs to.
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Loading tables for app_db…'),
+    )
+    expect(screen.getByRole('button', { name: 'app_db' })).toBeInTheDocument()
+
+    releaseTables()
+
+    await waitFor(() => expect(screen.getByText('users')).toBeInTheDocument())
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
 })

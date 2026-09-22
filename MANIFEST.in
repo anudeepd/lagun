@@ -1,0 +1,5 @@
+# The sdist is a source distribution of the Python package, not of the
+# repository: `tests/` needs a MySQL container and `e2e/` needs Playwright plus
+# a built frontend, so neither belongs in a release artifact that pip unpacks.
+prune tests
+prune e2e

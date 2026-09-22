@@ -4,6 +4,7 @@ import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
 import Select from '../ui/Select'
+import Label from '../ui/Label'
 import { api } from '../../api/client'
 
 interface ColDef {
@@ -105,14 +106,14 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
 
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-medium text-slate-400 uppercase tracking-wide">Columns</label>
+            <Label as="span">Columns</Label>
             <Button variant="ghost" size="sm" onClick={() => setCols(prev => [...prev, defaultCol()])}>
               <Plus size={12} /> Add Column
             </Button>
           </div>
 
           <div className="flex flex-col gap-1">
-            <div className="grid grid-cols-12 gap-1 text-xs text-slate-500 px-1 mb-1">
+            <div className="grid grid-cols-12 gap-1 text-xs text-muted px-1 mb-1">
               <span className="col-span-3">Name</span>
               <span className="col-span-4">Type</span>
               <span className="col-span-1 text-center">NULL</span>
@@ -123,7 +124,7 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
             {cols.map((col, i) => (
               <div key={i} className="grid grid-cols-12 gap-1 items-center">
                 <input
-                  className="col-span-3 bg-surface-800 border border-surface-700 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  className="col-span-3 bg-surface-800 border border-surface-700 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-400"
                   value={col.name}
                   onChange={e => updateCol(i, { name: e.target.value })}
                   placeholder="column_name"
@@ -148,7 +149,7 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
                   <input type="checkbox" checked={col.auto_increment} onChange={e => updateCol(i, { auto_increment: e.target.checked })} />
                 </div>
                 <div className="col-span-2 flex justify-end">
-                  <button onClick={() => removeCol(i)} className="p-0.5 text-slate-600 hover:text-red-400">
+                  <button onClick={() => removeCol(i)} className="p-0.5 text-muted hover:text-red-400">
                     <Trash2 size={11} />
                   </button>
                 </div>

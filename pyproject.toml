@@ -4,51 +4,71 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lagun"
-version = "0.1.93"
+version = "0.1.94"
 description = "A web-based MySQL/MariaDB GUI editor"
 readme = "README.md"
-requires-python = ">=3.10"
+# The query runner uses `asyncio.timeout` (lagun/api/query.py), which is 3.11+.
+# Nothing in lagun/ uses a newer API, so 3.11 is the real floor.
+requires-python = ">=3.11"
+# PEP 639 SPDX expression: this is what produces `License-Expression: MIT` in
+# the wheel metadata. Do not also add a `License :: OSI Approved :: MIT License`
+# classifier: setuptools >= 77 raises InvalidConfigError for that combination
+# ("License classifiers have been superseded by license expressions").
 license = "MIT"
 authors = [{ name = "Anudeep Dhavaleswarapu", email = "anudeepd2@gmail.com" }]
 keywords = ["mysql", "mariadb", "gui", "web", "database"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Web Environment",
+    "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Database :: Front-Ends",
+    "Typing :: Typed",
 ]
+# Every entry is a direct API dependency of the app, so the upper bound is a
+# compatible-release ceiling: a new major (or, for cryptography, a jump past
+# the 47.x line) must be adopted deliberately instead of arriving through a
+# fresh `pip install`. The ceilings are honest to uv.lock — each one is at
+# least two minor/major releases above the version the lock resolves.
 dependencies = [
-    "fastapi>=0.111.0",
-    "uvicorn[standard]>=0.29.0",
-    "aiomysql>=0.2.0",
-    "aiosqlite>=0.20.0",
-    "cryptography>=42.0.0",
-    "keyring>=25.0.0",
-    "click>=8.1.0",
-    "pydantic>=2.7.0",
-    "python-multipart>=0.0.9",
-    "PyYAML>=6.0",
+    "fastapi>=0.111.0,<1",
+    "uvicorn>=0.29.0,<1",
+    "aiomysql>=0.2.0,<1",
+    "aiosqlite>=0.20.0,<1",
+    "cryptography>=42.0.0,<48",
+    "keyring>=25.0.0,<26",
+    "click>=8.1.0,<9",
+    "pydantic>=2.7.0,<3",
+    "python-multipart>=0.0.9,<1",
+    "PyYAML>=6.0,<7",
 ]
 
 [project.urls]
 Homepage = "https://github.com/anudeepd/lagun"
 Repository = "https://github.com/anudeepd/lagun"
+Documentation = "https://github.com/anudeepd/lagun/tree/main/docs"
+Changelog = "https://github.com/anudeepd/lagun/blob/main/CHANGELOG.md"
 Issues = "https://github.com/anudeepd/lagun/issues"
 
 [project.scripts]
 lagun = "lagun.cli:main"
 
 [project.optional-dependencies]
+# `uvicorn[standard]` (uvloop, httptools, watchfiles, websockets,
+# python-dotenv, colorama) is dev/`--reload` tooling only: nothing under lagun/
+# imports any of it, and it makes a wheel-less platform need a C/Rust
+# toolchain. The server itself runs on plain uvicorn.
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "httpx>=0.27",
     "ruff>=0.8.0",
     "testcontainers[mysql]>=4.0",
+    "uvicorn[standard]>=0.29.0,<1",
 ]
 ldap = [
     "ldapgate>=0.1.28",
@@ -67,4 +87,6 @@ where = ["."]
 include = ["lagun*"]
 
 [tool.setuptools.package-data]
-lagun = ["static/**/*", "static/*", "templates/*"]
+# `py.typed` is the PEP 561 marker the `Typing :: Typed` classifier claims;
+# without it type checkers ignore the inline annotations.
+lagun = ["static/**/*", "static/*", "templates/*", "py.typed"]

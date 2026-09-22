@@ -173,7 +173,11 @@ def iter_sql_statements(
                 append(ch)
                 if escaped:
                     escaped = False
-                elif ch == "\\":
+                elif ch == "\\" and not in_backtick:
+                    # MySQL does not process backslash escapes inside a
+                    # backtick-quoted identifier, so `dir\` ends at the backtick.
+                    # Treating it as an escape swallowed the closing quote and
+                    # aborted the whole dump import.
                     escaped = True
                 elif ch == quote:
                     if nxt == quote:

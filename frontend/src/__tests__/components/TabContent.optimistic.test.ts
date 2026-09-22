@@ -5,53 +5,19 @@ import type { ColumnInfo, QueryResult, Tab } from '../../types'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import { buildResultGridRowData } from '../../components/editor/ResultGrid'
-import TabContent, { buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, normalizeDataTabState, normalizeTableCellValue, shouldDebounceDataSearch, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
+import TabContent, { applyEditsToRows, buildDuplicateRowDraftValues, buildEmptyRowDraftValues, buildQueryExportContext, buildQueryResultExportData, buildSelectedRowsExportData, buildTableDataExportData, buildTableDataSelectSql, filterDeletedRows, normalizeDataTabState, normalizeTableCellValue, shouldDebounceDataSearch, shouldKeepPreviousResultOnLoad } from '../../components/editor/TabContent'
 
-// ── Helper: filterDeletedRows ──────────────────────────────────────────
-// Standalone replica of the optimistic delete logic from `handleDeleteRows`.
-// Matches rows by primary-key column values (joined with '\x00') against the
-// set of deleted row keys.
-function filterDeletedRows(
+// `applyEditsToRows` matches rows by the same row id the grid publishes, so the
+// fixtures derive their keys through the production row-identity path.
+function editsFor(
   result: QueryResult,
-  deletedRows: Record<string, unknown>[],
-  rowKeyColumns: string[],
-): QueryResult {
-  if (!result) return result
-  const deletedKeys = new Set(
-    deletedRows.map(row => rowKeyColumns.map(pk => String(row[pk])).join('\x00')),
-  )
-  const newRows = result.rows.filter(row => {
-    const key = rowKeyColumns
-      .map(pk => {
-        const colIndex = result.columns.indexOf(pk)
-        return String(row[colIndex])
-      })
-      .join('\x00')
-    return !deletedKeys.has(key)
-  })
-  return { ...result, rows: newRows, row_count: newRows.length }
-}
-
-// ── Helper: applyEditsToRows ────────────────────────────────────────────
-// Standalone replica of the optimistic edit logic from `handleApplyChanges`.
-// Matches rows by index (String(idx)) and applies column-level value changes.
-function applyEditsToRows(
-  result: QueryResult,
-  pendingChanges: Map<string, { changes: Record<string, unknown> }>,
-): QueryResult {
-  if (!result) return result
-  const newRows = result.rows.map((row, idx) => {
-    const rowId = String(idx)
-    const edit = pendingChanges.get(rowId)
-    if (!edit) return row
-    const updatedRow = [...row]
-    for (const [col, newValue] of Object.entries(edit.changes)) {
-      const colIndex = result.columns.indexOf(col)
-      if (colIndex >= 0) updatedRow[colIndex] = newValue
-    }
-    return updatedRow
-  })
-  return { ...result, rows: newRows }
+  primaryKeyColumns: string[],
+  edits: Array<[number, Record<string, unknown>]>,
+): Map<string, { changes: Record<string, unknown> }> {
+  const rows = buildResultGridRowData({ result, primaryKeyColumns })
+  const pending = new Map<string, { changes: Record<string, unknown> }>()
+  for (const [rowIdx, changes] of edits) pending.set(String(rows[rowIdx].__ag_rowId), { changes })
+  return pending
 }
 
 // ── Test fixtures ───────────────────────────────────────────────────────
@@ -120,7 +86,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     ])
     const deleted = [{ id: 2 }]
 
-    const out = filterDeletedRows(result, deleted, pk)
+    const out = filterDeletedRows(result, deleted, pk)!
 
     expect(out.rows).toHaveLength(2)
     expect(out.row_count).toBe(2)
@@ -139,7 +105,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     ])
     const deleted = [{ id: 1 }, { id: 3 }]
 
-    const out = filterDeletedRows(result, deleted, pk)
+    const out = filterDeletedRows(result, deleted, pk)!
 
     expect(out.rows).toHaveLength(2)
     expect(out.row_count).toBe(2)
@@ -156,7 +122,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     ])
     const deleted = [{ id: 1 }, { id: 2 }]
 
-    const out = filterDeletedRows(result, deleted, pk)
+    const out = filterDeletedRows(result, deleted, pk)!
 
     expect(out.rows).toHaveLength(0)
     expect(out.row_count).toBe(0)
@@ -170,7 +136,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     ])
     const deleted = [{ id: 99 }]
 
-    const out = filterDeletedRows(result, deleted, pk)
+    const out = filterDeletedRows(result, deleted, pk)!
 
     expect(out.rows).toHaveLength(2)
     expect(out.row_count).toBe(2)
@@ -187,7 +153,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     ])
     const deleted = [{ id: null }]
 
-    const out = filterDeletedRows(result, deleted, pk)
+    const out = filterDeletedRows(result, deleted, pk)!
 
     expect(out.rows).toHaveLength(1)
     expect(out.row_count).toBe(1)
@@ -203,7 +169,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     const pkCols = ['first', 'last']
     const deleted = [{ first: 'John', last: 'Doe' }]
 
-    const out = filterDeletedRows(result, deleted, pkCols)
+    const out = filterDeletedRows(result, deleted, pkCols)!
 
     expect(out.rows).toHaveLength(2)
     expect(out.row_count).toBe(2)
@@ -223,7 +189,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     // Delete a row where only the `first` column matches — should NOT match any existing row
     const deleted = [{ first: 'John', last: 'Unknown' }]
 
-    const out = filterDeletedRows(result, deleted, pkCols)
+    const out = filterDeletedRows(result, deleted, pkCols)!
 
     expect(out.rows).toHaveLength(3)
     expect(out.row_count).toBe(3)
@@ -233,7 +199,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     const result = makeResult(cols, [[1, 'Alice', 'a@x']], { exec_time_ms: 47 })
     const deleted = [{ id: 1 }]
 
-    const out = filterDeletedRows(result, deleted, pk)
+    const out = filterDeletedRows(result, deleted, pk)!
 
     expect(out.exec_time_ms).toBe(47)
     expect(out.columns).toBe(cols)
@@ -244,7 +210,7 @@ describe('filterDeletedRows — optimistic delete', () => {
       [1, 'Alice', 'a@x'],
       [2, 'Bob', 'b@x'],
     ])
-    const out = filterDeletedRows(result, [], pk)
+    const out = filterDeletedRows(result, [], pk)!
 
     expect(out.rows).toHaveLength(2)
     expect(out.row_count).toBe(2)
@@ -256,7 +222,7 @@ describe('filterDeletedRows — optimistic delete', () => {
     ])
     const deleted = [{ id: 1 }]
 
-    const out = filterDeletedRows(result, deleted, pk)
+    const out = filterDeletedRows(result, deleted, pk)!
 
     expect(out).not.toBe(result)
   })
@@ -531,7 +497,7 @@ describe('data tab search loading', () => {
     const getColumns = vi.spyOn(api, 'getColumns')
     vi.spyOn(api, 'getFunctions').mockResolvedValue([])
     const killQueryExecution = vi.spyOn(api, 'killQueryExecution')
-      .mockResolvedValue({ ok: true })
+      .mockResolvedValue({ ok: true, data: { ok: true } })
     const executeQuery = vi.spyOn(api, 'executeQuery')
       .mockImplementation((_sessionId, _sql, _database, _limit, signal) => (
         new Promise<QueryResult>((_resolve, reject) => {
@@ -582,16 +548,16 @@ describe('data tab search loading', () => {
 
 describe('applyEditsToRows — optimistic edit', () => {
   const cols = ['id', 'name', 'email']
+  const pk = ['id']
 
   it('applies a single edit to one cell', () => {
     const result = makeResult(cols, [
       [1, 'Alice', 'a@x'],
       [2, 'Bob', 'b@x'],
     ])
-    const pending = new Map<string, { changes: Record<string, unknown> }>()
-    pending.set('0', { changes: { name: 'Alicia' } })
+    const pending = editsFor(result, pk, [[0, { name: 'Alicia' }]])
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out.rows).toEqual([
       [1, 'Alicia', 'a@x'],
@@ -604,10 +570,9 @@ describe('applyEditsToRows — optimistic edit', () => {
       [1, 'Alice', 'a@x'],
       [2, 'Bob', 'b@x'],
     ])
-    const pending = new Map<string, { changes: Record<string, unknown> }>()
-    pending.set('0', { changes: { name: 'Alicia', email: 'alicia@x.com' } })
+    const pending = editsFor(result, pk, [[0, { name: 'Alicia', email: 'alicia@x.com' }]])
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out.rows).toEqual([
       [1, 'Alicia', 'alicia@x.com'],
@@ -621,16 +586,53 @@ describe('applyEditsToRows — optimistic edit', () => {
       [2, 'Bob', 'b@x'],
       [3, 'Carol', 'c@x'],
     ])
-    const pending = new Map<string, { changes: Record<string, unknown> }>()
-    pending.set('0', { changes: { name: 'Alicia' } })
-    pending.set('2', { changes: { email: 'carol2@x.com' } })
+    const pending = editsFor(result, pk, [
+      [0, { name: 'Alicia' }],
+      [2, { email: 'carol2@x.com' }],
+    ])
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out.rows).toEqual([
       [1, 'Alicia', 'a@x'],
       [2, 'Bob', 'b@x'],
       [3, 'Carol', 'carol2@x.com'],
+    ])
+  })
+
+  it('matches rows by primary-key identity, not by position', () => {
+    const result = makeResult(cols, [
+      [1, 'Alice', 'a@x'],
+      [2, 'Bob', 'b@x'],
+    ])
+    // Key the edit by the id of the *second* row, then swap the row order: the
+    // edit must follow the row, not the position.
+    const pending = editsFor(result, pk, [[1, { name: 'Bobby' }]])
+    const reordered = makeResult(cols, [
+      [2, 'Bob', 'b@x'],
+      [1, 'Alice', 'a@x'],
+    ])
+
+    const out = applyEditsToRows(reordered, pending, pk, pk)!
+
+    expect(out.rows).toEqual([
+      [2, 'Bobby', 'b@x'],
+      [1, 'Alice', 'a@x'],
+    ])
+  })
+
+  it('falls back to row-index identity when the result has no primary key', () => {
+    const result = makeResult(['name', 'role'], [
+      ['Sam', 'admin'],
+      ['Sam', 'admin'],
+    ])
+    const pending = editsFor(result, [], [[1, { role: 'viewer' }]])
+
+    const out = applyEditsToRows(result, pending, [], [])!
+
+    expect(out.rows).toEqual([
+      ['Sam', 'admin'],
+      ['Sam', 'viewer'],
     ])
   })
 
@@ -641,7 +643,7 @@ describe('applyEditsToRows — optimistic edit', () => {
     ])
     const pending = new Map<string, { changes: Record<string, unknown> }>()
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out.rows).toEqual([
       [1, 'Alice', 'a@x'],
@@ -656,7 +658,7 @@ describe('applyEditsToRows — optimistic edit', () => {
     const pending = new Map<string, { changes: Record<string, unknown> }>()
     pending.set('99', { changes: { name: 'Nope' } })
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out.rows).toEqual([[1, 'Alice', 'a@x']])
   })
@@ -665,10 +667,9 @@ describe('applyEditsToRows — optimistic edit', () => {
     const result = makeResult(cols, [
       [1, 'Alice', 'a@x'],
     ])
-    const pending = new Map<string, { changes: Record<string, unknown> }>()
-    pending.set('0', { changes: { nonexistent_col: 'should not appear' } })
+    const pending = editsFor(result, pk, [[0, { nonexistent_col: 'should not appear' }]])
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     // Row should be unchanged because colIndex was -1
     expect(out.rows).toEqual([[1, 'Alice', 'a@x']])
@@ -676,10 +677,9 @@ describe('applyEditsToRows — optimistic edit', () => {
 
   it('does NOT change row_count', () => {
     const result = makeResult(['id', 'val'], [[1, 'old']])
-    const pending = new Map<string, { changes: Record<string, unknown> }>()
-    pending.set('0', { changes: { val: 'new' } })
+    const pending = editsFor(result, pk, [[0, { val: 'new' }]])
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out.row_count).toBe(1) // same as before
     expect(out.rows).toHaveLength(1)
@@ -687,23 +687,25 @@ describe('applyEditsToRows — optimistic edit', () => {
 
   it('returns new object reference (immutability)', () => {
     const result = makeResult(cols, [[1, 'Alice', 'a@x']])
-    const pending = new Map<string, { changes: Record<string, unknown> }>()
-    pending.set('0', { changes: { name: 'New' } })
+    const pending = editsFor(result, pk, [[0, { name: 'New' }]])
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out).not.toBe(result)
   })
 
   it('preserves exec_time_ms and columns', () => {
     const result = makeResult(cols, [[1, 'Alice', 'a@x']], { exec_time_ms: 99 })
-    const pending = new Map<string, { changes: Record<string, unknown> }>()
-    pending.set('0', { changes: { name: 'Alicia' } })
+    const pending = editsFor(result, pk, [[0, { name: 'Alicia' }]])
 
-    const out = applyEditsToRows(result, pending)
+    const out = applyEditsToRows(result, pending, pk, pk)!
 
     expect(out.exec_time_ms).toBe(99)
     expect(out.columns).toBe(cols)
+  })
+
+  it('leaves a null result untouched', () => {
+    expect(applyEditsToRows(null, new Map(), pk, pk)).toBeNull()
   })
 })
 
