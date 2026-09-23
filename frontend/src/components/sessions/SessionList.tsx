@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Wifi, MoreVertical, Edit, Trash2, Terminal } from 'lucide-react'
 import clsx from 'clsx'
 import { useSessionStore } from '../../store/sessionStore'
@@ -8,6 +8,7 @@ import ConfirmDialog from '../ui/ConfirmDialog'
 import type { Session } from '../../types'
 import { LoadingState } from '../ui/Spinner'
 import Tooltip from '../ui/Tooltip'
+import useMenuKeyboard from '../../hooks/useMenuKeyboard'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, spatialTransition, surfaceTransition } from '../../motion/tokens'
 import { AnimatePresence } from 'motion/react'
@@ -22,6 +23,8 @@ export default function SessionList() {
   const [editSession, setEditSession] = useState<Session | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useMenuKeyboard(menuRef, () => setMenuId(null), Boolean(menuId))
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return
@@ -94,33 +97,37 @@ export default function SessionList() {
               <m.div
                 initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
                 animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
-                exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
-                role="menu"
-                aria-label={`Actions for ${s.name}`}
-                className="absolute right-0 top-6 z-popover w-40 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"
-                onMouseLeave={() => setMenuId(null)}
+                exit={{ opacity: 0, scale: 0.92, y: -motionDistance.surface, transition: exitTransition }}
               >
-                {!s.managed && <button
-                  role="menuitem"
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
-                  onClick={e => { e.stopPropagation(); openQueryTab(s.id); setMenuId(null) }}
+                <div
+                  ref={menuRef}
+                  role="menu"
+                  aria-label={`Actions for ${s.name}`}
+                  className="absolute right-0 top-6 z-popover w-40 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"
+                  onMouseLeave={() => setMenuId(null)}
                 >
-                  <Terminal size={12} aria-hidden="true" /> New Query
-                </button>}
-                <button
-                  role="menuitem"
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
-                  onClick={e => { e.stopPropagation(); setEditSession(s); setMenuId(null) }}
-                >
-                  <Edit size={12} aria-hidden="true" /> Edit
-                </button>
-                <button
-                  role="menuitem"
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-red-400"
-                  onClick={e => { e.stopPropagation(); setDeleteTarget(s); setMenuId(null) }}
-                >
-                  <Trash2 size={12} aria-hidden="true" /> {s.managed ? 'Remove' : 'Delete'}
-                </button>
+                  {!s.managed && <button
+                    role="menuitem"
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                    onClick={e => { e.stopPropagation(); openQueryTab(s.id); setMenuId(null) }}
+                  >
+                    <Terminal size={12} aria-hidden="true" /> New Query
+                  </button>}
+                  <button
+                    role="menuitem"
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                    onClick={e => { e.stopPropagation(); setEditSession(s); setMenuId(null) }}
+                  >
+                    <Edit size={12} aria-hidden="true" /> Edit
+                  </button>
+                  <button
+                    role="menuitem"
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-red-400"
+                    onClick={e => { e.stopPropagation(); setDeleteTarget(s); setMenuId(null) }}
+                  >
+                    <Trash2 size={12} aria-hidden="true" /> {s.managed ? 'Remove' : 'Delete'}
+                  </button>
+                </div>
               </m.div>
             )}
             </AnimatePresence>

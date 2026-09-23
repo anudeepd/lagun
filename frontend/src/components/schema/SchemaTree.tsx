@@ -34,6 +34,15 @@ function useBookmarks(sessionId: string) {
     }
   })
 
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`lagun-bookmarks-${sessionId}`)
+      setBookmarks(new Set(stored ? JSON.parse(stored) : []))
+    } catch {
+      setBookmarks(new Set())
+    }
+  }, [sessionId])
+
   const toggle = (db: string, table: string) => {
     const id = `${db}/${table}`
     const next = new Set(bookmarks)
@@ -168,7 +177,10 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     if (q) filtered = filtered.filter(t => t.name.toLowerCase().includes(q))
     return { db, tbls: filtered }
   }).filter(({ db, tbls }) => {
-    if (showBookmarksOnly) return tbls.length > 0
+    if (showBookmarksOnly) {
+      if (tables[`${sessionId}/${db}`] === undefined) return [...bookmarks].some(bookmark => bookmark.startsWith(`${db}/`))
+      return tbls.length > 0
+    }
     if (!q) return true
     // A schema whose table list has not arrived yet cannot be ruled out as a
     // match. Hiding it would blank the list and drop the schema name the

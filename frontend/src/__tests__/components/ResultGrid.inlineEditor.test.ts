@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { focusTextareaAtEnd, formatResultGridCellValue, placeInlineEditorCaretAtEnd, startInlineCellEditing } from '../../components/editor/ResultGrid'
+import { canSetCellToNull, focusTextareaAtEnd, formatResultGridCellValue, placeInlineEditorCaretAtEnd, startInlineCellEditing } from '../../components/editor/ResultGrid'
+import type { ColumnInfo } from '../../types'
 
 describe('ResultGrid inline editor', () => {
   it('uses AG Grid\'s caret-preserving edit mode instead of a browser-timed correction', () => {
@@ -43,5 +44,15 @@ describe('ResultGrid inline editor', () => {
     expect(input.selectionStart).toBe(input.value.length)
     expect(input.selectionEnd).toBe(input.value.length)
     root.remove()
+  })
+
+  it('allows NULL for auto-increment columns only on insert drafts', () => {
+    const column: ColumnInfo = {
+      name: 'id', data_type: 'int', column_type: 'int', is_nullable: false,
+      column_default: null, is_primary_key: true, is_auto_increment: true, extra: 'auto_increment', comment: '',
+    }
+
+    expect(canSetCellToNull(column, true)).toBe(true)
+    expect(canSetCellToNull(column, false)).toBe(false)
   })
 })

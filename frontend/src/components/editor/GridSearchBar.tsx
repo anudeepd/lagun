@@ -49,7 +49,7 @@ export default function GridSearchBar({
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.85, y: -12, transition: exitTransition }}
       transition={FIND_BAR_SPRING}
-      className="absolute right-2 top-2 z-20 flex items-center gap-1 rounded-xl border border-surface-600 bg-surface-900/95 px-2 py-1.5 shadow-2xl ring-1 ring-brand-400/30 backdrop-blur"
+      className="absolute right-2 top-2 z-20 flex w-[calc(100%-1rem)] max-w-2xl items-center gap-1 overflow-hidden rounded-xl border border-surface-600 bg-surface-900/95 px-2 py-1.5 shadow-2xl ring-1 ring-brand-400/30 backdrop-blur sm:w-auto sm:min-w-[22rem]"
       role="search"
       aria-label="Find in grid"
     >
@@ -73,7 +73,7 @@ export default function GridSearchBar({
           }
         }}
         placeholder="Find in grid"
-        className="h-7 w-44 rounded bg-surface-950 px-2 text-xs text-slate-200 outline-none placeholder:text-muted focus:ring-1 focus:ring-brand-400"
+        className="h-7 min-w-0 flex-1 rounded bg-surface-950 px-2 text-xs text-slate-200 outline-none placeholder:text-muted focus:ring-1 focus:ring-brand-400 sm:w-44 sm:flex-none"
       />
       <span
         aria-live="polite"

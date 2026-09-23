@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import AdminConsole from './components/admin/AdminConsole'
@@ -15,6 +15,9 @@ import { startAuthIdleTimer } from './utils/authIdleTimer'
 
 export default function App() {
   const [isAdminRoute, setIsAdminRoute] = useState(() => window.location.pathname === '/admin')
+  const adminRouteRef = useRef<HTMLDivElement>(null)
+  const workspaceRouteRef = useRef<HTMLDivElement>(null)
+  const adminOpenerRef = useRef<HTMLElement | null>(null)
   const loadSessions = useSessionStore(s => s.loadSessions)
   const loadServerConfig = useServerConfigStore(s => s.load)
   const ldapEnabled = useServerConfigStore(s => s.ldapEnabled)
@@ -54,6 +57,7 @@ export default function App() {
   }), [ldapEnabled, ldapIdleTimeout])
 
   const navigateToAdmin = () => {
+    adminOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     window.history.pushState({}, '', '/admin')
     setIsAdminRoute(true)
   }
@@ -63,6 +67,17 @@ export default function App() {
     setIsAdminRoute(false)
   }
   const routeDirection = isAdminRoute ? 1 : -1
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const activeRoute = isAdminRoute ? adminRouteRef.current : workspaceRouteRef.current
+      for (const route of [adminRouteRef.current, workspaceRouteRef.current]) {
+        if (route) (route as HTMLDivElement & { inert: boolean }).inert = route !== activeRoute
+      }
+      if (!isAdminRoute && adminOpenerRef.current?.isConnected) adminOpenerRef.current.focus()
+      else activeRoute?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [isAdminRoute])
 
   return (
     <>
@@ -75,22 +90,27 @@ export default function App() {
           {isAdminRoute ? (
             <m.div
               key="admin-route"
+              ref={adminRouteRef}
+              tabIndex={-1}
+              aria-label="Admin console route"
               initial={{ opacity: 0, x: routeDirection * 18 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -routeDirection * 18 }}
-              transition={{ ...spatialTransition, opacity: { duration: 0.2 } }}
-              className="absolute inset-0"
+              aria-hidden={!isAdminRoute || undefined}
+              className="absolute inset-0 focus:outline-none"
             >
               <AdminConsole onClose={closeAdmin} />
             </m.div>
           ) : (
             <m.div
-              key="workspace-route"
+              ref={workspaceRouteRef}
+              tabIndex={-1}
+              aria-label="Workspace route"
               initial={{ opacity: 0, x: routeDirection * 18 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -routeDirection * 18 }}
-              transition={{ ...spatialTransition, opacity: { duration: 0.2 } }}
-              className="absolute inset-0"
+              aria-hidden={isAdminRoute || undefined}
+              className="absolute inset-0 focus:outline-none"
             >
               <AppLayout navigateToAdmin={navigateToAdmin} />
             </m.div>

@@ -25,8 +25,8 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
     if (!ref.current) return
     const { width, height } = ref.current.getBoundingClientRect()
     setPos({
-      left: Math.min(x, window.innerWidth - width - 8),
-      top: Math.min(y, window.innerHeight - height - 8),
+      left: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
+      top: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
     })
   }, [x, y])
 

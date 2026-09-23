@@ -1442,7 +1442,18 @@ function TableTab({ tab, active = true }: Props) {
       normalizedDrafts.set(draftId, normalizedValues)
     }
 
-    for (const [, { original, changes }] of normalizedPending) {
+    const remainingPending = new Map(normalizedPending)
+    const remainingDrafts = new Map(normalizedDrafts)
+    const syncPending = (next: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>) => {
+      pendingChangesRef.current = next
+      setPendingChanges(next)
+    }
+    const syncDrafts = (next: Map<string, Record<string, unknown>>) => {
+      insertDraftsRef.current = next
+      setInsertDrafts(next)
+    }
+
+    for (const [rowId, { original, changes }] of normalizedPending) {
       const primary_key: Record<string, unknown> = {}
       rowKeyColumns.forEach(pk => { primary_key[pk] = original[pk] })
       const start = Date.now()
@@ -1468,12 +1479,15 @@ function TableTab({ tab, active = true }: Props) {
         return
       }
       if (r.data.affected_rows === 0) {
-        setStatusMsg(`✗ Update matched 0 rows — the row may have been modified or deleted since it was loaded.`)
+        setStatusMsg('✗ Update matched 0 rows — the row may have been modified or deleted since it was loaded.')
         setTimeout(() => setStatusMsg(null), 6000)
         return
       }
+      remainingPending.delete(rowId)
+      syncPending(new Map(remainingPending))
+      setResult(prev => applyEditsToRows(prev, new Map([[rowId, { original, changes }]]), rowKeyColumns, pkColumns))
     }
-    for (const [, values] of normalizedDrafts) {
+    for (const [draftId, values] of normalizedDrafts) {
       const start = Date.now()
       const r = await api.rowInsert(tab.sessionId, {
         database: tab.database,
@@ -1493,11 +1507,17 @@ function TableTab({ tab, active = true }: Props) {
       if (!r.ok) {
         setStatusMsg(`✗ ${r.error}`)
         setTimeout(() => setStatusMsg(null), 4000)
+        loadData()
         return
       }
+      remainingDrafts.delete(draftId)
+      syncDrafts(new Map(remainingDrafts))
+      setInsertDraftAnchors(previous => {
+        const next = new Map(previous)
+        next.delete(draftId)
+        return next
+      })
     }
-    setPendingChanges(new Map())
-    setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
     if (normalizedDrafts.size > 0) {
       setStatusMsg(`✓ Inserted ${normalizedDrafts.size} row${normalizedDrafts.size !== 1 ? 's' : ''}`)
@@ -1780,17 +1800,17 @@ function TableTab({ tab, active = true }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => requestDeleteRows(selectedRows)}
-              disabled={!(columns.length > 0 && !initialLoading && !refreshing) || selectedRows.length === 0}
+              onClick={() => requestDeleteRows(selectedRows.filter(row => !row.__lagun_insertDraft))}
+              disabled={!(columns.length > 0 && !initialLoading && !refreshing) || selectedRows.every(row => row.__lagun_insertDraft)}
               title={
-                selectedRows.length > 0
-                  ? `Delete ${formatRowCount(selectedRows.length)}`
+                selectedRows.some(row => !row.__lagun_insertDraft)
+                  ? `Delete ${formatRowCount(selectedRows.filter(row => !row.__lagun_insertDraft).length)}`
                   : 'Select rows to delete'
               }
               className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors text-muted hover:text-red-400 disabled:opacity-40 disabled:hover:text-muted"
             >
               <Trash2 size={11} aria-hidden="true" />
-              Delete{selectedRows.length > 0 ? ` ${selectedRows.length}` : ''}
+              Delete{selectedRows.some(row => !row.__lagun_insertDraft) ? ` ${selectedRows.filter(row => !row.__lagun_insertDraft).length}` : ''}
             </button>
           </div>
         )}

@@ -105,7 +105,7 @@ export default function CommandPalette({ open, onClose }: Props) {
             autoFocus
             role="combobox"
             aria-label="Search commands and tabs"
-            aria-expanded={visible.length > 0}
+            aria-expanded={open}
             aria-controls={listboxId}
             aria-activedescendant={activeCommand ? `${listboxId}-option-${activeCommand.id}` : undefined}
             aria-autocomplete="list"

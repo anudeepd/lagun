@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
@@ -48,6 +48,17 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
   const [engine, setEngine] = useState('InnoDB')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const createRequestId = useRef(0)
+
+  useEffect(() => {
+    createRequestId.current += 1
+    if (!open) return
+    setTableName('')
+    setCols([{ name: 'id', type: 'INT', nullable: false, primary_key: true, auto_increment: true }])
+    setEngine('InnoDB')
+    setSaving(false)
+    setError(null)
+  }, [open])
 
   const updateCol = (i: number, patch: Partial<ColDef>) =>
     setCols(prev => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c))
@@ -58,6 +69,7 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
   const handleCreate = async () => {
     if (!tableName) { setError('Table name required'); return }
     if (cols.some(c => !c.name)) { setError('All columns need a name'); return }
+    const requestId = ++createRequestId.current
     setSaving(true)
     setError(null)
     try {
@@ -68,12 +80,13 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
         charset: 'utf8mb4',
         collation: 'utf8mb4_unicode_ci',
       })
+      if (requestId !== createRequestId.current || !open) return
       onCreated()
       onClose()
     } catch (e) {
-      setError(String(e))
+      if (requestId === createRequestId.current) setError(String(e))
     } finally {
-      setSaving(false)
+      if (requestId === createRequestId.current) setSaving(false)
     }
   }
 

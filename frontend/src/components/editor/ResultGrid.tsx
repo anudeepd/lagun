@@ -62,6 +62,10 @@ export function formatResultGridCellValue(value: unknown): string {
   return String(value)
 }
 
+export function canSetCellToNull(column: ColumnInfo | undefined, isInsertDraft: boolean): boolean {
+  return Boolean(column?.is_nullable || (isInsertDraft && column?.is_auto_increment))
+}
+
 export function focusTextareaAtEnd(textarea: HTMLTextAreaElement | null): void {
   if (!textarea) return
   textarea.focus()
@@ -827,7 +831,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           data: menu.rowData,
         }),
       })
-      if (colInfo?.is_nullable) {
+      if (canSetCellToNull(colInfo, Boolean(menu.rowData.__lagun_insertDraft))) {
         items.push({
           type: 'item',
           label: 'Set to NULL',

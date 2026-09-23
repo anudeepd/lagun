@@ -103,9 +103,12 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     return () => window.clearTimeout(timeout)
   }, [notice])
   const filtersRef = useRef<AdminActivityFilters>({})
+  const activityFilterKeyRef = useRef<string | null>(null)
 
   const refresh = useCallback(async (filters: AdminActivityFilters = filtersRef.current) => {
     const generation = ++refreshGeneration.current
+    const filterKey = JSON.stringify(filters)
+    const preserveActivity = activityFilterKeyRef.current === filterKey
     setLoading(true)
     setError(null)
     try {
@@ -119,12 +122,13 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
         api.getAdminPresence(),
       ])
       if (generation !== refreshGeneration.current) return
+      activityFilterKeyRef.current = filterKey
       setOverview(overviewData)
       setConnections(connectionData.items)
       setUsers(userData.items)
       setUserPolicyFingerprint(userData.fingerprint)
-      setActivity(activityData.items)
-      setActivityCursor(activityData.next_before_id ?? null)
+      setActivity(previous => preserveActivity ? [...activityData.items, ...previous.filter(item => !activityData.items.some(current => JSON.stringify(current) === JSON.stringify(item)))] : activityData.items)
+      if (!preserveActivity) setActivityCursor(activityData.next_before_id ?? null)
       setRetention(retentionData)
       setQueries(queryData.items)
       setPresence(presenceData.items)
@@ -155,14 +159,17 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
    */
   const loadOlderActivity = async () => {
     if (activityCursor === null || loadingOlderActivity) return
+    const generation = refreshGeneration.current
+    const filterKey = JSON.stringify(filtersRef.current)
     setLoadingOlderActivity(true)
     setError(null)
     try {
       const page = await api.getAdminActivity(filtersRef.current, activityCursor)
+      if (generation !== refreshGeneration.current || filterKey !== JSON.stringify(filtersRef.current)) return
       setActivity(previous => [...previous, ...page.items])
       setActivityCursor(page.next_before_id ?? null)
     } catch (cause) {
-      setError(requestError(cause))
+      if (generation === refreshGeneration.current && filterKey === JSON.stringify(filtersRef.current)) setError(requestError(cause))
     } finally {
       setLoadingOlderActivity(false)
     }

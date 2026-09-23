@@ -18,7 +18,7 @@ export default function useMenuKeyboard(
     const onKeyDown = (event: KeyboardEvent) => {
       const items = getItems()
       const index = items.indexOf(document.activeElement as HTMLElement)
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' || event.key === 'Tab') {
         event.preventDefault()
         onClose()
         return

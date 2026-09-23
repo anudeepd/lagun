@@ -42,7 +42,15 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const tabListRef = useRef<HTMLDivElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
-
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return
+    const menu = contextMenuRef.current.getBoundingClientRect()
+    setMenuPosition({
+      left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - menu.width - 8)),
+      top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - menu.height - 8)),
+    })
+  }, [contextMenu])
   useLayoutEffect(() => {
     const tab = activeTabId ? tabButtonRefs.current[activeTabId]?.parentElement : null
     const tabList = tabListRef.current
@@ -227,7 +235,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
                 )}
                 <span className="truncate max-w-[120px]">{tab.type === 'table' ? tab.table ?? tab.label : tab.label}</span>
               </button>
-              <Tooltip label={getCloseTitle(tab)}>
+              <Tooltip portal side="bottom" label={getCloseTitle(tab)}>
               <button
                 type="button"
                 onClick={() => requestCloseTab(tab.id)}
@@ -286,7 +294,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
           animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
           exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
           className="fixed z-popover min-w-36"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          style={{ left: menuPosition.left, top: menuPosition.top }}
         >
           <div ref={contextMenuRef} role="menu" aria-label="Tab actions" className="rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-xl">
           {currentTab.type === 'query' && (

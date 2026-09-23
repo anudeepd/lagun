@@ -143,6 +143,16 @@ export default function SessionForm({ open, onClose, session }: Props) {
     }
   }
 
+  const probePort = (): number | null => {
+    const port = parseInt(form.port)
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      setError('Port must be a number between 1 and 65535.')
+      portRef.current?.focus()
+      return null
+    }
+    return port
+  }
+
   const handleTest = async () => {
     setTesting(true)
     setTestResult(null)
@@ -151,9 +161,11 @@ export default function SessionForm({ open, onClose, session }: Props) {
       if (session) {
         r = await testSession(session.id)
       } else {
+        const port = probePort()
+        if (port === null) return
         r = await api.probeConnection({
           host: form.host,
-          port: parseInt(form.port),
+          port,
           username: form.username,
           password: form.password,
           ssl_enabled: form.ssl_enabled,
@@ -179,9 +191,11 @@ export default function SessionForm({ open, onClose, session }: Props) {
       if (session) {
         r = await testSession(session.id)
       } else {
+        const port = probePort()
+        if (port === null) return
         r = await api.probeConnection({
           host: form.host,
-          port: parseInt(form.port),
+          port,
           username: form.username,
           password: form.password,
           ssl_enabled: form.ssl_enabled,

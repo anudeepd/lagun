@@ -105,10 +105,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
   onRunRef.current = onRun
   const runningRef = useRef(running)
   runningRef.current = running
-  // The Ctrl+Enter keymap is built once, so it reads the current database
-  // through a ref: running without one fails server-side with error 1046.
-  const databaseRef = useRef(database)
-  databaseRef.current = database
+
 
   // Stable extension: only recreates when database changes, not on every schema update.
   // Schema completions read from the ref at completion time so they're always current.
@@ -193,7 +190,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
   const runKeymap = useMemo(() => Prec.highest(keymap.of([{
     key: 'Ctrl-Enter',
     mac: 'Cmd-Enter',
-    run: () => { if (!runningRef.current && databaseRef.current) onRunRef.current(); return true },
+    run: () => { if (!runningRef.current) onRunRef.current(); return true },
   }])), [])
   const tooltipExtensions = useMemo((): Extension[] =>
     typeof document === 'undefined' ? [] : [tooltips({ parent: document.body })],
@@ -278,15 +275,15 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
           )}
           {!database && (
             <span className="text-[11px] text-amber-400" role="status">
-              Select a database to run
+              Select a database for table queries
             </span>
           )}
           <Button
             variant="primary"
             size="sm"
             onClick={onRun}
-            disabled={running || !value.trim() || !database}
-            title={!database ? 'Select a database first' : `Run (${modKey}Enter)`}
+            disabled={running || !value.trim()}
+            title={`Run (${modKey}Enter)`}
           >
             <span className="relative inline-flex h-3 w-3 items-center justify-center">
               <AnimatePresence initial={false} mode="sync">

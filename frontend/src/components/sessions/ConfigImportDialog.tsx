@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Upload, Loader2, CheckCircle } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
@@ -20,13 +20,14 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
-
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const handleClose = () => {
     if (loading) return
     setFile(null)
     setPassphrase('')
     setResult(null)
     setError(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
     onClose()
   }
 
@@ -97,6 +98,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
                 Export file
               </Label>
               <input
+                ref={fileInputRef}
                 id="config-import-file"
                 type="file"
                 accept=".json,application/json"

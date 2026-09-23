@@ -168,14 +168,14 @@ describe('CommandPalette', () => {
     expect(input).toHaveAttribute('aria-activedescendant', narrowed[0].id)
   })
 
-  it('reports no options and a collapsed combobox when nothing matches', async () => {
+  it('reports no options and an open combobox when nothing matches', async () => {
     const { user, input } = await openPalette()
 
     await user.type(input, 'zzzz')
 
     expect(screen.queryAllByRole('option')).toHaveLength(0)
     expect(input).not.toHaveAttribute('aria-activedescendant')
-    expect(input).toHaveAttribute('aria-expanded', 'false')
+    expect(input).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('No matching commands')).toBeInTheDocument()
   })
 
