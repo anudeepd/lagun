@@ -5,6 +5,21 @@ All notable changes to Lagun are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.97] - 2026-09-27
+
+### Tests and CI
+
+- **vitest 3 → 4.1.11.** vitest 3's jsdom environment copied jsdom's
+  `AbortController`/`AbortSignal` over the Node globals, and the `fetch` the tests
+  run against is Node's own, which refuses a signal it did not create — 15 tests
+  across 7 files failed with `RequestInit: Expected signal (...) to be an instance
+  of AbortSignal` the moment requests started carrying deadlines (0.1.96). vitest 4
+  fixes that upstream (vitest-dev/vitest#8390), so the environment wrapper 0.1.96
+  shipped (`frontend/src/__tests__/environment.ts`) is deleted and
+  `environment: 'jsdom'` is back. `@vitest/ui` moves to the same version, and
+  `poolOptions.forks.execArgv` becomes the top-level `execArgv`, because vitest 4
+  removed `poolOptions`.
+
 ## [0.1.96] - 2026-09-27
 
 Regressions introduced between 0.1.92 and 0.1.95, plus the hardening and the
