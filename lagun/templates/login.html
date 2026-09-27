@@ -430,7 +430,11 @@
 
 
     if (hasError && username && !username.value) {
-      username.value = sessionStorage.getItem(storageKey) || '';
+      try {
+        username.value = sessionStorage.getItem(storageKey) || '';
+      } catch (error) {
+        // Storage can be disabled by browser privacy settings; login still works.
+      }
     }
 
     // The alert is server-rendered, so a live region never announces it: move
@@ -443,7 +447,11 @@
 
     if (username) {
       username.addEventListener('input', function() {
-        sessionStorage.setItem(storageKey, username.value);
+        try {
+          sessionStorage.setItem(storageKey, username.value);
+        } catch (error) {
+          // Storage is a convenience only and must never block authentication.
+        }
       });
     }
 
@@ -454,7 +462,11 @@
       const btn = document.getElementById('submit-btn');
       const label = btn.querySelector('.submit-label');
 
-      sessionStorage.setItem(storageKey, username.value);
+      try {
+        sessionStorage.setItem(storageKey, username.value);
+      } catch (error) {
+        // Storage is a convenience only and must never block authentication.
+      }
       label.textContent = 'Signing in…';
       btn.disabled = true;
       loginForm.setAttribute('aria-busy', 'true');

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
@@ -111,9 +111,20 @@ export default function EditColumnDialog({
   const [comment, setComment] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Bumped on every open. Callers keep this dialog mounted so it can play its
+  // exit animation, so a save started before the last close can still be in
+  // flight when it is reopened; its completion must not close or repaint this
+  // dialog.
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      // Closing abandons whatever is still in flight: bumping here (only on the
+      // close, never on an unrelated prop change) keeps a late completion from
+      // closing or repainting the dialog on the next open.
+      requestIdRef.current += 1
+      return
+    }
     if (mode === 'modify' && column) {
       setName(column.name)
       const knownType = COMMON_TYPES.includes(column.column_type) ? column.column_type : '__custom__'
@@ -134,6 +145,10 @@ export default function EditColumnDialog({
       setComment('')
     }
     setError(null)
+    // A save abandoned by a close never clears this itself — its own `finally`
+    // is fenced by the request id — so the reset has to, or the reopened dialog
+    // shows a permanently disabled Save.
+    setSaving(false)
   }, [open, mode, column])
 
   const effectiveType = typeSelect === '__custom__' ? customType : typeSelect
@@ -147,6 +162,12 @@ export default function EditColumnDialog({
       return
     }
     setError(null)
+    // Disables the primary button for the whole round trip (API + schema
+    // refresh), so a second click cannot submit the same ALTER twice. A close
+    // abandons the request and the fenced `finally` deliberately leaves the flag
+    // alone; the reset effect clears it on the next open.
+    setSaving(true)
+    const requestId = requestIdRef.current
     try {
       const defaultValue = defaultMode === 'none'
         ? null
@@ -175,6 +196,7 @@ export default function EditColumnDialog({
       } catch (e) {
         refreshError = e
       }
+      if (requestId !== requestIdRef.current) return
       const message = mode === 'add'
         ? `Column ${payload.name} added.`
         : `Column ${payload.name} updated.`
@@ -186,9 +208,12 @@ export default function EditColumnDialog({
       )
       onClose()
     } catch (e) {
-      setError(String(e))
+      if (requestId === requestIdRef.current) setError(String(e))
     } finally {
-      setSaving(false)
+      // Fenced like the rest of this request: an abandoned save must leave
+      // `saving` alone so it doesn't re-enable the Save button under a newer,
+      // still in-flight request (the reset effect clears it on next open).
+      if (requestId === requestIdRef.current) setSaving(false)
     }
   }
 

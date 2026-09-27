@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { ChevronRight, Database, Table2, Terminal, Trash2, Scissors, Upload, Search, X, Star, Plus } from 'lucide-react'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useTabStore } from '../../store/tabStore'
@@ -6,7 +6,9 @@ import { api } from '../../api/client'
 import type { TableInfo } from '../../types'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import { showToast } from '../../utils/toast'
+import { clampToViewport } from '../../utils/clampToViewport'
 import useMenuKeyboard from '../../hooks/useMenuKeyboard'
+import useEverOpened from '../../hooks/useEverOpened'
 import Spinner, { LoadingState } from '../ui/Spinner'
 import RefreshIcon from '../ui/RefreshIcon'
 import Tooltip from '../ui/Tooltip'
@@ -85,6 +87,11 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   const [importTarget, setImportTarget] = useState<{ db: string; table: string } | null>(null)
   const [createTableTarget, setCreateTableTarget] = useState<{ db: string } | null>(null)
   const [destructiveTarget, setDestructiveTarget] = useState<{ action: 'truncate' | 'drop'; db: string; table: string } | null>(null)
+  // Lazily loaded dialogs stay mounted while closed for their exit animation,
+  // so gate the mount on "opened at least once" to keep their chunk out of the
+  // initial render.
+  const createTableEverOpened = useEverOpened(!!createTableTarget)
+  const importEverOpened = useEverOpened(!!importTarget)
   const menuRef = useRef<HTMLDivElement>(null)
   const { bookmarks, toggle: toggleBookmark, isBookmarked } = useBookmarks(sessionId)
   const allDbs = databases[sessionId] ?? []
@@ -121,6 +128,12 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     invalidateSession(sessionId)
     try {
       const refreshedDatabases = await loadDatabases(sessionId)
+      // A failed listing resolves to [] and records the reason in dbErrors
+      // instead of rejecting, so an empty result must not be mistaken for "this
+      // connection has no schemas": the success path would collapse every open
+      // group and clear the filter with no way back.
+      const failure = useSchemaStore.getState().dbErrors[sessionId]
+      if (failure) throw new Error(failure)
       await loadTablesBatch(
         sessionId,
         openDatabases.filter(db => refreshedDatabases.includes(db)),
@@ -128,8 +141,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       setExpandedDbs(new Set(openDatabases.filter(db => refreshedDatabases.includes(db))))
       setQuery('')
     } catch (error) {
-      // Without this the rejection escaped as an unhandled promise and every
-      // expanded group stayed collapsed, with no explanation.
+      // Reached when the listing failed (routed here from the dbErrors check
+      // above) or when the batch table fetch rejected: keep the groups the user
+      // had open and say why, instead of leaving a collapsed tree unexplained.
       showToast(
         `Could not refresh schemas: ${error instanceof Error ? error.message : String(error)}`,
         'error',
@@ -148,14 +162,18 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   }
 
   const toggleDb = async (db: string) => {
-    const next = new Set(expandedDbs)
-    if (next.has(db)) {
-      next.delete(db)
-    } else {
-      next.add(db)
-      await loadTables(sessionId, db)
+    if (expandedDbs.has(db)) {
+      setExpandedDbs(prev => {
+        const next = new Set(prev)
+        next.delete(db)
+        return next
+      })
+      return
     }
-    setExpandedDbs(next)
+    await loadTables(sessionId, db)
+    // Functional update: a snapshot taken before the await would drop every
+    // schema expanded (or collapsed) while this one's tables were loading.
+    setExpandedDbs(prev => new Set(prev).add(db))
   }
 
   const handleToggleBookmarksOnly = () => {
@@ -199,6 +217,13 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
 
   const closeMenu = () => setContextMenu(null)
   useMenuKeyboard(menuRef, closeMenu, Boolean(contextMenu))
+  // Keep the menu inside the viewport: opened near the bottom of the sidebar it
+  // used to hang off-screen, hiding Truncate/Drop.
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
+  useLayoutEffect(() => {
+    if (!contextMenu || !menuRef.current) return
+    setMenuPosition(clampToViewport(contextMenu.x, contextMenu.y, menuRef.current))
+  }, [contextMenu])
 
   const dropTable = async (db: string, table: string) => {
     try {
@@ -207,6 +232,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       useSchemaStore.setState(s => ({
         tables: { ...s.tables, [key]: (s.tables[key] ?? []).filter(t => t.name !== table) }
       }))
+      // The dropped table's cached columns would otherwise be served to a
+      // table of the same name created later, selecting columns it lacks.
+      useSchemaStore.getState().invalidateTable(sessionId, db, table)
       showToast(`Dropped ${db}.${table}.`)
     } catch (error) {
       showToast(`Could not drop ${db}.${table}: ${error}`, 'error')
@@ -340,6 +368,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                     onClick={() => toggleDb(db)}
                     onContextMenu={e => handleTableContext(e, db)}
                     title={db}
+                    aria-expanded={isOpen}
                   >
                     {tablesLoading
                       ? <Spinner size="sm" className="flex-shrink-0" />
@@ -358,7 +387,14 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                   </button>
                 </div>
 
-                <div className={`grid transition-[grid-template-rows,opacity] duration-200 ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
+                <div
+                  className={`grid transition-[grid-template-rows,opacity] duration-200 ${isOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}
+                  // A collapsed group is only clipped to zero height, so its
+                  // table buttons stayed in the tab order as invisible stops.
+                  ref={node => {
+                    if (node) (node as HTMLDivElement & { inert: boolean }).inert = !isOpen
+                  }}
+                >
                 <div className="overflow-hidden">
                 <AnimatePresence initial={false}>
                 {tbls.map(tbl => {
@@ -410,7 +446,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
           exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
           className="fixed z-popover w-44 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
+          style={{ top: menuPosition.top, left: menuPosition.left }}
           onClick={e => e.stopPropagation()}
         >
           {contextMenu.table ? (
@@ -475,22 +511,26 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       </AnimatePresence>
 
       <Suspense fallback={null}>
-        <CreateTableDialog
-          open={!!createTableTarget}
-          onClose={() => setCreateTableTarget(null)}
-          sessionId={sessionId}
-          database={createTableTarget?.db ?? ''}
-          onCreated={refresh}
-        />
+        {createTableEverOpened && (
+          <CreateTableDialog
+            open={!!createTableTarget}
+            onClose={() => setCreateTableTarget(null)}
+            sessionId={sessionId}
+            database={createTableTarget?.db ?? ''}
+            onCreated={refresh}
+          />
+        )}
       </Suspense>
       <Suspense fallback={null}>
-        <ImportDialog
-          open={!!importTarget}
-          onClose={() => setImportTarget(null)}
-          sessionId={sessionId}
-          database={importTarget?.db ?? ''}
-          table={importTarget?.table}
-        />
+        {importEverOpened && (
+          <ImportDialog
+            open={!!importTarget}
+            onClose={() => setImportTarget(null)}
+            sessionId={sessionId}
+            database={importTarget?.db ?? ''}
+            table={importTarget?.table}
+          />
+        )}
       </Suspense>
       <ConfirmDialog
         open={Boolean(destructiveTarget)}

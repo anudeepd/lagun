@@ -96,6 +96,7 @@ export default function App() {
               initial={{ opacity: 0, x: routeDirection * 18 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -routeDirection * 18 }}
+              transition={{ ...spatialTransition, opacity: { duration: 0.2 } }}
               aria-hidden={!isAdminRoute || undefined}
               className="absolute inset-0 focus:outline-none"
             >
@@ -109,6 +110,7 @@ export default function App() {
               initial={{ opacity: 0, x: routeDirection * 18 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -routeDirection * 18 }}
+              transition={{ ...spatialTransition, opacity: { duration: 0.2 } }}
               aria-hidden={isAdminRoute || undefined}
               className="absolute inset-0 focus:outline-none"
             >

@@ -1,6 +1,7 @@
 """Integration tests for the export API."""
 
 import json
+import time
 
 import pytest
 
@@ -33,7 +34,7 @@ async def test_resolve_ai_columns_raises_on_lookup_failure():
     output that omits columns the user expected to omit.
     """
     with pytest.raises(RuntimeError, match="information_schema lookup failed"):
-        await _resolve_ai_columns(_FailingPool(), "db", "tbl", ["id", "name"])
+        await _resolve_ai_columns(_FailingPool(), "db", "tbl", time.monotonic() + 30, 0)
 
 
 async def test_export_insert_format(client, session_id, test_db):
@@ -499,3 +500,54 @@ async def test_export_sql_preserves_binary_and_backslashes(client, session_id, t
     assert r.status_code == 200
     assert "0x00ff616263" in r.text
     assert "0x433a5c6e6577" in r.text
+
+
+async def test_export_rejects_a_server_file_write_behind_two_minus_signs(
+    client, session_id, test_db
+):
+    """`--(` is two unary minus operators, not a comment.
+
+    MySQL still executes the text after it, so the OUTFILE refusal must see the
+    clause rather than treating it as a comment.
+    """
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/export",
+        json={
+            "database": test_db,
+            "sql": "SELECT 1--(1) INTO OUTFILE '/tmp/lagun-export-should-not-exist'",
+            "format": "csv",
+        },
+    )
+    assert r.status_code == 400
+    assert "server-side files" in r.json()["detail"]
+
+
+async def test_export_auto_increment_filter_with_single_connection_pool(
+    client, session_id, test_db, monkeypatch
+):
+    """A maxsize-1 pool must still complete an auto-increment-filtered export.
+
+    The streaming cursor holds the pool's only connection for the whole
+    download, so the excluded-column metadata lookup has to run before that
+    cursor opens: acquiring a second lease from the same pool never succeeds.
+    """
+    import lagun.db.pool as pool_mod
+
+    monkeypatch.setattr(pool_mod, "_POOL_MAX_SIZE", 1)
+
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/export",
+        json={
+            "database": test_db,
+            "table": "users",
+            "format": "insert",
+            "exclude_auto_increment": True,
+        },
+    )
+    assert r.status_code == 200
+    body = r.text
+    # `id` is auto_increment and must be omitted; the other columns remain.
+    assert "`name`" in body
+    assert "`age`" in body
+    assert "`id`" not in body
+    assert "-- Lagun export complete: 2 rows" in body

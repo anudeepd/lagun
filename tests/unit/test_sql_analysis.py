@@ -9,14 +9,19 @@ These back three behaviours that were previously regex-based and wrong:
   write even when a comment splits the keywords.
 """
 
+import time
+
 from lagun.api.sql_analysis import (
+    _use_schema,
     add_row_limit,
     has_top_level_limit,
     is_result_producing,
+    referenced_schemas,
     statement_kind,
+    strip_comments_and_literals,
+    target_database,
     target_table,
     top_level_keywords,
-    writes_server_file,
 )
 
 
@@ -103,23 +108,6 @@ def test_limit_inside_a_string_is_not_a_limit():
 
 
 # ---------------------------------------------------------------------------
-# writes_server_file
-# ---------------------------------------------------------------------------
-
-
-def test_server_side_file_writes_are_detected():
-    assert writes_server_file("SELECT * FROM t INTO OUTFILE '/tmp/x'")
-    assert writes_server_file("SELECT * FROM t INTO DUMPFILE '/tmp/x'")
-    # Comment-split keywords defeated the previous regex.
-    assert writes_server_file("SELECT * FROM t INTO/**/OUTFILE '/tmp/x'")
-
-
-def test_plain_select_does_not_write_a_server_file():
-    assert not writes_server_file("SELECT * FROM t")
-    assert not writes_server_file("SELECT 'INTO OUTFILE' AS s")
-
-
-# ---------------------------------------------------------------------------
 # target_table
 # ---------------------------------------------------------------------------
 
@@ -152,11 +140,6 @@ def test_ordinary_comments_stay_blanked():
 
 def test_result_producing_sees_through_an_executable_comment():
     assert is_result_producing("/*!50000 SELECT */ * FROM t")
-
-
-def test_server_file_write_hidden_in_an_executable_comment_is_detected():
-    assert writes_server_file("SELECT * FROM t /*!50000 INTO OUTFILE '/tmp/x' */")
-    assert writes_server_file("SELECT * FROM t INTO/**/OUTFILE '/tmp/x'")
 
 
 def test_target_table_sees_through_an_executable_comment():
@@ -246,3 +229,245 @@ def test_target_table_recognises_the_write_forms_a_dump_uses():
 def test_target_table_still_ignores_reads():
     assert target_table("SELECT * FROM other_db.t") is None
     assert target_table("USE other_db") is None
+
+
+def test_multi_table_delete_resolves_targets_before_from():
+    """``DELETE t1, t2 FROM ...`` names targets before FROM, not just sources."""
+    assert target_table("DELETE other_db.t1 FROM other_db.t1 JOIN t2 ON 1") == (
+        "other_db",
+        "t1",
+    )
+    assert target_table("DELETE t1 FROM other_db.t1 JOIN other_db.t2 ON 1") == (
+        "other_db",
+        "t1",
+    )
+    assert target_table("DELETE FROM t WHERE id = 1") == (None, "t")
+
+
+def test_target_table_reads_through_a_with_prelude():
+    """A CTE wrapper hides the verb behind its CTE list; read from the verb on."""
+    assert target_table("WITH x AS (SELECT 1) DELETE FROM app_db.t WHERE 1=1") == (
+        "app_db",
+        "t",
+    )
+    assert target_table("WITH x AS (SELECT 1) DELETE FROM t WHERE 1=1") == (None, "t")
+    assert target_table("WITH x AS (SELECT 1) UPDATE app_db.t SET a = 1") == (
+        "app_db",
+        "t",
+    )
+    assert target_table("WITH x AS (SELECT 1) INSERT INTO app_db.t VALUES (1)") == (
+        "app_db",
+        "t",
+    )
+    assert target_table(
+        "WITH RECURSIVE r AS (SELECT 1) REPLACE INTO app_db.t VALUES (1)"
+    ) == ("app_db", "t")
+    assert target_table("WITH x AS (SELECT 1) TRUNCATE TABLE app_db.t") == (
+        "app_db",
+        "t",
+    )
+
+
+def test_with_prelude_nested_and_quoted_names_do_not_confuse_the_verb_scan():
+    """Only the verb sits at depth zero; a backticked CTE is not a keyword."""
+    assert target_table(
+        "WITH x AS (SELECT * FROM (SELECT 1) y) DELETE FROM app_db.t WHERE 1=1"
+    ) == ("app_db", "t")
+    assert target_table(
+        "WITH `delete` AS (SELECT 1) DELETE FROM app_db.t WHERE 1=1"
+    ) == ("app_db", "t")
+    # A comment between the prelude and the verb keeps the slice aligned.
+    assert target_table(
+        "WITH x AS (SELECT 1) /* why */ DELETE FROM app_db.t WHERE 1=1"
+    ) == ("app_db", "t")
+    assert target_table(
+        "WITH x AS (SELECT 'UPDATE app_db.t') DELETE FROM app_db.t"
+    ) == (
+        "app_db",
+        "t",
+    )
+
+
+def test_multi_table_delete_reads_through_a_with_prelude():
+    assert target_table(
+        "WITH x AS (SELECT 1) DELETE t1 FROM app_db.t1 JOIN u ON 1"
+    ) == (
+        "app_db",
+        "t1",
+    )
+
+
+def test_with_prelude_without_a_write_verb_is_not_a_target():
+    """A CTE-wrapped read is still a read, so it has no write target."""
+    assert target_table("WITH x AS (SELECT 1) SELECT * FROM app_db.t") is None
+    assert target_table("WITH x AS (SELECT 1) SELECT 1") is None
+
+
+def test_target_database_recognises_database_level_ddl():
+    assert target_database("CREATE DATABASE other_db") == "other_db"
+    assert target_database("CREATE SCHEMA IF NOT EXISTS `other_db`") == "other_db"
+    assert target_database("DROP DATABASE IF EXISTS other_db") == "other_db"
+    assert target_database("ALTER DATABASE other_db DEFAULT CHARACTER SET utf8mb4") == (
+        "other_db"
+    )
+    assert target_database("CREATE TABLE t (id INT)") is None
+    assert target_database("SELECT * FROM other_db.t") is None
+
+
+def test_referenced_schemas_covers_reads_and_multi_table_writes():
+    assert referenced_schemas("SELECT * FROM other_db.t JOIN app_db.u ON 1") == {
+        "other_db",
+        "app_db",
+    }
+    assert referenced_schemas("SELECT * FROM `other_db`.`t`") == {"other_db"}
+    assert referenced_schemas("DELETE other_db.t1 FROM other_db.t1 JOIN t2 ON 1") == {
+        "other_db"
+    }
+    assert referenced_schemas("CREATE DATABASE other_db") == {"other_db"}
+    # Comments, literals and quoted identifiers never produce hits.
+    assert referenced_schemas("SELECT 'other_db.t'") == set()
+    assert referenced_schemas("/* other_db.t */ SELECT 1") == set()
+    assert referenced_schemas("SELECT * FROM t /*!50000 INTO OUTFILE '/x' */") == set()
+    assert referenced_schemas("SELECT * FROM t") == set()
+
+
+def test_referenced_schemas_ignores_column_dots():
+    """Alias dots (t.col) never count as schema use: no false 403."""
+    assert referenced_schemas("SELECT t.id FROM users t") == set()
+    assert referenced_schemas("SELECT * FROM app_db.t WHERE t.col = 1") == {"app_db"}
+    assert referenced_schemas("SELECT u.name FROM users u JOIN orders o ON 1") == set()
+    assert referenced_schemas("SELECT * FROM a.t, b.u") == {"a", "b"}
+
+
+def test_referenced_schemas_covers_use_and_routines():
+    assert referenced_schemas("USE other_db") == {"other_db"}
+    assert referenced_schemas("SELECT other_db.f(1)") == {"other_db"}
+
+
+def test_referenced_schemas_covers_object_ddl_positions():
+    """Qualified object DDL names its schema where no target pattern looks."""
+    assert referenced_schemas("CREATE VIEW other_db.v AS SELECT 1") == {"other_db"}
+    assert referenced_schemas("DROP TRIGGER other_db.trg") == {"other_db"}
+    assert referenced_schemas("DROP PROCEDURE other_db.p") == {"other_db"}
+    assert referenced_schemas("DROP FUNCTION other_db.f") == {"other_db"}
+    assert referenced_schemas(
+        "CREATE EVENT other_db.e ON SCHEDULE EVERY 1 DAY DO SELECT 1"
+    ) == {"other_db"}
+
+
+def test_object_ddl_keywords_do_not_false_positive():
+    """The new keywords only fire on a dotted name right after them."""
+    assert referenced_schemas("CREATE VIEW v AS SELECT 1") == set()
+    assert referenced_schemas("DROP VIEW IF EXISTS v") == set()
+    assert referenced_schemas("SELECT event FROM t") == set()
+    assert referenced_schemas("SELECT event.name FROM t") == set()
+    assert referenced_schemas("SELECT `view`.id FROM t") == set()
+    assert referenced_schemas("SELECT * FROM t ORDER BY event") == set()
+
+
+def test_target_table_resolves_ddl_destinations():
+    """ALTER ... RENAME and DROP INDEX name a table no reference keyword covers."""
+    assert target_table("ALTER TABLE t RENAME TO other_db.t2") == ("other_db", "t2")
+    assert target_table("ALTER TABLE t RENAME AS other_db.t2") == ("other_db", "t2")
+    assert target_table("ALTER TABLE t RENAME other_db.t2") == ("other_db", "t2")
+    assert target_table("DROP INDEX i ON other_db.t") == ("other_db", "t")
+    # In-table renames keep the table as the target, not the new column name.
+    assert target_table("ALTER TABLE t RENAME COLUMN a TO b") == (None, "t")
+    assert target_table("ALTER TABLE t RENAME INDEX i TO j") == (None, "t")
+    assert target_table("ALTER TABLE t RENAME KEY i TO j") == (None, "t")
+
+
+def test_a_leading_comment_cannot_hide_a_use_statement():
+    """`/* hint */ USE other_db` must still be seen as naming other_db.
+
+    `USE` switches the pooled connection's default schema, so a comment that hid
+    the statement from the scope scan let a scoped session move itself to a
+    schema outside its scope.
+    """
+    assert _use_schema("/* hint */ USE other_db") == "other_db"
+    assert _use_schema("-- c\nUSE other_db") == "other_db"
+    assert _use_schema("#x\nUSE other_db") == "other_db"
+    assert _use_schema("/*a*/ -- b\n /*c*/ USE `odd name`") == "odd name"
+    assert referenced_schemas("/* hint */ USE other_db") == {"other_db"}
+    assert referenced_schemas("-- c\nUSE `other_db`") == {"other_db"}
+    # Still not a USE statement.
+    assert referenced_schemas("SELECT 1") == set()
+
+
+def test_many_leading_comments_do_not_multiply_the_scan_cost():
+    """The comment prefix is shared by every target pattern.
+
+    Its repetition was ambiguous (each iteration may end with `\\s*` and the next
+    may start with `\\s*`), so N comments meant exponentially many parses: 16
+    comments cost >100 ms and 40 cost hours. Atomic grouping makes it linear;
+    this bound is orders of magnitude above the linear cost, so it only fails on
+    a real regression.
+    """
+    statement = "/*a*/" * 5000 + "SELECT 1"
+    started = time.monotonic()
+    assert target_table(statement) is None
+    assert target_database(statement) is None
+    assert referenced_schemas(statement) == set()
+    assert time.monotonic() - started < 2.0
+
+
+def test_a_dash_is_only_a_comment_after_whitespace():
+    """MySQL needs whitespace after `--`; `--(` is two unary minus operators.
+
+    Reading every `--` as a comment blanked text MySQL still executes, so a
+    scoped connection could reach another schema through the hidden part.
+    """
+    assert referenced_schemas("SELECT 1--(SELECT COUNT(*) FROM other_db.users)") == {
+        "other_db"
+    }
+    assert referenced_schemas("SELECT * FROM t--(SELECT 1)") == set()
+    # A real comment is still ignored.
+    assert referenced_schemas("SELECT 1 -- (SELECT COUNT(*) FROM other_db.t)") == set()
+    assert referenced_schemas("SELECT 1 # (SELECT 1 FROM other_db.t)") == set()
+    assert "other_db" in strip_comments_and_literals(
+        "SELECT 1--(SELECT x FROM other_db.t)"
+    )
+
+
+def test_comments_cannot_separate_a_verb_from_its_name():
+    """An inter-token comment used to hide the name a verb introduces.
+
+    `USE` moves the pooled connection's default schema, and `DROP … IF EXISTS`
+    puts an existence clause where the object name would be: both shapes hid a
+    schema from the scan.
+    """
+    assert referenced_schemas("USE /*c*/ other_db") == {"other_db"}
+    assert referenced_schemas("/*h*/ USE /*c*/ other_db") == {"other_db"}
+    assert referenced_schemas("USE -- c\n  other_db") == {"other_db"}
+    assert referenced_schemas("DROP VIEW IF EXISTS other_db.v") == {"other_db"}
+    assert referenced_schemas("DROP TRIGGER IF EXISTS other_db.trg") == {"other_db"}
+    assert referenced_schemas("DROP VIEW IF EXISTS v") == set()
+    # Not a USE statement, and not an existence clause on a table reference.
+    assert referenced_schemas("USEother") == set()
+    assert _use_schema("USEother") is None
+    assert referenced_schemas("SELECT * FROM t IF EXISTS") == set()
+    assert referenced_schemas("SELECT * FROM app_db.t") == {"app_db"}
+
+
+def test_referenced_schemas_follow_mysql_lexing():
+    """Shapes where MySQL reads a table reference the scanner used to miss."""
+    assert referenced_schemas("SELECT * FROM a STRAIGHT_JOIN other_db.b ON 1") == {
+        "other_db"
+    }
+    assert referenced_schemas("SELECT * FROM (other_db.t)") == {"other_db"}
+    # A quote inside a backtick identifier is part of the name, not a string:
+    # reading it as one blanked the rest of the statement.
+    assert referenced_schemas("SELECT * FROM `a'b`.t, other_db.u") == {
+        "a'b",
+        "other_db",
+    }
+    # …and none of them invent a schema.
+    assert referenced_schemas("SELECT * FROM (SELECT 1) x") == set()
+    assert referenced_schemas("SELECT * FROM t") == set()
+
+
+def test_multi_table_delete_targets_win_over_the_from_tables():
+    """MySQL deletes from the list before FROM, not from the source tables."""
+    assert target_table("DELETE other_db.t1 FROM app_db.t1") == ("other_db", "t1")
+    assert target_table("DELETE app_db.t1 FROM other_db.t1") == ("app_db", "t1")
+    assert target_table("DELETE t1, t2 FROM t1 JOIN t2 ON 1") == (None, "t1")

@@ -57,7 +57,18 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
       }
     }
     window.addEventListener('keydown', onKeyDown)
+    // The overlay and the drawer are `lg:hidden`, so widening the viewport past
+    // `lg` reveals the ordinary desktop sidebar while `mobileSidebarOpen` stays
+    // true and the main area stays inert: a normal-looking layout that ignores
+    // every click and keystroke. Close the drawer as the breakpoint is crossed;
+    // the cleanup below then clears `inert`.
+    const desktop = window.matchMedia('(min-width: 1024px)')
+    const closeOnDesktop = () => {
+      if (desktop.matches) setMobileSidebarOpen(false)
+    }
+    desktop.addEventListener('change', closeOnDesktop)
     return () => {
+      desktop.removeEventListener('change', closeOnDesktop)
       if (mainArea) (mainArea as HTMLDivElement & { inert: boolean }).inert = false
       window.removeEventListener('keydown', onKeyDown)
     }

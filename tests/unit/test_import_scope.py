@@ -75,3 +75,47 @@ def test_dynamic_sql_is_refused_for_a_scoped_connection():
     assert _uninspectable_statement("INSERT INTO t VALUES (1)", SCOPE) is False
     # An unrestricted connection keeps accepting dumps as before.
     assert _uninspectable_statement("PREPARE s FROM @sql", None) is False
+
+
+def test_database_level_ddl_is_scope_checked():
+    assert _out_of_scope_schema("CREATE DATABASE other_db", SCOPE) == "other_db"
+    assert _out_of_scope_schema("DROP SCHEMA IF EXISTS other_db", SCOPE) == "other_db"
+    assert (
+        _out_of_scope_schema(
+            "ALTER DATABASE other_db DEFAULT CHARACTER SET utf8mb4", SCOPE
+        )
+        == "other_db"
+    )
+    assert _out_of_scope_schema("CREATE DATABASE app_db", SCOPE) is None
+    assert _out_of_scope_schema("CREATE DATABASE app_db", None) is None
+
+
+def test_unanalysable_database_ddl_and_merge_fail_closed():
+    """A database-level DDL with no schema name and MERGE (no target pattern)
+    cannot be proven in-scope, so scoped imports refuse them outright."""
+    from lagun.api.import_data import _uninspectable_statement
+
+    assert _uninspectable_statement("CREATE DATABASE", SCOPE) is True
+    assert (
+        _uninspectable_statement(
+            "MERGE INTO t USING s ON 1 WHEN MATCHED THEN UPDATE SET a = 1", SCOPE
+        )
+        is True
+    )
+    # Named in-scope DDL stays runnable; unrestricted imports keep old behaviour.
+    assert _uninspectable_statement("CREATE DATABASE app_db", SCOPE) is False
+    assert _uninspectable_statement("CREATE DATABASE", None) is False
+    assert (
+        _uninspectable_statement(
+            "MERGE INTO t USING s ON 1 WHEN MATCHED THEN UPDATE SET a = 1", None
+        )
+        is False
+    )
+
+
+def test_multi_table_delete_targets_before_from_are_scope_checked():
+    assert (
+        _out_of_scope_schema("DELETE other_db.t1 FROM other_db.t1 JOIN t2 ON 1", SCOPE)
+        == "other_db"
+    )
+    assert _out_of_scope_schema("SELECT * FROM other_db.t", SCOPE) == "other_db"

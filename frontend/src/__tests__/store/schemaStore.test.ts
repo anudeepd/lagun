@@ -101,6 +101,161 @@ describe('schemaStore', () => {
       expect(state.columns[`${SESSION}/${DB}/orders`]).toBeDefined()
     })
   })
+
+  describe('invalidation fences in-flight requests', () => {
+    it('drops a tables response requested before invalidateTablesForDb', async () => {
+      let release = () => {}
+      const arrived = new Promise<void>(resolve => { release = resolve })
+      let requests = 0
+      const staleTables = mockTables.map(t => ({ ...t, name: 'stale_table' }))
+      server.use(
+        http.get(`http://localhost/api/v1/sessions/${SESSION}/databases/${DB}/tables`, async () => {
+          requests += 1
+          if (requests === 1) await arrived
+          return HttpResponse.json(requests === 1 ? staleTables : mockTables)
+        })
+      )
+      const key = `${SESSION}/${DB}`
+
+      const stale = useSchemaStore.getState().loadTables(SESSION, DB)
+      useSchemaStore.getState().invalidateTablesForDb(SESSION, DB)
+      release()
+
+      // Callers still get the fetched value; only the cache write is dropped.
+      expect(await stale).toEqual(staleTables)
+      expect(useSchemaStore.getState().tables[key]).toBeUndefined()
+
+      // The next read starts a fresh request instead of reusing the stale promise.
+      const fresh = await useSchemaStore.getState().loadTables(SESSION, DB)
+      expect(requests).toBe(2)
+      expect(fresh).toEqual(mockTables)
+      expect(useSchemaStore.getState().tables[key]).toEqual(mockTables)
+    })
+
+    it('drops a databases response requested before invalidateSession', async () => {
+      let release = () => {}
+      const arrived = new Promise<void>(resolve => { release = resolve })
+      let requests = 0
+      server.use(
+        http.get(`http://localhost/api/v1/sessions/${SESSION}/databases`, async () => {
+          requests += 1
+          if (requests === 1) await arrived
+          return HttpResponse.json(requests === 1 ? ['stale_db'] : mockDatabases)
+        })
+      )
+
+      const stale = useSchemaStore.getState().loadDatabases(SESSION)
+      useSchemaStore.getState().invalidateSession(SESSION)
+      release()
+
+      expect(await stale).toEqual(['stale_db'])
+      expect(useSchemaStore.getState().databases[SESSION]).toBeUndefined()
+
+      const fresh = await useSchemaStore.getState().loadDatabases(SESSION)
+      expect(requests).toBe(2)
+      expect(fresh).toEqual(mockDatabases)
+    })
+
+    it('clears loadingTables when invalidateTablesForDb abandons an in-flight load', async () => {
+      let release = () => {}
+      const arrived = new Promise<void>(resolve => { release = resolve })
+      const staleTables = mockTables.map(t => ({ ...t, name: 'stale_table' }))
+      server.use(
+        http.get(`http://localhost/api/v1/sessions/${SESSION}/databases/${DB}/tables`, async () => {
+          await arrived
+          return HttpResponse.json(staleTables)
+        })
+      )
+      const key = `${SESSION}/${DB}`
+
+      const stale = useSchemaStore.getState().loadTables(SESSION, DB)
+      expect(useSchemaStore.getState().loadingTables.has(key)).toBe(true)
+
+      useSchemaStore.getState().invalidateTablesForDb(SESSION, DB)
+
+      // No request is in flight for this key anymore, so the indicator must go.
+      expect(useSchemaStore.getState().loadingTables.has(key)).toBe(false)
+
+      release()
+      expect(await stale).toEqual(staleTables)
+      expect(useSchemaStore.getState().tables[key]).toBeUndefined()
+      expect(useSchemaStore.getState().loadingTables.has(key)).toBe(false)
+    })
+
+    it('clears loadingDbs when invalidateSession abandons an in-flight load', async () => {
+      let release = () => {}
+      const arrived = new Promise<void>(resolve => { release = resolve })
+      server.use(
+        http.get(`http://localhost/api/v1/sessions/${SESSION}/databases`, async () => {
+          await arrived
+          return HttpResponse.json(['stale_db'])
+        })
+      )
+
+      const stale = useSchemaStore.getState().loadDatabases(SESSION)
+      expect(useSchemaStore.getState().loadingDbs.has(SESSION)).toBe(true)
+
+      useSchemaStore.getState().invalidateSession(SESSION)
+
+      expect(useSchemaStore.getState().loadingDbs.has(SESSION)).toBe(false)
+
+      release()
+      expect(await stale).toEqual(['stale_db'])
+      expect(useSchemaStore.getState().databases[SESSION]).toBeUndefined()
+      expect(useSchemaStore.getState().loadingDbs.has(SESSION)).toBe(false)
+    })
+
+    it('keeps loadingTables set while a newer load owns a key a stale batch was invalidated from', async () => {
+      let releaseBatch = () => {}
+      const batchArrived = new Promise<void>(resolve => { releaseBatch = resolve })
+      let releaseSingle = () => {}
+      const singleArrived = new Promise<void>(resolve => { releaseSingle = resolve })
+      server.use(
+        http.get(`http://localhost/api/v1/sessions/${SESSION}/tables`, async () => {
+          await batchArrived
+          return HttpResponse.json({ [DB]: mockTables })
+        }),
+        http.get(`http://localhost/api/v1/sessions/${SESSION}/databases/${DB}/tables`, async () => {
+          await singleArrived
+          return HttpResponse.json(mockTables)
+        }),
+      )
+      const key = `${SESSION}/${DB}`
+
+      const staleBatch = useSchemaStore.getState().loadTablesBatch(SESSION, [DB])
+      useSchemaStore.getState().invalidateTablesForDb(SESSION, DB)
+      const fresh = useSchemaStore.getState().loadTables(SESSION, DB)
+      expect(useSchemaStore.getState().loadingTables.has(key)).toBe(true)
+
+      // The abandoned batch settles first: the newer request is still running,
+      // so the schema must keep its spinner.
+      releaseBatch()
+      await staleBatch
+      expect(useSchemaStore.getState().loadingTables.has(key)).toBe(true)
+      expect(useSchemaStore.getState().tables[key]).toBeUndefined()
+
+      releaseSingle()
+      await fresh
+      expect(useSchemaStore.getState().loadingTables.has(key)).toBe(false)
+      expect(useSchemaStore.getState().tables[key]).toEqual(mockTables)
+    })
+
+    it('records the failure reason and leaves the listing unset', async () => {
+      // The shared reset helper leaves dbErrors alone, so clear it here.
+      useSchemaStore.setState({ databases: {}, dbErrors: {} })
+      server.use(
+        http.get(`http://localhost/api/v1/sessions/${SESSION}/databases`, () =>
+          HttpResponse.json({ detail: 'boom' }, { status: 500 })
+        )
+      )
+
+      const dbs = await useSchemaStore.getState().loadDatabases(SESSION)
+
+      expect(dbs).toEqual([])
+      expect(useSchemaStore.getState().databases[SESSION]).toBeUndefined()
+      expect(useSchemaStore.getState().dbErrors[SESSION]).toBeTruthy()
+    })
+  })
 })
 
 describe('database listing failures', () => {

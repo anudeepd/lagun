@@ -5,7 +5,7 @@ import { AnimatePresence } from 'motion/react'
 import { api } from '../../api/client'
 import type { AdminActivityEvent, AdminActivityFilters, AdminConnection, AdminOverview, AdminPresence, AdminQuery, AdminRetention, AdminUser } from '../../types'
 import ConfirmDialog from '../ui/ConfirmDialog'
-import { surfaceTransition } from '../../motion/tokens'
+import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 type View = 'overview' | 'connections' | 'activity' | 'retention' | 'live' | 'users'
 type AdminError = Error & { status?: number }
@@ -77,6 +77,12 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
   }, [])
   const [overview, setOverview] = useState<AdminOverview>(emptyOverview)
   const [connections, setConnections] = useState<AdminConnection[]>([])
+  // Keyset cursor for the connection inventory, and how many pages it holds:
+  // the 15s refresh only re-reads page 1, so the cursor follows that page while
+  // it is the only one loaded and is kept once the admin pages deeper.
+  const [connectionCursor, setConnectionCursor] = useState<string | null>(null)
+  const [loadingOlderConnections, setLoadingOlderConnections] = useState(false)
+  const connectionPageCountRef = useRef(1)
   const [users, setUsers] = useState<AdminUser[]>([])
   const [userPolicyFingerprint, setUserPolicyFingerprint] = useState('')
   const [activity, setActivity] = useState<AdminActivityEvent[]>([])
@@ -104,6 +110,13 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
   }, [notice])
   const filtersRef = useRef<AdminActivityFilters>({})
   const activityFilterKeyRef = useRef<string | null>(null)
+  // Bumped only when the admin actually changes the activity filters (never
+  // by the 15s auto-refresh, which reuses the same filters). A filterKey
+  // comparison alone misses a round trip back to the same filters (A -> B ->
+  // A) within one in-flight loadOlderActivity call: the key matches again on
+  // completion even though an intervening refresh(B) and refresh(A) already
+  // replaced the activity list and cursor out from under it.
+  const activityEpochRef = useRef(0)
 
   const refresh = useCallback(async (filters: AdminActivityFilters = filtersRef.current) => {
     const generation = ++refreshGeneration.current
@@ -124,7 +137,16 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       if (generation !== refreshGeneration.current) return
       activityFilterKeyRef.current = filterKey
       setOverview(overviewData)
-      setConnections(connectionData.items)
+      // Page 1 only: replacing the list here would throw away the pages the
+      // admin just loaded, so the fresh rows go on top and everything already
+      // fetched stays below (deduplicated by id via a Set — an admin who has
+      // paged through a large inventory would otherwise re-scan every already
+      // loaded row, with a fresh array allocation, on every 15s refresh tick).
+      const freshConnectionIds = new Set(connectionData.items.map(item => item.id))
+      setConnections(previous => [...connectionData.items, ...previous.filter(item => !freshConnectionIds.has(item.id))])
+      // Taking the fresh cursor while deeper pages are loaded would restart the
+      // walk at page 1 and re-fetch what is already there.
+      if (connectionPageCountRef.current === 1) setConnectionCursor(connectionData.next_cursor ?? null)
       setUsers(userData.items)
       setUserPolicyFingerprint(userData.fingerprint)
       setActivity(previous => preserveActivity ? [...activityData.items, ...previous.filter(item => !activityData.items.some(current => JSON.stringify(current) === JSON.stringify(item)))] : activityData.items)
@@ -147,6 +169,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
   }, [refresh])
 
   const applyActivityFilters = (filters: AdminActivityFilters) => {
+    activityEpochRef.current += 1
     filtersRef.current = filters
     setActivityFilters(filters)
     void refresh(filters)
@@ -159,19 +182,50 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
    */
   const loadOlderActivity = async () => {
     if (activityCursor === null || loadingOlderActivity) return
-    const generation = refreshGeneration.current
-    const filterKey = JSON.stringify(filtersRef.current)
+    const epoch = activityEpochRef.current
     setLoadingOlderActivity(true)
     setError(null)
     try {
       const page = await api.getAdminActivity(filtersRef.current, activityCursor)
-      if (generation !== refreshGeneration.current || filterKey !== JSON.stringify(filtersRef.current)) return
+      // Only an actual filter change makes this page stale, tracked by an
+      // epoch bumped in applyActivityFilters (not by filterKey equality,
+      // which a round trip back to the same filters could pass spuriously —
+      // see activityEpochRef). A plain refresh re-reads the same filters and
+      // preserves both the list and the cursor (see the preserveActivity
+      // merge above), so treating the 15s interval as invalidating made a
+      // finished fetch vanish: the list stayed the same length, the cursor
+      // never advanced and the click looked like a no-op.
+      if (epoch !== activityEpochRef.current) return
       setActivity(previous => [...previous, ...page.items])
       setActivityCursor(page.next_before_id ?? null)
     } catch (cause) {
-      if (generation === refreshGeneration.current && filterKey === JSON.stringify(filtersRef.current)) setError(requestError(cause))
+      if (epoch === activityEpochRef.current) setError(requestError(cause))
     } finally {
       setLoadingOlderActivity(false)
+    }
+  }
+
+  /**
+   * Read the next page of the connection inventory with the keyset cursor. The
+   * console used to receive every saved profile in one payload, which does not
+   * scale past a deployment's worth of users.
+   */
+  const loadOlderConnections = async () => {
+    if (connectionCursor === null || loadingOlderConnections) return
+    setLoadingOlderConnections(true)
+    setError(null)
+    try {
+      const page = await api.getAdminConnections(connectionCursor)
+      connectionPageCountRef.current += 1
+      setConnections(previous => {
+        const previousIds = new Set(previous.map(item => item.id))
+        return [...previous, ...page.items.filter(item => !previousIds.has(item.id))]
+      })
+      setConnectionCursor(page.next_cursor ?? null)
+    } catch (cause) {
+      setError(requestError(cause))
+    } finally {
+      setLoadingOlderConnections(false)
     }
   }
 
@@ -286,13 +340,17 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
                 <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => selectView(key)} className={`min-h-10 rounded-md px-3 py-1.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-muted hover:bg-surface-800'}`}>{label}</button>
               ))}
             </div>
-            {notice && <div className="mb-3 flex items-center gap-2 rounded-md border border-green-900/50 bg-green-950/30 px-3 py-2 text-xs text-green-300" role="status"><Shield className="h-3.5 w-3.5" /> {notice}</div>}
-            {error && <div className="mb-3 flex items-center gap-2 rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-300" role="alert"><X className="h-3.5 w-3.5" /> {error.message}</div>}
+            <AnimatePresence>
+              {notice && <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="mb-3 flex items-center gap-2 rounded-md border border-green-900/50 bg-green-950/30 px-3 py-2 text-xs text-green-300" role="status"><Shield className="h-3.5 w-3.5" /> {notice}</m.div>}
+            </AnimatePresence>
+            <AnimatePresence>
+              {error && <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="mb-3 flex items-center gap-2 rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-300" role="alert"><X className="h-3.5 w-3.5" /> {error.message}</m.div>}
+            </AnimatePresence>
             <AnimatePresence mode="wait" initial={false}>
               <m.div key={view} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={surfaceTransition}>
                 {view === 'overview' && <OverviewPanel overview={overview} connections={connections} onViewConnections={() => selectView('connections')} onViewLive={() => selectView('live')} />}
                 {view === 'live' && <LiveWorkspacePanel presence={presence} queries={queries} connections={connections} />}
-                {view === 'connections' && <ConnectionsPanel connections={connections} presence={presence} />}
+                {view === 'connections' && <ConnectionsPanel connections={connections} presence={presence} onLoadMore={loadOlderConnections} hasMore={connectionCursor !== null} loadingMore={loadingOlderConnections} />}
                 {view === 'users' && <UsersPanel users={users} onAdd={addUser} onRequestRemove={setConfirmRemoveUser} busyUsername={userAction} />}
                 {view === 'activity' && <ActivityPanel events={activity} filters={activityFilters} onApply={applyActivityFilters} onLoadOlder={loadOlderActivity} hasOlder={activityCursor !== null} loadingOlder={loadingOlderActivity} />}
                 {view === 'retention' && <RetentionPanel retention={retention} days={retentionDays} onDaysChange={setRetentionDays} onRefresh={() => void refresh()} onPurge={() => setConfirmPurge(true)} />}
@@ -677,11 +735,11 @@ function LiveMetric({ icon: Icon, label, value }: { icon: typeof Users; label: s
   return <article className="flex items-center gap-3 rounded-lg border border-surface-800 bg-surface-900 p-4"><Icon className="h-4 w-4 text-brand-400" /><div><div className="font-mono text-xl font-semibold tabular-nums text-slate-100">{value}</div><div className="text-[11px] text-muted">{label}</div></div></article>
 }
 
-function ConnectionsPanel({ connections, presence }: { connections: AdminConnection[]; presence: AdminPresence[] }) {
+function ConnectionsPanel({ connections, presence, onLoadMore, hasMore, loadingMore }: { connections: AdminConnection[]; presence: AdminPresence[]; onLoadMore: () => void; hasMore: boolean; loadingMore: boolean }) {
   const [expandedTabLists, setExpandedTabLists] = useState<Set<string>>(new Set())
   return (
     <section aria-labelledby="connections-title">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-muted">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner.</p></div>
+      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-muted">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner. The inventory loads <strong className="font-medium text-slate-300">100 connections</strong> at a time; use <strong className="font-medium text-slate-300">Load more connections</strong> to fetch the next page.</p></div>
       <div id="connection-inventory-table" className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Saved connection inventory and active users</caption>
@@ -695,7 +753,7 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
                 if (labels.length) activeUsers.set(item.username, [...(activeUsers.get(item.username) || []), ...labels])
               })
               return (
-                <tr key={connection.id} className="border-b border-surface-800/70 last:border-0">
+                <m.tr key={connection.id} initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="border-b border-surface-800/70 last:border-0">
                   <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
                   <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-muted [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
                   <td className="align-top break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
@@ -735,13 +793,25 @@ function ConnectionsPanel({ connections, presence }: { connections: AdminConnect
                     ) : <span className="text-muted">No active users</span>}
                   </td>
                   <td className="align-top break-words px-3 py-3 text-muted [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
-                </tr>
+                </m.tr>
               )
             })}
             {connections.length === 0 && <tr><td colSpan={6} className="px-3 py-12 text-center text-muted">No saved connections.</td></tr>}
           </tbody>
         </table>
       </div>
+      {hasMore && (
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="min-h-10 rounded border border-surface-700 px-4 py-2 text-xs text-slate-300 hover:bg-surface-800 hover:text-slate-100 disabled:opacity-60"
+          >
+            {loadingMore ? 'Loading…' : 'Load more connections'}
+          </button>
+        </div>
+      )}
     </section>
   )
 }

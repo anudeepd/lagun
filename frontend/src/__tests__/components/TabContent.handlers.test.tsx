@@ -128,7 +128,14 @@ describe('TabContent data tab — row mutation wiring', () => {
     // Server state took the write, and the grid the user sees shows it.
     expect(mockTableRows).toEqual([[1, 'Alicia'], [2, 'Bob']])
     await waitFor(() => expect(rowByName('Alicia').id).toBe(1))
+    // Applied rows clear their staged state exactly once: no retained
+    // highlight, no Apply count, and no resurrected stale editor value.
     expect(screen.queryByRole('button', { name: /^Apply \(/ })).toBeNull()
+    expect(gridProps().rowData.filter(row => row.name === 'Alicia')).toHaveLength(1)
+    // A single committed row-update applies once; the full pending map must
+    // not run a second optimistic pass over the same row.
+    await waitFor(() => expect(dataRequests.query.length).toBeGreaterThan(1))
+    expect(gridProps().rowData.map(row => row.name)).toEqual(['Alicia', 'Bob'])
   })
 
   it('sends a selected row as DELETE /rows and drops it from the grid', async () => {

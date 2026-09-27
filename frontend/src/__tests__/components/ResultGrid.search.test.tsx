@@ -244,6 +244,31 @@ describe('ResultGrid search wiring', () => {
     fireEvent.keyDown(gridRoot, { key: 'Enter' })
     await waitFor(() => expect(screen.getByText('2 of 2')).toBeInTheDocument())
   })
+
+  it('Shift+Enter on a focused cell with the find bar open steps back and does NOT open the cell editor', async () => {
+    const { container } = renderResultGrid({ editable: true })
+    // An active cell gives the Shift+Enter editor branch something to open, so
+    // this test fails if that branch is not gated on findOpen.
+    const gridProps = __latestProps.current as unknown as { onCellClicked: (e: unknown) => void }
+    gridProps.onCellClicked({ colDef: { field: 'name' }, rowIndex: 0, value: 'Alice', data: { name: 'Alice' }, event: null })
+
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const input = screen.getByRole('searchbox')
+    await userEvent.type(input, 'a')
+    await waitForMatches()
+    expect(screen.getByText('1 of 2')).toBeInTheDocument()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText('2 of 2')).toBeInTheDocument())
+
+    const gridRoot = container.querySelector('.lagun-result-grid') as HTMLElement
+    gridRoot.focus()
+    fireEvent.keyDown(gridRoot, { key: 'Enter', shiftKey: true })
+
+    // The find bar owns Shift+Enter: it steps to the previous match, and the
+    // large cell editor must not open from the same keystroke.
+    await waitFor(() => expect(screen.getByText('1 of 2')).toBeInTheDocument())
+    expect(screen.queryByLabelText('Edit name')).not.toBeInTheDocument()
+  })
 })
 
 describe('ResultGrid inside an inert subtree (a tab that is mounted but hidden)', () => {

@@ -80,9 +80,11 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
         charset: 'utf8mb4',
         collation: 'utf8mb4_unicode_ci',
       })
-      if (requestId !== createRequestId.current || !open) return
+      // The table exists now, so refresh schema/cache even if the dialog raced
+      // with close/cancel while the request was in flight. onClose still only
+      // fires for the latest live request so a stale response never closes a newer dialog.
       onCreated()
-      onClose()
+      if (requestId === createRequestId.current) onClose()
     } catch (e) {
       if (requestId === createRequestId.current) setError(String(e))
     } finally {

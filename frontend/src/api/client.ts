@@ -40,15 +40,24 @@ export async function apiFetch(input: RequestInfo | URL, options?: RequestInit):
   return res
 }
 
-async function errorMessageFromResponse(res: Response): Promise<string> {
-  const text = await res.text()
-  let payload: unknown = text || res.statusText
+/**
+ * Message for a failed response, from its status and raw body. Shared with the
+ * `XMLHttpRequest` upload path in `importFileWithProgress`, which sees the same
+ * body without a `Response` object, so a failed import reads the same either
+ * way.
+ */
+export function errorMessageFromBody(status: number, statusText: string, text: string): string {
+  let payload: unknown = text || statusText
   try {
-    payload = text ? JSON.parse(text) : { detail: res.statusText }
+    payload = text ? JSON.parse(text) : { detail: statusText }
   } catch {
     // Keep the plain response body.
   }
-  return formatApiError(res.status, payload)
+  return formatApiError(status, payload)
+}
+
+export async function errorMessageFromResponse(res: Response): Promise<string> {
+  return errorMessageFromBody(res.status, res.statusText, await res.text())
 }
 
 /**
@@ -114,6 +123,68 @@ export async function requestResult<T extends { error?: string | null }>(
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * How much of an upload body has been handed to the server, or `null` when the
+ * body is fully sent and only the server's response is outstanding — the latter
+ * is a phase with no countable total, not an unknown fraction.
+ */
+export type UploadProgress = { loaded: number; total: number } | null
+
+/**
+ * Import a file through `XMLHttpRequest` so `upload.onprogress` can report how
+ * much of the body has transferred. That transfer is the only part of an import
+ * with a knowable total: the server-side import that follows reports nothing
+ * until it finishes, which `onProgress(null)` marks.
+ *
+ * Nothing else here differs from the fetch-based path (`api.importFile` without
+ * a callback, which callers that do not care about progress keep using): same
+ * URL, same multipart body, same error text. Without `XMLHttpRequest` — some
+ * test shims and the SSR pass — it falls back to fetch silently.
+ */
+export async function importFileWithProgress<T>(
+  sessionId: string,
+  form: FormData,
+  onProgress?: (progress: UploadProgress) => void,
+): Promise<T> {
+  const path = `${API_BASE}/sessions/${sessionId}/import`
+  if (typeof XMLHttpRequest === 'undefined') {
+    const res = await apiFetch(path, { method: 'POST', body: form })
+    if (!res.ok) throw new Error(await errorMessageFromResponse(res))
+    return res.json()
+  }
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', path)
+    xhr.upload.onprogress = event => {
+      if (event.lengthComputable) onProgress?.({ loaded: event.loaded, total: event.total })
+    }
+    xhr.upload.onload = () => onProgress?.(null)
+    // `responsetype` stays at its default text: the bodies here are JSON, and
+    // the error path needs the raw text anyway.
+    xhr.onabort = () => reject(new Error('Import upload aborted'))
+    xhr.onerror = () => reject(new Error('Import upload failed'))
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        // Same as `apiFetch`, so a signed-out import redirects to login instead
+        // of reporting a bare 401.
+        redirectToLdapLogin()
+        reject(new Error('Authentication required. Redirecting to login.'))
+        return
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(errorMessageFromBody(xhr.status, xhr.statusText, xhr.responseText)))
+        return
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as T)
+      } catch (error) {
+        reject(error)
+      }
+    }
+    xhr.send(form)
+  })
 }
 
 export const api = {
@@ -346,16 +417,11 @@ export const api = {
     return res.json()
   },
 
-  importFile: async <T>(sessionId: string, form: FormData): Promise<T> => {
-    const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/import`, {
-      method: 'POST',
-      body: form,
-    })
-    if (!res.ok) {
-      throw new Error(await errorMessageFromResponse(res))
-    }
-    return res.json()
-  },
+  importFile: <T>(
+    sessionId: string,
+    form: FormData,
+    onProgress?: (progress: UploadProgress) => void,
+  ): Promise<T> => importFileWithProgress<T>(sessionId, form, onProgress),
 
   // Config export/import
   exportConfig: async (passphrase: string): Promise<void> => {
@@ -392,7 +458,8 @@ export const api = {
 
   getServerConfig: () => request<{ ldap_enabled: boolean; ldap_idle_timeout: number; is_admin: boolean }>('/config/server'),
   getAdminOverview: () => request<AdminOverview>('/admin/overview'),
-  getAdminConnections: () => request<AdminConnectionsResponse>('/admin/connections'),
+  getAdminConnections: (after?: string) =>
+    request<AdminConnectionsResponse>('/admin/connections' + (after ? `?after=${encodeURIComponent(after)}` : '')),
   getAdminUsers: () => request<AdminUsersResponse>('/admin/users'),
   addAdminUser: (username: string, expectedFingerprint?: string) =>
     request<{ ok: boolean; username: string; fingerprint: string }>('/admin/users', {

@@ -5,6 +5,179 @@ All notable changes to Lagun are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.96] - 2026-09-27
+
+Regressions introduced between 0.1.92 and 0.1.95, plus the hardening and the
+import/export progress and admin-pagination work this pass added around them.
+
+### Security
+
+- **Scope covers the schemas a raw statement actually names.** A qualified read
+  (`SELECT * FROM other_db.t`), a qualified write, a `USE`, a schema-qualified
+  routine call and now also a qualified object name (`CREATE VIEW other_db.v`,
+  `DROP TRIGGER other_db.trg`, `DROP INDEX i ON other_db.t`,
+  `ALTER TABLE t RENAME TO other_db.t2`) are refused on a scoped connection.
+  CTE-wrapped writes resolve their target instead of failing closed. The
+  introspection schemas (`information_schema`, `performance_schema`, `sys`) are
+  readable; `mysql` is not. `GRANT`/`REVOKE` and dynamic SQL
+  (`CALL`/`PREPARE`/`EXECUTE`/`DEALLOCATE`) stay refused, and the deeper gate
+  remains the MySQL user's grants.
+- **`Sec-Fetch-Site: same-site` is no longer trusted on its own.** A write from a
+  foreign Origin on the same registrable domain (a sibling subdomain, another
+  port) sends `same-site`; the Origin is now checked in that case too.
+- **Binary columns only decode `0x`-prefixed text.** Any other text — including
+  even-length hex that is not a hex literal — round-trips unchanged instead of
+  being silently rewritten to bytes.
+- **`/healthz` and `/readyz` are reachable without a session** in LDAP mode:
+  a probe that cannot log in must not be answered with a redirect or 401.
+- **Scope on free-form SQL is decided by a text analyser, not by MySQL.** It now
+  follows the lexer where it had diverged: a `--` comment needs whitespace after
+  the second dash, a backtick identifier is opaque (a quote inside it is part of
+  the name, not a string), a parenthesised table factor and `STRAIGHT_JOIN` are
+  table positions, an inter-token comment cannot separate a verb from its name,
+  `IF [NOT] EXISTS` cannot hide an object's schema, and a multi-table `DELETE`
+  resolves the target list before `FROM` rather than the source tables. One
+  divergence remains and cannot be closed without knowing the server's
+  `sql_mode`: with `ANSI_QUOTES` a double-quoted token is an identifier, and the
+  analyser reads it as a string (with `NO_BACKSLASH_ESCAPES`, a backslash inside
+  a string is likewise read as an escape). For a scoped connection the MySQL
+  user's own grants remain the authoritative gate; treat this check as a second
+  line, not the last one.
+- **Audit redaction is a substring test, not a list of exact names.** A request
+  field whose key contains `pass`, `secret`, `token`, `key`, `auth`, `cookie` or
+  `credential` is stored redacted, so keys such as `monkey` or `keyboard` no
+  longer slip past the seven names 0.1.94 matched. Every stored body is also
+  capped at 16 KiB and marked `[truncated]`, so an audit row cannot grow with the
+  payload it describes.
+
+### Fixed
+
+- **Sign-in survives blocked storage.** The login page's username prefill and
+  persist calls are guarded again, so a browser that denies `sessionStorage`
+  (private mode, blocked cookies) can still submit.
+- **A failed schema refresh no longer looks like an empty connection.** The tree
+  keeps the schemas it had open and the filter, and reports the failure; before,
+  the failure resolved as an empty listing and silently collapsed everything.
+- **A dialog kept mounted for its exit animation can no longer be hijacked by the
+  previous open's request.** The connection form, the modify-column dialog and
+  the export dialog fence completions with a close-time request generation and
+  reset their in-flight state on open, so a late response no longer closes or
+  repaints the next open — including the case where the abandoned write left the
+  Save button permanently disabled.
+- **The mobile drawer cannot wedge the workspace.** Widening the viewport past
+  `lg` closes it instead of leaving the main area `inert` behind a hidden
+  overlay.
+- **Each connection row's action menu has its own ref**, so the menu opened
+  second keeps keyboard navigation and focus.
+- **A refresh tick no longer discards a finished "load older" page** in the admin
+  console.
+- **Grid popovers clamp against the layout box**, not the box mid enter-animation,
+  so a tab or cell menu settles fully on screen.
+- **Shift+Enter with the find bar open steps to the previous match** instead of
+  also opening the cell editor.
+- **The schema cache fences in-flight responses on invalidation**, so a
+  pre-invalidation payload can no longer be cached as if it were fresh.
+- **A lazy dialog loads its chunk when it is first opened**, not on every tab
+  render.
+- **The admin and workspace route transition keeps its motion token.** 0.1.95
+  dropped `transition={{ ...spatialTransition, opacity: { duration: 0.2 } }}`
+  from both route wrappers while rewriting their focus and `inert` handling, so
+  the swap ran on Motion's default spring and the fade rode that spring instead
+  of a 200 ms tween. Restored on both.
+- **The results region animates.** Its `AnimatePresence mode="wait"` wrapped a
+  plain `div`, so the wrapper animated nothing and switching result sets — running
+  a query, paging — hard-cut.
+- **The form `Select`'s listbox has an exit again.** It was the only dropdown in
+  the app that vanished in a single frame; `LimitSelect` and
+  `FilterHistoryDropdown` both animate out. It now matches them.
+- **Tooltips, loading regions and the admin console's banners animate.** Tooltips
+  and `LoadingState` appeared and disappeared instantly (the latter behind ~10
+  call sites), and the console's notice/error banners and appended connection
+  rows popped in.
+- **A truncated SQL export is refused.** A `text/plain` export that fails after
+  the response headers now ends with `-- Lagun export FAILED: <message>`, and the
+  export dialog checks for the `-- Lagun export complete: N rows` trailer before
+  it saves, so a dropped stream leaves an error instead of a partial file on
+  disk.
+- **DDL typed into the editor refreshes the schema tree.** A run whose
+  completed statements include `CREATE`/`ALTER`/`DROP`/`RENAME`/`TRUNCATE`
+  invalidates and reloads that tab's table list, as the table dialogs already did.
+- **Apply merges edits staged while its requests are in flight.** The staged
+  changes and insert drafts are cleared synchronously when Apply sends them, so an
+  edit made mid-flight is neither dropped nor resurrected by the response.
+- **Create Table refreshes the schema even when the dialog was closed first.**
+  The success path invalidates the table list and cache whether or not the dialog
+  is still mounted.
+- **The form `Select` is anchored to its trigger**, not to the label and error
+  container around it, opens above the trigger when there is more room there, and
+  caps its height to the side it opens on instead of a fixed 320 px that could
+  run off-screen.
+- **Tab inside a `Select`'s listbox parks focus on the trigger** instead of
+  walking out of the portaled listbox, which the enclosing dialog's focus trap
+  could not see.
+- **A collapsed schema group is `inert`**, so its buttons are not invisible tab
+  stops; a dropped table's cached columns are invalidated before a same-name
+  table is created; and the tree's context menu clamps to the viewport instead of
+  hanging off it.
+- **An import that cannot roll back no longer commits what it imported.** A
+  rollback that fails or times out closes the connection instead of leaving the
+  transaction open for the caller's `SET autocommit=1` to commit.
+
+### Added
+
+- **A progress bar for imports.** A file upload shows a determinate fill driven
+  by `XMLHttpRequest.upload.onprogress`, then switches to an indeterminate bar
+  while the server imports; a browser without `XMLHttpRequest` falls back to the
+  previous upload path. Exports show only the indeterminate bar — the response is
+  an unbounded stream with no `Content-Length`, so a percentage would be invented
+  rather than measured.
+
+### Changed
+
+- **Export concurrency is bounded** (`LAGUN_EXPORT_MAX_CONCURRENCY`, default 3,
+  `LAGUN_EXPORT_QUEUE_TIMEOUT_SECONDS` default 10): a trickling download can no
+  longer pin pooled connections past `_EXPORT_MAX_CONCURRENCY`, and excess
+  exports answer 503 with `Retry-After` instead of queueing behind them.
+- **Every export and import await is bounded by the operation's remaining
+  deadline**, not only the loop between batches, and a row write that times out
+  discards its pooled connection instead of returning a possibly-busy one.
+- **A user's narrowed database list is stored per user** on a shared
+  (`connections.yaml`) connection instead of on the one row every allowed user
+  sees, so one user narrowing their view no longer changes another's. A
+  narrowing that an earlier revision stored on the shared row is not copied into
+  anyone's per-user list — those users start at the administrator's ceiling and
+  narrow again — because copying the last writer's choice would re-share one
+  user's view.
+- **The admin connection inventory pages.** `GET /api/v1/admin/connections`
+  takes a keyset `limit` (default 100, max 500) and returns `next_cursor`, so the
+  payload no longer grows with the number of saved connections; the console grows
+  a "Load more" that keeps the pages an operator already loaded across its
+  15-second refresh. The overview's connection counts now come from a `COUNT`
+  query instead of the page in hand, so they stay correct past one page.
+- **`lagun.api.sql_analysis.writes_server_file` was removed.** It had no caller —
+  the export path validates server-side file writes inline — and it was the only
+  user of its private regex. Anything importing it must inline the check.
+- **Bulk scripts are bounded statement by statement**, not only across the run:
+  `LAGUN_BULK_MAX_RUNTIME_SECONDS` caps each statement, and `COMMIT`, `ROLLBACK`
+  and `SET` get 5 seconds, so a stuck transaction still answers the cancel
+  button.
+- **A statement that names its own schema no longer needs an in-scope
+  `default_db`.** `USE other_db` still fails on a scoped connection, but a fully
+  qualified statement is checked against the schemas it actually names.
+- **`close_pool` is bounded.** A pool that has not closed within the grace period
+  is force-terminated instead of holding the shutdown path open.
+
+## [0.1.95] - 2026-09-23
+
+### Fixed
+
+- **Post-0.1.94 UI regressions.** Fixed across query execution, staged row
+  Apply, table dialogs, import/session flows, bookmarks, selects, tooltips,
+  menus, focus management, the mobile drawer, admin pagination and the grid find
+  layout.
+
+_Backfilled from the release commit; the changelog was introduced with 0.1.94._
+
 ## [0.1.94] - 2026-09-22
 
 Remediation of the 2026-09-22 audit, grouped by the audit lens each change came
@@ -302,3 +475,58 @@ this release is behaviour-preserving at the HTTP boundary.
   and ruff caches are now ignored explicitly (`H-12`).
 - **`e2e/package.json` matches the project** (`H-10`): version `0.1.93`, licence
   MIT.
+
+## [0.1.93] - 2026-09-20
+
+### Changed
+
+- **The login card is unified with ldapgate, torrus and xwing**: one animation
+  pair (`login-card-in` 340 ms, `login-error-up` 180 ms), an always-present
+  error slot with `role="alert"` and `aria-describedby` on both fields, one
+  `:root` palette block instead of scattered literals, and a single
+  username-prefill guard. The card now differs from the other three only by
+  colours, name, brand mark, title and favicon.
+- **Contrast fixes**: the submit hover is `#2e69ec`, which lightens like the
+  rest of the theme while keeping the white label at 4.83:1 (was 3.68:1), and
+  placeholders and secondary copy are `#86909d` (was 1.93:1 on the input
+  surface).
+
+### Dependencies
+
+- **ldapgate >= 0.1.28** is required by the `ldap` extra, tracking the published
+  release.
+
+_Backfilled from the release commit; the changelog was introduced with 0.1.94._
+
+## [0.1.92] - 2026-09-19
+
+### Fixed
+
+- **Every dialog now plays its exit animation.** Eight dialogs were mounted
+  behind a `{state && <Dialog/>}` guard, which unmounted the component (and the
+  `AnimatePresence` it owned) in the same commit as the state flip, so closing
+  one hard-cut in a single frame. They now stay mounted with `open` driving
+  presence: the cell editor in the grid, the CREATE-statement modal and the
+  modify-column dialog in the schema view, both export dialogs, the import
+  dialog, the bulk-write confirmation, and the connection form.
+- **A fresh open stays clean without remounting**: the export, import and
+  bulk-confirm dialogs reset their form state when `open` goes true, so
+  reopening never shows the previous run's fields. The destructive-run
+  acknowledgement is part of that reset, and the import dialog no longer
+  prefetches table lists at mount for tabs that never open it.
+- **Four e2e specs that were already failing** were fixed: the grid context menu
+  moved off `div.z-[9999]` to `z-popover` with `role="menuitem"`, the
+  schema-tree rows now collide with the "New query on <db>" and
+  "Bookmark <db>.<table>" buttons, applying changes goes through the
+  change-review dialog, the bulk-reject message renders in both a paragraph and
+  a `pre`, and the query log's "N rows" entries made the toolbar count
+  ambiguous.
+
+### Tests
+
+- **An e2e guard for the dialog-exit class**: `motion.spec` opens a dialog,
+  asserts an interpolated exit before the shell detaches, and the suite creates
+  and removes its own connection so it no longer depends on whatever is stored
+  locally.
+
+_Backfilled from the release commit; the changelog was introduced with 0.1.94._

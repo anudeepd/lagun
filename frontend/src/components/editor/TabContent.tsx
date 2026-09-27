@@ -34,6 +34,7 @@ import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 import { useHandoff } from '../../motion/useHandoff'
+import useEverOpened from '../../hooks/useEverOpened'
 import TransitionVeil from '../ui/TransitionVeil'
 import Label from '../ui/Label'
 
@@ -154,6 +155,16 @@ export function needsBulkConfirmation(validation: ScriptQueryValidationResult): 
 export function shouldTryFastExecute(statements: string[]): boolean {
   const writeCount = statements.filter(stmt => ['INSERT', 'UPDATE', 'DELETE'].includes(statementFirstToken(stmt))).length
   return writeCount >= FAST_EXECUTE_THRESHOLD
+}
+
+// Statements that add, remove, or rename a table (or its indexes) leave the
+// schema tree's cached table list stale: nothing else re-fetches it after a
+// statement typed directly into the editor, unlike row edits made through the
+// grid, which already invalidate that cache themselves.
+const SCHEMA_CHANGING_TOKENS = new Set(['CREATE', 'ALTER', 'DROP', 'RENAME', 'TRUNCATE'])
+
+export function statementsChangeSchema(statements: string[]): boolean {
+  return statements.some(stmt => SCHEMA_CHANGING_TOKENS.has(statementFirstToken(stmt)))
 }
 
 export function scriptResultToQueryResult(result: ScriptQueryResult): QueryResult {
@@ -455,6 +466,11 @@ function QueryTab({ tab }: Props) {
   const [limit, setLimit] = useState(1000)
   const [functions, setFunctions] = useState<string[]>([])
   const [queryExportContext, setQueryExportContext] = useState<QueryExportContext | null>(null)
+  // Gate the lazily loaded dialogs' mount on "opened at least once": they are
+  // kept mounted while closed for their exit animation, so an unconditional
+  // render would fetch their chunks on every tab render.
+  const bulkConfirmEverOpened = useEverOpened(bulkConfirm !== null)
+  const queryExportEverOpened = useEverOpened(queryExportContext !== null && !!tab.database)
   const [resultSortActive, setResultSortActive] = useState(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const activeScriptExecutionRef = useRef<string | null>(null)
@@ -477,6 +493,7 @@ function QueryTab({ tab }: Props) {
   const loadDatabases = useSchemaStore(s => s.loadDatabases)
   const loadTables = useSchemaStore(s => s.loadTables)
   const loadColumns = useSchemaStore(s => s.loadColumns)
+  const invalidateTablesForDb = useSchemaStore(s => s.invalidateTablesForDb)
   const setTabDatabase = useTabStore(s => s.setTabDatabase)
   const pendingSql = useTabStore(s => s.pendingSqls[tab.id])
   const consumePendingSql = useTabStore(s => s.consumePendingSql)
@@ -642,6 +659,7 @@ function QueryTab({ tab }: Props) {
     // in `finally` was always falsy and wiped the results the dialog was about
     // to show.
     let awaitingConfirmation = false
+    const succeededStatements: string[] = []
     try {
       if (shouldTryFastExecute(statements)) {
         const controller = new AbortController()
@@ -719,6 +737,7 @@ function QueryTab({ tab }: Props) {
           })
         } catch { /* ignore localStorage errors */ }
         if (r.error) break
+        succeededStatements.push(stmt)
       }
     } finally {
       abortControllerRef.current = null
@@ -726,6 +745,10 @@ function QueryTab({ tab }: Props) {
       if (!awaitingConfirmation) {
         setResults(newResults)
         setResultIdx(0)
+      }
+      if (tab.sessionId && tab.database && statementsChangeSchema(succeededStatements)) {
+        invalidateTablesForDb(tab.sessionId, tab.database)
+        loadTables(tab.sessionId, tab.database)
       }
       setRunning(false)
     }
@@ -788,6 +811,10 @@ function QueryTab({ tab }: Props) {
     }
     const result = scriptResultToQueryResult(scriptResult)
     newResults.push({ id: `${executionId}-bulk`, result, sql: toRun, scriptResult })
+    if (database && scriptResult.statements_executed > 0 && statementsChangeSchema(statements.slice(0, scriptResult.statements_executed))) {
+      invalidateTablesForDb(sessionId, database)
+      loadTables(sessionId, database)
+    }
     try {
       const previewSql = scriptResult.statements_executed > 0
         ? toRun.slice(0, 500) + (toRun.length > 500 ? '…' : '')
@@ -903,7 +930,13 @@ function QueryTab({ tab }: Props) {
         <div className="flex-1 min-h-0 overflow-hidden">
           <AnimatePresence initial={false} mode="wait">
           {results.length > 0 ? (
-            <div key={results[resultIdx].id} className="h-full">
+            <m.div
+              key={results[resultIdx].id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1, transition: surfaceTransition }}
+              exit={{ opacity: 0, transition: exitTransition }}
+              className="h-full"
+            >
             {results[resultIdx].scriptResult ? (
               <div className="p-4 overflow-y-auto h-full">
                 <Suspense fallback={null}>
@@ -923,7 +956,7 @@ function QueryTab({ tab }: Props) {
                 />
               </Suspense>
             )}
-            </div>
+            </m.div>
           ) : (
             <m.div key="no-results" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="flex items-center justify-center h-full text-muted text-sm">
               Press {isMac ? '⌘Enter' : 'Ctrl+Enter'} to run a query
@@ -964,27 +997,31 @@ function QueryTab({ tab }: Props) {
       </div>
 
       <Suspense fallback={null}>
-        <ExportDialog
-          open={queryExportContext !== null && !!tab.database}
-          onClose={() => setQueryExportContext(null)}
-          sessionId={tab.sessionId}
-          database={tab.database ?? ''}
-          table="query_result"
-          sql={queryExportContext?.sql}
-          rowsOverride={queryExportContext?.rowsOverride}
-          rowsOverrideLabel="displayed rows"
-        />
+        {queryExportEverOpened && (
+          <ExportDialog
+            open={queryExportContext !== null && !!tab.database}
+            onClose={() => setQueryExportContext(null)}
+            sessionId={tab.sessionId}
+            database={tab.database ?? ''}
+            table="query_result"
+            sql={queryExportContext?.sql}
+            rowsOverride={queryExportContext?.rowsOverride}
+            rowsOverrideLabel="displayed rows"
+          />
+        )}
       </Suspense>
 
       <Suspense fallback={null}>
-        <BulkConfirmDialog
-          open={bulkConfirm !== null}
-          validation={bulkConfirm?.validation}
-          database={tab.database}
-          statements={bulkStatements}
-          onConfirm={handleBulkConfirm}
-          onClose={() => { setBulkConfirm(null); setBulkStatements([]); setBulkValidation(null) }}
-        />
+        {bulkConfirmEverOpened && (
+          <BulkConfirmDialog
+            open={bulkConfirm !== null}
+            validation={bulkConfirm?.validation}
+            database={tab.database}
+            statements={bulkStatements}
+            onConfirm={handleBulkConfirm}
+            onClose={() => { setBulkConfirm(null); setBulkStatements([]); setBulkValidation(null) }}
+          />
+        )}
       </Suspense>
 
       {(running || bulkConfirm || bulkValidation) && bulkStatements.length >= FAST_EXECUTE_THRESHOLD && results.length === 0 && (
@@ -1025,6 +1062,11 @@ function TableTab({ tab, active = true }: Props) {
   const [dataSortActive, setDataSortActive] = useState(false)
   const gridRef = useRef<ResultGridHandle>(null)
   const [showImport, setShowImport] = useState(false)
+  // Same mount gating as the query tab: keep the lazy chunks out of the first
+  // render while still keeping the dialog mounted for its exit animation once
+  // it has been opened.
+  const dataExportEverOpened = useEverOpened(dataExportContext !== null && !!tab.database && !!tab.table)
+  const importDialogEverOpened = useEverOpened(showImport && !!tab.database)
   const [showChangeReview, setShowChangeReview] = useState(false)
   const [deleteRowsTarget, setDeleteRowsTarget] = useState<Record<string, unknown>[] | null>(null)
   const [globalSearch, setGlobalSearch] = useState(initialDataState.globalSearch)
@@ -1444,6 +1486,16 @@ function TableTab({ tab, active = true }: Props) {
 
     const remainingPending = new Map(normalizedPending)
     const remainingDrafts = new Map(normalizedDrafts)
+    // Edits staged while this apply's requests are in flight belong to the
+    // next Apply: merge back any the per-row sync below overwrote so the
+    // final reload never resurrects a stale editor value or drops pending state.
+    // Match on remainingPending (not the start snapshot) so a restage of an
+    // already-applied row still survives instead of being deleted with it.
+    const mergeConcurrentStaged = () => {
+      for (const [stagedRowId, edit] of pendingChangesRef.current) {
+        if (!remainingPending.has(stagedRowId)) remainingPending.set(stagedRowId, edit)
+      }
+    }
     const syncPending = (next: Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>) => {
       pendingChangesRef.current = next
       setPendingChanges(next)
@@ -1474,17 +1526,23 @@ function TableTab({ tab, active = true }: Props) {
         })
       } catch { /* ignore */ }
       if (!r.ok) {
+        mergeConcurrentStaged()
+        syncPending(new Map(remainingPending))
         setStatusMsg(`✗ ${r.error}`)
         setTimeout(() => setStatusMsg(null), 4000)
         return
       }
       if (r.data.affected_rows === 0) {
+        mergeConcurrentStaged()
+        syncPending(new Map(remainingPending))
         setStatusMsg('✗ Update matched 0 rows — the row may have been modified or deleted since it was loaded.')
         setTimeout(() => setStatusMsg(null), 6000)
         return
       }
       remainingPending.delete(rowId)
       syncPending(new Map(remainingPending))
+      // Immutable update, only after the server write succeeded: fresh row
+      // array for the edited row, untouched references for the rest.
       setResult(prev => applyEditsToRows(prev, new Map([[rowId, { original, changes }]]), rowKeyColumns, pkColumns))
     }
     for (const [draftId, values] of normalizedDrafts) {
@@ -1505,6 +1563,8 @@ function TableTab({ tab, active = true }: Props) {
         })
       } catch { /* ignore */ }
       if (!r.ok) {
+        mergeConcurrentStaged()
+        syncPending(new Map(remainingPending))
         setStatusMsg(`✗ ${r.error}`)
         setTimeout(() => setStatusMsg(null), 4000)
         loadData()
@@ -1524,11 +1584,12 @@ function TableTab({ tab, active = true }: Props) {
       setTimeout(() => setStatusMsg(null), 4000)
     }
 
-    // Optimistically apply changes to local result state
-    if (normalizedPending.size > 0) {
-      setResult(prev => applyEditsToRows(prev, normalizedPending, rowKeyColumns, pkColumns))
-    }
-
+    // Rows already merged one at a time above match the server writes, and
+    // pending refs/state were cleared for exactly those rows. Merge back
+    // concurrent staged edits so the final reload never resurrects a stale
+    // editor value or drops pending state.
+    mergeConcurrentStaged()
+    syncPending(new Map(remainingPending))
     invalidateTablesForDb(tab.sessionId!, tab.database!)
     loadTables(tab.sessionId!, tab.database!)
     loadData()
@@ -1540,6 +1601,10 @@ function TableTab({ tab, active = true }: Props) {
   }
 
   const handleDiscardChanges = () => {
+    // Clear refs sync: state sync via effect runs post-render, same-tick
+    // apply would otherwise read stale ref and resurrect discarded edits.
+    pendingChangesRef.current = new Map()
+    insertDraftsRef.current = new Map()
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
@@ -2143,11 +2208,13 @@ function TableTab({ tab, active = true }: Props) {
                 insertDraftAnchors={insertDraftAnchors}
               onSortActiveChange={setDataSortActive}
             />
+            <AnimatePresence>
             {refreshing && (
               <div className="absolute inset-0 z-10 flex items-start justify-center bg-surface-950/35 pt-3" aria-live="polite" aria-label="Refreshing data">
                 <LoadingState label="Searching…" />
               </div>
             )}
+            </AnimatePresence>
             </div>
           </Suspense>
           ) : (
@@ -2176,27 +2243,31 @@ function TableTab({ tab, active = true }: Props) {
       )}
 
       <Suspense fallback={null}>
-        <ExportDialog
-          open={dataExportContext !== null && !!tab.database && !!tab.table}
-          onClose={() => setDataExportContext(null)}
-          sessionId={tab.sessionId}
-          database={tab.database ?? ''}
-          table={tab.table ?? ''}
-          rowsOverride={dataExportContext?.rowsOverride}
-          rowsOverrideLabel={dataExportContext?.rowsOverrideLabel ?? 'displayed rows'}
-          pkColumnsForSql={pkColumns}
-        />
+        {dataExportEverOpened && (
+          <ExportDialog
+            open={dataExportContext !== null && !!tab.database && !!tab.table}
+            onClose={() => setDataExportContext(null)}
+            sessionId={tab.sessionId}
+            database={tab.database ?? ''}
+            table={tab.table ?? ''}
+            rowsOverride={dataExportContext?.rowsOverride}
+            rowsOverrideLabel={dataExportContext?.rowsOverrideLabel ?? 'displayed rows'}
+            pkColumnsForSql={pkColumns}
+          />
+        )}
       </Suspense>
 
       <Suspense fallback={null}>
-        <ImportDialog
-          open={showImport && !!tab.database}
-          onClose={() => setShowImport(false)}
-          sessionId={tab.sessionId}
-          database={tab.database ?? ''}
-          table={tab.table}
-          onImportComplete={() => loadData()}
-        />
+        {importDialogEverOpened && (
+          <ImportDialog
+            open={showImport && !!tab.database}
+            onClose={() => setShowImport(false)}
+            sessionId={tab.sessionId}
+            database={tab.database ?? ''}
+            table={tab.table}
+            onImportComplete={() => loadData()}
+          />
+        )}
       </Suspense>
       <ConfirmDialog
         open={deleteRowsTarget !== null}

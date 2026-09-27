@@ -62,17 +62,17 @@ def _observed_at() -> int:
 @router.get("/overview", response_model=AdminOverview)
 async def get_overview(request: Request):
     request_admin_username(request)
-    connections = await session_store.list_admin_connections()
+    # Counts come from their own query: the inventory is keyset-paginated, so
+    # deriving them from one page would report the page size as the total.
+    connection_counts = await session_store.count_admin_connections()
     day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     audit = await session_store.audit_summary(day_ago)
     live_presence = await presence.list_presence()
     active_queries = await query.list_active_queries()
     return {
-        "connection_count": len(connections),
-        "managed_connection_count": sum(1 for item in connections if item["managed"]),
-        "private_connection_count": sum(
-            1 for item in connections if not item["managed"]
-        ),
+        "connection_count": connection_counts["total"],
+        "managed_connection_count": connection_counts["managed"],
+        "private_connection_count": connection_counts["private"],
         "audit_event_count": audit["event_count"],
         "audit_user_count": audit["user_count"],
         "live_user_count": len({item["username"] for item in live_presence}),
@@ -83,10 +83,24 @@ async def get_overview(request: Request):
 
 
 @router.get("/connections", response_model=AdminConnectionsResponse)
-async def get_connections(request: Request):
+async def get_connections(
+    request: Request,
+    after: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+):
     request_admin_username(request)
+    try:
+        items, next_cursor = await session_store.list_admin_connections(
+            after=after, limit=limit
+        )
+    except ValueError as error:
+        raise HTTPException(400, "Invalid cursor") from error
+    # Keyset pagination, mirroring the audit trail: the cursor carries the sort
+    # tuple of this page's last row, so a caller can walk the whole inventory and
+    # a short page means there is nothing more.
     return {
-        "items": await session_store.list_admin_connections(),
+        "items": items,
+        "next_cursor": next_cursor,
         "observed_at": _observed_at(),
     }
 

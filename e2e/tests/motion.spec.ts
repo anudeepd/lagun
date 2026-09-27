@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createTestSession, deleteTestSession } from '../fixtures'
+import { createTestSession, deleteTestSession, seedDatabase } from '../fixtures'
 
 let sessionId = ''
 
@@ -30,10 +30,11 @@ test.describe('motion system', () => {
   })
 
   test('plays a dialog exit animation instead of unmounting it', async ({ page }) => {
-    const row = page.locator('span.text-xs.truncate', { hasText: 'E2E Test Session' }).first().locator('xpath=..')
+    const trigger = page.getByRole('button', { name: 'Actions for E2E Test Session' })
+    const row = trigger.locator('xpath=ancestor::div[2]')
     await row.hover()
-    await row.locator('div.relative button').click()
-    await row.getByRole('button', { name: 'Edit', exact: true }).click()
+    await trigger.click()
+    await row.getByRole('menuitem', { name: 'Edit', exact: true }).click()
 
     const dialog = page.getByRole('dialog')
     await expect(dialog).toBeVisible()
@@ -52,8 +53,42 @@ test.describe('motion system', () => {
     await expect.poll(() => shell.evaluate(el => el.isConnected)).toBe(false)
   })
 
+  test('fades a Select listbox out instead of unmounting it in one frame', async ({ page }) => {
+    // The schema view's Add Column dialog is the shortest path to a Select that
+    // lives in a table tab. This file's beforeEach creates a session but no
+    // database, so seed the table first.
+    await seedDatabase(page, sessionId)
+    await page.locator('span.text-xs.truncate', { hasText: 'E2E Test Session' }).click()
+    await page.getByText('e2e_test').click()
+    await page.getByText('products').click()
+    await page.getByRole('button', { name: 'Add Column' }).click()
+    await expect(page.getByRole('dialog', { name: 'Add Column to products' })).toBeVisible()
+
+    const trigger = page.getByRole('button', { name: 'Type' })
+    const menuId = await trigger.getAttribute('aria-controls')
+    expect(menuId).toBeTruthy()
+    await trigger.click()
+
+    // The listbox portals to document.body, so it is found by the id the
+    // trigger advertises rather than by a role query scoped to the dialog.
+    const listbox = page.locator(`[id="${menuId}"]`)
+    await expect(listbox).toBeVisible()
+    const handle = await listbox.evaluateHandle(el => el as HTMLElement)
+
+    await trigger.click()
+    // A listbox rendered from a plain `open ? … : null` is gone within one
+    // frame and never reports a partial opacity; an animated one fades through
+    // intermediate values before it detaches.
+    await page.waitForFunction(
+      el => el.isConnected && parseFloat(getComputedStyle(el).opacity) < 0.9,
+      handle,
+      { timeout: 2000 },
+    )
+    await expect.poll(() => handle.evaluate(el => el.isConnected)).toBe(false)
+  })
+
   test('expands and reverses the Query Log without losing its endpoint', async ({ page }) => {
-    const panel = page.getByText('Query Log').locator('xpath=../..')
+    const panel = page.getByText('Query Log').locator('xpath=../../..')
     await page.getByText('Query Log').click()
     await page.getByText('Query Log').click()
     await page.getByText('Query Log').click()

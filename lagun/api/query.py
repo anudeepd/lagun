@@ -18,10 +18,16 @@ from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, escape_value, format_mysql_time
 from lagun.api.scope import effective_scope, require_db_scope
 from lagun.api.sql_analysis import (
+    _WRITE_KINDS,
+    SCOPE_REFERENCE_EXEMPT_SCHEMAS,
     add_row_limit,
+    referenced_schemas,
     statement_kind,
     strip_comments_and_literals,
+    target_database,
     target_table,
+    top_level_keywords,
+    unwrap_executable_comments,
 )
 from lagun.api.sql_script import SqlScriptError, split_sql_script
 from lagun.models.query import (
@@ -370,6 +376,137 @@ def _script_scope_error(
     return None
 
 
+_SCOPE_FAIL_CLOSED_KINDS = frozenset(
+    {
+        *_WRITE_KINDS,
+        "CREATE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "RENAME",
+        "LOAD",
+        "LOCK",
+        "CALL",
+        "PREPARE",
+        "EXECUTE",
+        "DEALLOCATE",
+        "GRANT",
+        "REVOKE",
+    }
+)
+
+# Kinds whose statements may legitimately have no determinable target: an
+# unqualified object DDL resolves to the connection's current database, which
+# ``require_db_scope(effective_db)`` has already checked. CALL/PREPARE/EXECUTE/
+# DEALLOCATE can hide arbitrary SQL and GRANT/REVOKE change privileges rather
+# than schema-scoped data, so those — and an unrecognised write — stay
+# fail-closed.
+#
+# The four table writes are here for the same reason the import path treats them
+# as checkable: an unqualified INSERT/UPDATE/DELETE/REPLACE resolves through the
+# connection's current schema, which the scope check above has already vetted,
+# and the branch below still refuses one when no database is selected at all.
+# Without them a legitimate `INSERT t VALUES (…)` (MySQL's optional `INTO`) or a
+# multi-table `UPDATE a JOIN b … SET` — neither of which a target pattern
+# resolves — was a 403 on every scoped connection.
+_SCOPE_TARGETLESS_OK_KINDS = frozenset(
+    {
+        "CREATE",
+        "DROP",
+        "ALTER",
+        "TRUNCATE",
+        "RENAME",
+        "LOAD",
+        "LOCK",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "REPLACE",
+    }
+)
+
+
+def _classify_statement_write_like(sql_text: str) -> tuple[str, bool]:
+    """The statement's kind, and whether it is write-like for scope checks.
+
+    Shared by `_statement_names_its_own_schema` and `_require_statement_scope`:
+    both need the same "is this write-like" classification (including the
+    ``WITH``-prelude special case, where a CTE's trailing statement can be a
+    write even though ``WITH`` itself isn't in `_SCOPE_FAIL_CLOSED_KINDS`), and
+    a change to that classification must reach both call sites or one can
+    silently fall out of sync with the other on statements that gate access to
+    a schema outside the session's scope.
+    """
+    unwrapped = unwrap_executable_comments(sql_text)
+    kind = statement_kind(unwrapped)
+    write_like = kind in _SCOPE_FAIL_CLOSED_KINDS
+    if kind == "WITH" and any(
+        k in _SCOPE_FAIL_CLOSED_KINDS for k in top_level_keywords(sql_text)[1:]
+    ):
+        write_like = True
+    return kind, write_like
+
+
+def _statement_names_its_own_schema(sql_text: str) -> bool:
+    """True when the statement resolves against a schema it names itself.
+
+    A qualified read or write carries its schema in the statement, so the
+    connection's current database is irrelevant to it. A statement with no
+    schema reference at all (``SELECT 1``, ``SHOW TABLES``) reads from the
+    current database, and a write whose target is unqualified (``INSERT t …``)
+    or not a table at all (``CALL``, ``PREPARE``) resolves through it too, so
+    both rely on that default rather than naming a schema of their own.
+    """
+    _kind, write_like = _classify_statement_write_like(sql_text)
+    if write_like:
+        target = target_table(sql_text)
+        if target is None or not target[0]:
+            return False
+    return bool(referenced_schemas(sql_text))
+
+
+def _require_statement_scope(
+    session, sql_text: str, current_database: str | None
+) -> None:
+    """Reject raw SQL that names a schema outside the session's scope.
+
+    ``require_db_scope`` only guards the connection's current database; a
+    qualified read (``SELECT * FROM other_db.t``) or a qualified write would
+    otherwise reach another schema. Every explicitly referenced schema must be
+    inside ``effective_scope``, except MySQL's own catalogs. A write-like
+    statement with a target that cannot be determined fails closed for scoped
+    sessions unless its kind is object DDL that resolves to the current
+    database; unrestricted sessions and downstream MySQL grants keep their
+    existing behaviour.
+    """
+    scope = effective_scope(session)
+    if scope is None:
+        return
+    for schema in referenced_schemas(sql_text):
+        if schema.lower() in SCOPE_REFERENCE_EXEMPT_SCHEMAS:
+            continue
+        require_db_scope(session, schema)
+    kind, write_like = _classify_statement_write_like(sql_text)
+    if not write_like:
+        return
+    target = target_table(sql_text)
+    if target is None and target_database(sql_text) is None:
+        if kind not in _SCOPE_TARGETLESS_OK_KINDS:
+            raise HTTPException(
+                403,
+                "Statement target cannot be verified against this connection's "
+                "allowed databases.",
+            )
+        return
+    if target is not None:
+        database, _ = target
+        if not database and not current_database:
+            raise HTTPException(
+                403, "Unqualified write needs a selected database in scope."
+            )
+        require_db_scope(session, current_database if not database else database)
+
+
 class _QueryCancelled(Exception):
     pass
 
@@ -563,15 +700,22 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
         # Scope enforcement resolves req.database and then session.default_db, so
         # omitting the database cannot bypass the check, and a managed connection
         # is bounded by the administrator's ceiling (see lagun/api/scope.py).
-        #
-        # Known limitation: this guards the connection's current database only.
-        # Free-form SQL naming another schema (``SELECT * FROM other_db.tbl``) is
-        # not scanned — parsing is fragile and bypassable via dynamic SQL and
-        # prepared statements. The deeper gate remains the MySQL user's grants.
-        require_db_scope(session, effective_db)
+        # The saved default only matters for a statement that relies on it: a
+        # fully schema-qualified statement (the data grid's `SELECT * FROM db.t`)
+        # names its own schema, so an out-of-scope default_db must not 403 it. An
+        # unqualified statement still resolves through the connection's current
+        # schema, so the default stays required for it. Free-form SQL is
+        # additionally scanned for qualified schema references, so
+        # ``SELECT * FROM other_db.t`` cannot reach outside the scope; an
+        # unrecognised write target fails closed for scoped sessions. The deeper
+        # gate remains the MySQL user's grants.
+        if req.database or not _statement_names_its_own_schema(req.sql):
+            require_db_scope(session, effective_db)
+        _require_statement_scope(
+            session, sql_text=req.sql, current_database=effective_db
+        )
         sql = req.sql.strip().rstrip(";").strip()
         limit = min(req.limit or session.query_limit, _QUERY_MAX_RESULT_ROWS)
-
         # Every row-returning statement gets a LIMIT unless it already has a
         # top-level one. A prefix regex is not enough: `WITH ... SELECT` and
         # `/* hint */ SELECT` both return rows but match neither `^SELECT` nor a
@@ -923,14 +1067,35 @@ async def execute_script_query(
                                 raise TimeoutError(
                                     "Large write script exceeded max runtime"
                                 )
-                            await cur.execute(statement)
+                            remaining = max(
+                                0.1, _BULK_MAX_RUNTIME_SECONDS - (time.monotonic() - t0)
+                            )
+                            try:
+                                async with asyncio.timeout(remaining):
+                                    await cur.execute(statement)
+                            except TimeoutError as timeout_exc:
+                                failed_idx = idx
+                                failed_preview = _preview_statement(statement)
+                                raise TimeoutError(
+                                    "Large write script exceeded max runtime"
+                                ) from timeout_exc
                             statements_executed += 1
                             if cur.rowcount and cur.rowcount > 0:
                                 affected_rows += cur.rowcount
-                        await cur.execute("COMMIT")
+                        remaining = max(
+                            0.1, _BULK_MAX_RUNTIME_SECONDS - (time.monotonic() - t0)
+                        )
+                        try:
+                            async with asyncio.timeout(remaining):
+                                await cur.execute("COMMIT")
+                        except TimeoutError as timeout_exc:
+                            raise TimeoutError(
+                                "Large write script exceeded max runtime"
+                            ) from timeout_exc
                     except BaseException:
                         try:
-                            await cur.execute("ROLLBACK")
+                            async with asyncio.timeout(5):
+                                await cur.execute("ROLLBACK")
                         except Exception:
                             try:
                                 await conn.close()
@@ -939,9 +1104,10 @@ async def execute_script_query(
                         raise
                     finally:
                         try:
-                            await cur.execute(
-                                f"SET SESSION innodb_lock_wait_timeout={original_timeout}"
-                            )
+                            async with asyncio.timeout(5):
+                                await cur.execute(
+                                    f"SET SESSION innodb_lock_wait_timeout={original_timeout}"
+                                )
                         except Exception:
                             pass
                 finally:
@@ -1106,9 +1272,10 @@ def _coerce_binary_value(value: Any, data_type: str | None) -> Any:
     """Decode the grid's ``0x…`` text back into bytes for a binary column."""
     if data_type not in _BINARY_DATA_TYPES or not isinstance(value, str):
         return value
-    body = value[2:] if value[:2].lower() == "0x" else value
+    if value[:2].lower() != "0x":
+        return value
     try:
-        return bytes.fromhex(body)
+        return bytes.fromhex(value[2:])
     except ValueError:
         return value
 
@@ -1120,6 +1287,20 @@ def _coerce_binary_map(
         key: _coerce_binary_value(value, data_types.get(key))
         for key, value in values.items()
     }
+
+
+def _discard_lease_connection(conn: Any) -> None:
+    """Drop a leased connection so a timed-out statement cannot be reused.
+
+    After ``asyncio.timeout`` fires, the driver connection may still own the
+    stuck statement; returning it to the pool risks handing a busy connection
+    to the next request. Closing marks it closed, and the pool's ``release``
+    then discards it instead of recycling it into the free list.
+    """
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 def _build_pk_where(pk: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -1183,9 +1364,15 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
 
                 # Single-row writes had no deadline at all; a stuck statement
                 # held a pooled connection for as long as the server allowed.
-                async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
-                    await cur.execute(sql, params)
-                    affected = cur.rowcount
+                # On timeout the leased connection is discarded (not returned to
+                # the pool) because it may still own the stuck statement.
+                try:
+                    async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                        await cur.execute(sql, params)
+                        affected = cur.rowcount
+                except TimeoutError:
+                    _discard_lease_connection(conn)
+                    raise
 
         return CellUpdateResult(
             ok=True, affected_rows=affected, sql_executed=display_sql
@@ -1219,9 +1406,13 @@ async def row_update(session_id: str, req: RowUpdateRequest):
                 params = list(updates.values()) + pk_values
                 display_sql = _display_sql(sql, params)
 
-                async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
-                    await cur.execute(sql, params)
-                    affected = cur.rowcount
+                try:
+                    async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                        await cur.execute(sql, params)
+                        affected = cur.rowcount
+                except TimeoutError:
+                    _discard_lease_connection(conn)
+                    raise
 
         return RowUpdateResult(
             ok=True, affected_rows=affected, sql_executed=display_sql
@@ -1254,8 +1445,12 @@ async def row_insert(session_id: str, req: RowInsertRequest):
                     sql = f"INSERT INTO {db_q}.{tbl_q} () VALUES ()"
                 params = list(values.values())
                 display_sql = _display_sql(sql, params)
-                async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
-                    await cur.execute(sql, params)
+                try:
+                    async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
+                        await cur.execute(sql, params)
+                except TimeoutError:
+                    _discard_lease_connection(conn)
+                    raise
                 return RowInsertResult(
                     ok=True,
                     insert_id=cur.lastrowid,
@@ -1293,17 +1488,24 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                 try:
                     # The whole batch shares one transaction, so it also shares
                     # one deadline: a huge key list must not hold a pooled
-                    # connection and row locks indefinitely.
-                    async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
-                        for pk in req.primary_keys:
-                            pk_clauses, pk_values = _build_pk_where(
-                                _coerce_binary_map(pk, data_types)
-                            )
-                            sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
-                            if len(display_sqls) < _ROW_DELETE_MAX_ECHO:
-                                display_sqls.append(_display_sql(sql, pk_values))
-                            await cur.execute(sql, pk_values)
-                            total_affected += cur.rowcount
+                    # connection and row locks indefinitely. On timeout the
+                    # leased connection is discarded (not returned to the pool).
+                    try:
+                        async with asyncio.timeout(
+                            max(0.1, _QUERY_MAX_RUNTIME_SECONDS)
+                        ):
+                            for pk in req.primary_keys:
+                                pk_clauses, pk_values = _build_pk_where(
+                                    _coerce_binary_map(pk, data_types)
+                                )
+                                sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
+                                if len(display_sqls) < _ROW_DELETE_MAX_ECHO:
+                                    display_sqls.append(_display_sql(sql, pk_values))
+                                await cur.execute(sql, pk_values)
+                                total_affected += cur.rowcount
+                    except TimeoutError:
+                        _discard_lease_connection(conn)
+                        raise
                     await cur.execute("COMMIT")
                 except Exception:
                     await cur.execute("ROLLBACK")

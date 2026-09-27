@@ -7,21 +7,28 @@ from httpx import ASGITransport, AsyncClient
 from lagun import main as lagun_main
 from lagun.api import presence, query
 from lagun.api.presence import PresenceUpdate
-from lagun.main import _audit_details
+from lagun.main import _AUDIT_MAX_DETAILS_CHARS, _AUDIT_TRUNCATED, _audit_details
 
 
 def request_for(username: str | None):
     return SimpleNamespace(state=SimpleNamespace(user=username))
 
 
-def test_request_details_preserve_complete_json_body():
+def test_request_details_are_capped_with_a_marker():
+    """A body over the cap is stored as its head plus an explicit marker."""
     body = (
         '{"bulk":{"fullSql":"SELECT * FROM users WHERE email=\'alice@example.test\'"},'
         '"statements":["UPDATE users SET name=\'Alice\'"],'
         '"padding":"' + ("x" * 32_001) + '"}'
     ).encode()
+    assert len(body) > _AUDIT_MAX_DETAILS_CHARS
 
-    assert _audit_details(body) == body.decode()
+    details = _audit_details(body)
+
+    assert len(details) == _AUDIT_MAX_DETAILS_CHARS + len(_AUDIT_TRUNCATED)
+    assert details.endswith(_AUDIT_TRUNCATED)
+    # The head survives, so the request is still recognisable to the operator.
+    assert details.startswith('{"bulk":{"fullSql":"SELECT * FROM users')
 
 
 @pytest.mark.asyncio

@@ -118,33 +118,52 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 # carries a passphrase. Those must not reach the durable audit store, the admin
 # console or `lagun audit`.
 _AUDIT_REDACTED = "***"
-_AUDIT_SECRET_KEYS = frozenset(
-    {
-        "password",
-        "passphrase",
-        "new_password",
-        "old_password",
-        "password_enc",
-        "secret",
-        "token",
-    }
+# Matching is a substring test rather than a fixed list of names: a body like
+# {"auth": {"bearer": "..."}} or {"client_secret": "..."} is credential-bearing
+# even though no exact name covers it. Over-matching is the safe direction — a
+# key that slips through stores a live credential in unencrypted SQLite for
+# every administrator to read, while masking a harmless field such as "monkey"
+# only costs the operator that one detail. The exact names this replaced
+# (password, passphrase, new_password, old_password, password_enc, secret,
+# token) all contain one of these parts, so they keep being redacted.
+_AUDIT_SECRET_KEY_PARTS = (
+    "pass",
+    "secret",
+    "token",
+    "key",
+    "auth",
+    "cookie",
+    "credential",
 )
+# The audit store keeps request bodies for operator review, but it must not grow
+# with them: a bulk script or import body can be megabytes, and it would be
+# written to SQLite and served to the admin console on every request.
+_AUDIT_MAX_DETAILS_CHARS = 16 * 1024
+_AUDIT_TRUNCATED = "[truncated]"
+
+
+def _is_secret_key(key: Any) -> bool:
+    lowered = str(key).lower()
+    return any(part in lowered for part in _AUDIT_SECRET_KEY_PARTS)
 
 
 def _redact_secrets(value: Any) -> Any:
     """Recursively replace credential-bearing values with a placeholder."""
     if isinstance(value, dict):
         return {
-            key: (
-                _AUDIT_REDACTED
-                if str(key).lower() in _AUDIT_SECRET_KEYS
-                else _redact_secrets(item)
-            )
+            key: (_AUDIT_REDACTED if _is_secret_key(key) else _redact_secrets(item))
             for key, item in value.items()
         }
     if isinstance(value, list):
         return [_redact_secrets(item) for item in value]
     return value
+
+
+def _cap_details(details: str) -> str:
+    """Bound what is stored, marking a body that did not fit."""
+    if len(details) <= _AUDIT_MAX_DETAILS_CHARS:
+        return details
+    return details[:_AUDIT_MAX_DETAILS_CHARS] + _AUDIT_TRUNCATED
 
 
 def _audit_details(body: bytes) -> str | None:
@@ -157,9 +176,9 @@ def _audit_details(body: bytes) -> str | None:
     except ValueError:
         # An unparseable body cannot be redacted safely, so record only that it
         # existed rather than storing raw bytes that might hold a password.
-        return "[unparseable request body omitted]"
-    return json.dumps(
-        _redact_secrets(parsed), ensure_ascii=False, separators=(",", ":")
+        return _cap_details("[unparseable request body omitted]")
+    return _cap_details(
+        json.dumps(_redact_secrets(parsed), ensure_ascii=False, separators=(",", ":"))
     )
 
 
@@ -185,6 +204,17 @@ def _should_audit_request(request: Request, username: str | None) -> bool:
 async def ldap_connection_access_and_audit(request: Request, call_next):
     """Enforce session ownership and write a private audit row in LDAP mode."""
     username = getattr(request.state, "user", None) if ldap_enabled() else None
+    # A per-user narrowing of a shared connection is resolved from the acting
+    # user (session_store.acting_username) while the request is served, so
+    # install the identity here rather than making every handler pass it down.
+    token = session_store.set_acting_username(username)
+    try:
+        return await _handle_audited_request(request, call_next, username)
+    finally:
+        session_store.reset_acting_username(token)
+
+
+async def _handle_audited_request(request: Request, call_next, username: str | None):
     session_match = re.match(r"^/api/v1/sessions/([^/]+)(?:/|$)", request.url.path)
     session_id = (
         session_match.group(1)
@@ -327,16 +357,25 @@ async def reject_cross_site_writes(request: Request, call_next):
         # page script, so when it is present it decides on its own. The
         # Origin-versus-Host comparison is the fallback for clients that do not
         # send it, and it is the fragile one behind a proxy that rewrites Host.
-        # `Sec-Fetch-Site` is set by the browser itself and cannot be forged by
-        # page script, so when it is present it decides on its own. The
-        # Origin-versus-Host comparison is the fallback for clients that do not
-        # send it, and it is the fragile one behind a proxy that rewrites Host.
         fetch_site = request.headers.get("sec-fetch-site")
         if fetch_site:
             if fetch_site not in {"same-origin", "same-site", "none"}:
                 return JSONResponse(
                     status_code=403, content={"detail": "Cross-origin request rejected"}
                 )
+            if fetch_site == "same-site":
+                # `same-site` means same registrable domain but possibly another
+                # origin (a sibling subdomain or a different port): the app has
+                # no sibling origin, so require the exact server Origin when one
+                # is present. No-Origin clients and proxied same-origin writes
+                # (Host rewritten, browser metadata saying same-origin) keep
+                # their existing behaviour.
+                origin = request.headers.get("origin")
+                if origin and not _origin_allowed(request, origin):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Cross-origin request rejected"},
+                    )
         else:
             origin = request.headers.get("origin")
             if origin and not _origin_allowed(request, origin):
@@ -464,7 +503,14 @@ async def third_party_licenses():
 
 
 def _ensure_ldapgate_static_paths(config) -> None:
-    """Allow only login-page public assets without exposing the SPA bundle."""
+    """Allow the login-page public assets and the health probes without exposing
+    the SPA bundle.
+
+    ``/healthz`` and ``/readyz`` must be reachable without a session: a liveness
+    or readiness probe cannot log in, and an orchestrator that sees 401 there
+    restarts a healthy container (or routes traffic to an instance whose database
+    layer is still starting).
+    """
     proxy_config = getattr(config, "proxy", None)
     if proxy_config is None:
         return
@@ -474,7 +520,13 @@ def _ensure_ldapgate_static_paths(config) -> None:
     ):
         proxy_config.session_cookie_name = "lagun_session"
     static_paths = list(getattr(proxy_config, "static_paths", []) or [])
-    for path in ("/favicon.svg", "/favicon.ico", "/THIRD_PARTY_LICENSES.txt"):
+    for path in (
+        "/favicon.svg",
+        "/favicon.ico",
+        "/THIRD_PARTY_LICENSES.txt",
+        "/healthz",
+        "/readyz",
+    ):
         if path not in static_paths:
             static_paths.append(path)
     proxy_config.static_paths = static_paths

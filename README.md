@@ -85,7 +85,9 @@ server. Neither can be changed from the UI.
 | `LAGUN_DB_POOL_REAP_INTERVAL_SECONDS` | `60` | server | How often idle pools are reaped. |
 | `LAGUN_DB_POOL_CLOSE_GRACE_SECONDS` | `5` | server | Grace period for in-flight connections on shutdown before a pool is force-terminated, so a stuck query cannot block process exit. |
 | `LAGUN_QUERY_MAX_RUNTIME_SECONDS` | `30` | server | Deadline for a normal query execution. |
-| `LAGUN_EXPORT_MAX_RUNTIME_SECONDS` | `300` | server | Deadline for a streaming export; a stream that runs longer is stopped with an explicit error instead of hanging. |
+| `LAGUN_EXPORT_MAX_RUNTIME_SECONDS` | `300` | server | Deadline for a streaming export; a stream that runs longer is stopped with an explicit error instead of hanging. The SQL formats end with a `-- Lagun export complete: N rows` marker so a truncated stream is detectable, but a browser download cannot be verified this way — a truncated CSV is the only signal there. |
+| `LAGUN_EXPORT_MAX_CONCURRENCY` | `3` | server | Concurrent streaming exports. Each holds a pooled connection and an open server-side cursor for the whole download, so this caps how many a slow client can pin. |
+| `LAGUN_EXPORT_QUEUE_TIMEOUT_SECONDS` | `10` | server | How long an export waits for a free concurrency slot before answering `503` with `Retry-After`. |
 | `LAGUN_QUERY_MAX_RESULT_ROWS` | `100000` | server | Hard ceiling on rows returned by one query, regardless of the session limit. |
 | `LAGUN_BULK_MAX_STATEMENTS` | `3000` | server | Statements allowed in one large write script. |
 | `LAGUN_BULK_MAX_BODY_BYTES` | `2097152` (2 MiB) | server | Request body ceiling for a large write script. |

@@ -90,7 +90,7 @@ async def test_admin_inventory_and_activity_filters_never_return_password(
     assert "password" not in result["items"][0]
     assert "secret" not in str(result["items"][0])
 
-    inventory = await session_store.list_admin_connections()
+    inventory, _ = await session_store.list_admin_connections()
     assert inventory[0]["username"] == "reporter"
     assert "password_enc" not in inventory[0]
 

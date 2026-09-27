@@ -109,6 +109,25 @@ async def test_close_all_pools_bounds_shutdown_of_stuck_pools(monkeypatch, caplo
 
 
 @pytest.mark.asyncio
+async def test_close_pool_bounds_wait_for_a_stuck_query(monkeypatch, caplog):
+    monkeypatch.setattr(pool_module, "_POOL_CLOSE_GRACE_SECONDS", 0.05)
+    stuck_raw = StuckRawPool()
+    pool_module._pools["stuck"] = make_pool(stuck_raw)
+
+    started = time.monotonic()
+    with caplog.at_level(logging.WARNING, logger="lagun.db.pool"):
+        # close_pool runs on the session update/delete request path; without the
+        # grace period this would wait forever on the never-released lease.
+        await asyncio.wait_for(pool_module.close_pool("stuck"), timeout=1)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.5
+    assert stuck_raw.terminated is True
+    assert "stuck" not in pool_module._pools
+    assert "Force-terminated database pool for session stuck" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_first_connection_failure_is_mapped_not_raw(monkeypatch, tmp_path):
     """A driver failure while opening a session's pool must not escape as a 500.
 

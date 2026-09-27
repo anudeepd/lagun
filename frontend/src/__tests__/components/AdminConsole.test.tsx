@@ -67,7 +67,7 @@ const retention = {
 
 beforeEach(() => {
   vi.mocked(api.getAdminOverview).mockResolvedValue(overview)
-  vi.mocked(api.getAdminConnections).mockResolvedValue({ items: [connection], observed_at: 1 })
+  vi.mocked(api.getAdminConnections).mockResolvedValue({ items: [connection], next_cursor: null, observed_at: 1 })
   vi.mocked(api.getAdminUsers).mockResolvedValue(users)
   vi.mocked(api.getAdminActivity).mockResolvedValue({ items: [], observed_at: 1 })
   vi.mocked(api.getAdminQueries).mockResolvedValue({ items: [], observed_at: 1 })
@@ -171,6 +171,46 @@ describe('AdminConsole', () => {
     // Appended, not replaced, and the pager disappears once the cursor is null.
     expect(screen.getByText('GET /api/v1/newest')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Load 100 older' })).not.toBeInTheDocument())
+  })
+
+  it('pages the connection inventory with the keyset cursor', async () => {
+    const staging = { ...connection, id: 'db-0', name: 'Staging', is_default: false }
+    vi.mocked(api.getAdminConnections)
+      .mockResolvedValueOnce({ items: [connection], next_cursor: 'cursor-1', observed_at: 1 })
+      // The next page repeats a row the first one already showed.
+      .mockResolvedValueOnce({ items: [connection, staging], next_cursor: null, observed_at: 1 })
+
+    render(<AdminConsole />)
+    await screen.findByRole('heading', { name: 'Workspace overview' })
+    fireEvent.click(screen.getByRole('button', { name: 'Connections (1)' }))
+
+    const inventory = await screen.findByRole('table', { name: 'Saved connection inventory and active users' })
+    fireEvent.click(screen.getByRole('button', { name: 'Load more connections' }))
+
+    // The cursor from the first page is what asks for the second one.
+    await waitFor(() => expect(api.getAdminConnections).toHaveBeenLastCalledWith('cursor-1'))
+    expect(await within(inventory).findByText('Staging')).toBeInTheDocument()
+    // Appended once, not once per page that mentioned it.
+    expect(within(inventory).getAllByText('Production')).toHaveLength(1)
+    expect(within(inventory).getAllByText('Staging')).toHaveLength(1)
+    // The last page reported no cursor, so the pager is gone.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Load more connections' })).not.toBeInTheDocument())
+
+    // The 15s refresh re-reads page 1 only: it merges instead of replacing, so
+    // the page that was just loaded is not thrown away.
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }))
+    await waitFor(() => expect(api.getAdminConnections).toHaveBeenCalledTimes(3))
+    expect(within(inventory).getAllByText('Production')).toHaveLength(1)
+    expect(within(inventory).getByText('Staging')).toBeInTheDocument()
+  })
+
+  it('hides the connection pager when the page was the last one', async () => {
+    render(<AdminConsole />)
+    await screen.findByRole('heading', { name: 'Workspace overview' })
+    fireEvent.click(screen.getByRole('button', { name: 'Connections (1)' }))
+
+    expect(await screen.findByRole('table', { name: 'Saved connection inventory and active users' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Load more connections' })).not.toBeInTheDocument()
   })
 
   it('shows raw query targets and complete request bodies', async () => {

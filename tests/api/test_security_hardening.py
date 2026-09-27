@@ -96,6 +96,31 @@ async def test_request_without_an_origin_header_is_allowed(client):
     assert r.status_code == 201
 
 
+async def test_same_site_cross_origin_write_is_rejected(client):
+    """``same-site`` is not ``same-origin``: a sibling origin write is refused."""
+    r = await client.post(
+        "/api/v1/sessions",
+        json={"name": "sibling", "username": "u"},
+        headers={
+            "origin": "https://evil.example.com",
+            "host": "lagun.example.com",
+            "sec-fetch-site": "same-site",
+        },
+    )
+    assert r.status_code == 403
+    assert "Cross-origin" in r.json()["detail"]
+
+
+async def test_same_site_write_without_an_origin_header_is_allowed(client):
+    """No-Origin clients keep working even when the browser metadata is same-site."""
+    r = await client.post(
+        "/api/v1/sessions",
+        json={"name": "cli-same-site", "username": "u"},
+        headers={"sec-fetch-site": "same-site"},
+    )
+    assert r.status_code == 201
+
+
 # ---------------------------------------------------------------------------
 # Response security headers (S-10)
 # ---------------------------------------------------------------------------

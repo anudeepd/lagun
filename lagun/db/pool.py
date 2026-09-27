@@ -258,7 +258,22 @@ async def close_pool(session_id: str) -> None:
         _pool_locks.pop(session_id, None)
     if pool:
         await pool.close()
-        await pool.wait_closed()
+        # wait_closed() waits for connections leased by in-flight queries, which
+        # may never return. This runs on the session update/delete request path,
+        # so bound it the way close_all_pools() does: one stuck query must not
+        # pin the request (and the pool lock) indefinitely.
+        try:
+            await asyncio.wait_for(
+                pool.wait_closed(), timeout=_POOL_CLOSE_GRACE_SECONDS
+            )
+        except asyncio.TimeoutError:
+            pool.terminate()
+            _log.warning(
+                "Force-terminated database pool for session %s after the %.1fs "
+                "close grace period",
+                session_id,
+                _POOL_CLOSE_GRACE_SECONDS,
+            )
 
 
 async def _reap_idle_pools() -> None:

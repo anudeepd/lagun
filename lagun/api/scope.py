@@ -11,7 +11,12 @@ A saved connection carries two lists:
   that choice is never silent.
 * ``selected_databases`` — the databases the *user* narrowed the connection to.
   For a managed connection an empty list means "everything the administrator
-  allows", never "everything on the server".
+  allows", never "everything on the server". Because a shared connection is one
+  row for several users, that narrowing is stored per user in
+  ``session_user_scope`` and the store copies the acting user's value onto the
+  session it loads (empty when the user never narrowed anything); an unmanaged
+  session, or one loaded with no known user, carries the value in the row's own
+  column instead.
 
 For a private (user-created) connection there is no ceiling and the user's own
 list is the scope; an empty list means unrestricted, which keeps a local
@@ -38,7 +43,12 @@ def _ceiling(session) -> frozenset[str]:
 
 
 def effective_scope(session) -> frozenset[str] | None:
-    """The databases this session may touch, or ``None`` when unrestricted."""
+    """The databases this session may touch, or ``None`` when unrestricted.
+
+    For a managed session ``selected_databases`` already holds the acting user's
+    own narrowing (see the module docstring), so it is intersected with the
+    ceiling exactly like a private connection's list is used as-is.
+    """
     chosen = frozenset(session.selected_databases or [])
     ceiling = _ceiling(session)
     if not ceiling:

@@ -42,6 +42,8 @@ class AdminOverview(BaseModel):
 
 class AdminConnectionsResponse(BaseModel):
     items: list[AdminConnection]
+    # Keyset cursor for the next page; null when this page is the last one.
+    next_cursor: Optional[str]
     observed_at: int
 
 

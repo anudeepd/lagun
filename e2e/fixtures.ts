@@ -17,6 +17,18 @@ export const E2E_PASS = process.env.E2E_MYSQL_PASS ?? 'dev'
 
 /** Create a session via the API and return its ID. */
 export async function createTestSession(page: Page): Promise<string> {
+  // A run that dies mid-way leaves its session behind, and two rows with the
+  // same name make openSessionQueryTab's text locator ambiguous (a strict-mode
+  // violation that fails every spec using it). Drop leftovers of this name first
+  // so a run only ever sees the session it created.
+  const existing = await page.request.get('/api/v1/sessions')
+  if (existing.ok()) {
+    for (const session of (await existing.json()) as Array<{ id: string; name: string }>) {
+      if (session.name === 'E2E Test Session') {
+        await page.request.delete(`/api/v1/sessions/${session.id}`)
+      }
+    }
+  }
   const res = await page.request.post('/api/v1/sessions', {
     data: {
       name: 'E2E Test Session',
@@ -50,6 +62,12 @@ export async function seedDatabase(page: Page, sessionId: string) {
             ) ENGINE=InnoDB`,
     },
   })
+  // Reset before seeding: without this each test appends three more rows to
+  // whatever earlier runs left behind, and a spec that asserts on "the first
+  // row" is then at the mercy of an unordered SELECT.
+  await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
+    data: { sql: 'TRUNCATE TABLE e2e_test.products' },
+  })
   await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
     data: {
       sql: `INSERT INTO e2e_test.products (title, price)
@@ -70,12 +88,14 @@ export async function teardownDatabase(page: Page, sessionId: string) {
  * Needed because the editor (.cm-content) only exists inside an open query tab.
  */
 export async function openSessionQueryTab(page: Page, sessionName: string) {
-  const sessionSpan = page.locator('span.text-xs.truncate', { hasText: sessionName })
-  await sessionSpan.click() // activate the session
-  const sessionRow = sessionSpan.locator('xpath=..')
-  await sessionRow.hover()  // reveal the context menu button
-  await sessionRow.locator('div.relative button').click()
-  await sessionRow.getByRole('button', { name: 'New Query', exact: true }).click()
+  const sessionButton = page.locator('button', {
+    has: page.locator('span.text-xs.truncate', { hasText: sessionName })
+  })
+  await sessionButton.click() // activate the session
+  const sessionRow = sessionButton.locator('xpath=ancestor::div[1]')
+  await sessionRow.hover() // reveal the context menu button
+  await sessionRow.getByRole('button', { name: `Actions for ${sessionName}` }).click()
+  await sessionRow.getByRole('menuitem', { name: 'New Query', exact: true }).click()
 }
 
 /** Extended test with a fully set-up session + seeded DB. */

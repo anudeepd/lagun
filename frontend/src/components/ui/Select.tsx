@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { Check, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
 import * as m from 'motion/react-m'
-import { surfaceTransition } from '../../motion/tokens'
+import { AnimatePresence } from 'motion/react'
+import { exitTransition, surfaceTransition } from '../../motion/tokens'
 import Label from './Label'
 
 interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'multiple'> {
@@ -19,13 +20,20 @@ interface SelectOption {
   disabled: boolean
 }
 
-const FOCUSABLE_SELECTOR = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+interface MenuPosition {
+  top?: number
+  bottom?: number
+  left: number
+  width: number
+  maxHeight: number
+  placement: 'below' | 'above'
+}
 
 export default function Select({ label, error, className, containerClassName, compact = false, children, value, defaultValue, onChange, disabled, id, 'aria-label': ariaLabel }: SelectProps) {
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const [uncontrolledValue, setUncontrolledValue] = useState(String(defaultValue ?? ''))
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, width: 0 })
+  const [menuPosition, setMenuPosition] = useState<MenuPosition>({ top: 0, left: 0, width: 0, maxHeight: 320, placement: 'below' })
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
@@ -42,7 +50,7 @@ export default function Select({ label, error, className, containerClassName, co
   const enabledOptions = options.filter(option => !option.disabled)
   const selectedValue = value === undefined ? uncontrolledValue : String(value)
   const selected = options.find(option => option.value === selectedValue) ?? options[0]
-  const isInsideDialog = rootRef.current?.closest('[role="dialog"]') !== null
+  const isInsideDialog = rootRef.current?.closest('[role="dialog"], [role="alertdialog"]') !== null
 
   useEffect(() => {
     if (!open) return
@@ -69,13 +77,25 @@ export default function Select({ label, error, className, containerClassName, co
   useLayoutEffect(() => {
     if (!open) return
     const positionMenu = () => {
-      const rect = rootRef.current?.getBoundingClientRect()
+      // Anchor to the trigger, not the whole field: the container also holds
+      // the label and the error text, which pushed the menu away from the
+      // control it belongs to.
+      const rect = triggerRef.current?.getBoundingClientRect()
       if (!rect) return
+      const gap = compact ? 3 : 4
       const width = Math.min(Math.max(rect.width, compact ? 96 : 128), window.innerWidth - 16)
       const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8)
-      const top = rect.bottom + (compact ? 3 : 4)
-      const maxHeight = Math.min(320, window.innerHeight - top - 8)
-      setMenuPosition({ top: maxHeight < 120 ? Math.max(8, rect.top - Math.min(320, rect.top - 8)) : top, left, width })
+      const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - gap - 8)
+      const spaceAbove = Math.max(0, rect.top - gap - 8)
+      // The height cap is the room actually available on the chosen side: a
+      // fixed 320px cap let the list run off the bottom of the viewport. Above
+      // the trigger the list is anchored by its bottom edge, so a short list
+      // sits against the trigger instead of floating 320px above it.
+      if (spaceBelow < 120 && spaceAbove > spaceBelow) {
+        setMenuPosition({ bottom: window.innerHeight - rect.top + gap, left, width, maxHeight: Math.min(320, spaceAbove), placement: 'above' })
+      } else {
+        setMenuPosition({ top: rect.bottom + gap, left, width, maxHeight: Math.min(320, spaceBelow), placement: 'below' })
+      }
     }
     positionMenu()
     window.addEventListener('resize', positionMenu)
@@ -114,14 +134,24 @@ export default function Select({ label, error, className, containerClassName, co
 
   const handleOptionKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
     if (event.key === 'Tab') {
-      const dialog = triggerRef.current?.closest('[role="dialog"], [role="alertdialog"]')
-      if (!dialog) return
-      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-      if (focusables.length === 0) return
-      event.preventDefault()
-      event.stopPropagation()
-      if (event.shiftKey && index === 0) focusables[focusables.length - 1].focus()
-      else if (!event.shiftKey && index === enabledOptions.length - 1) focusables[0].focus()
+      if (isInsideDialog) {
+        // The listbox is portaled to document.body, outside the dialog DOM, so
+        // an enclosing Modal's focus trap never sees it as a dialog control to
+        // wrap from. Closing here and letting Tab carry on natively could hand
+        // focus straight past the dialog's boundary. Stay open and park focus
+        // back on the trigger instead, which the trap does recognize.
+        event.preventDefault()
+        triggerRef.current?.focus()
+        return
+      }
+      // Close the listbox and hand focus back to the trigger, then let Tab carry
+      // on from there: the browser advances from the trigger in document order,
+      // and an enclosing Modal's focus trap (a window listener, so propagation
+      // must not be stopped here) wraps when the trigger is the dialog's first
+      // or last control. The listbox is portaled outside the dialog, so its own
+      // position in the tab order must never decide where focus goes.
+      setOpen(false)
+      triggerRef.current?.focus()
       return
     }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
@@ -166,39 +196,46 @@ export default function Select({ label, error, className, containerClassName, co
       </m.button>
       {error && <p className="text-xs text-red-400">{error}</p>}
       {createPortal(
-        open ? (
-          <m.div
-            ref={menuRef}
-            id={menuId}
-            role="listbox"
-            aria-label={ariaLabel ?? label}
-            initial={{ opacity: 0, scale: 0.96, y: -6 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={surfaceTransition}
-            style={{ position: 'fixed', top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, maxHeight: 'min(320px, calc(100vh - 16px))' }}
-            className={clsx(isInsideDialog ? 'z-critical' : 'z-popover', 'origin-top overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-xl')}
-          >
-            {enabledOptions.map((option, index) => (
-              <button
-                key={option.value}
-                ref={node => { optionRefs.current[index] = node }}
-                type="button"
-                role="option"
-                aria-selected={option.value === selectedValue}
-                onKeyDown={event => handleOptionKeyDown(event, index)}
-                onClick={() => choose(option)}
-                className={clsx(
-                  'flex w-full items-center justify-between gap-3 rounded px-2 text-left transition-colors',
-                  compact ? 'py-1 text-xs' : 'py-1.5 text-sm',
-                  option.value === selectedValue ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-surface-700 hover:text-white',
-                )}
-              >
-                <span>{option.label}</span>
-                <Check size={compact ? 11 : 13} className={option.value === selectedValue ? 'opacity-100' : 'opacity-0'} />
-              </button>
-            ))}
-          </m.div>
-        ) : null, document.body,
+        <AnimatePresence>
+          {open && (
+            <m.div
+              ref={menuRef}
+              id={menuId}
+              role="listbox"
+              aria-label={ariaLabel ?? label}
+              initial={{ opacity: 0, scale: 0.96, y: -6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: -6, transition: exitTransition }}
+              transition={surfaceTransition}
+              style={{ position: 'fixed', top: menuPosition.top, bottom: menuPosition.bottom, left: menuPosition.left, width: menuPosition.width, maxHeight: menuPosition.maxHeight }}
+              className={clsx(isInsideDialog ? 'z-critical' : 'z-popover', menuPosition.placement === 'above' ? 'origin-bottom' : 'origin-top', 'overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-xl')}
+            >
+              {enabledOptions.map((option, index) => (
+                <button
+                  key={option.value}
+                  ref={node => { optionRefs.current[index] = node }}
+                  type="button"
+                  role="option"
+                  // Focus moves between options programmatically; keeping them
+                  // out of the Tab sequence stops a Tab from landing on an option
+                  // of a listbox that is still fading out after closing.
+                  tabIndex={-1}
+                  aria-selected={option.value === selectedValue}
+                  onKeyDown={event => handleOptionKeyDown(event, index)}
+                  onClick={() => choose(option)}
+                  className={clsx(
+                    'flex w-full items-center justify-between gap-3 rounded px-2 text-left transition-colors',
+                    compact ? 'py-1 text-xs' : 'py-1.5 text-sm',
+                    option.value === selectedValue ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-surface-700 hover:text-white',
+                  )}
+                >
+                  <span>{option.label}</span>
+                  <Check size={compact ? 11 : 13} className={option.value === selectedValue ? 'opacity-100' : 'opacity-0'} />
+                </button>
+              ))}
+            </m.div>
+          )}
+        </AnimatePresence>, document.body,
       )}
     </div>
   )

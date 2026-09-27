@@ -128,6 +128,15 @@
   to { transform: rotate(360deg); }
 }
 
+/* Indeterminate progress sweep (see components/ui/Progress.tsx). Only this
+   mode is keyframed: the determinate fill retargets with a transform
+   transition, so a keyframe there would restart from zero on every progress
+   event instead of gliding from where the fill already is. */
+@keyframes lagun-progress-indeterminate {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
 /* Inter — bundled locally for consistent, readable tabular data across browsers */
 @font-face {
   font-family: 'Inter Variable';

@@ -150,4 +150,57 @@ describe('EditColumnDialog save flow', () => {
       comment: undefined,
     })
   })
+
+  it('disables Save while the request is in flight, so a second click cannot submit twice', async () => {
+    // Promise.withResolvers is ES2024; this project's tsconfig lib is ES2020, so
+    // the executor form is the only one that type-checks.
+    let resolveAdd: (value: { ok: boolean; sql: string }) => void = () => {}
+    addColumn.mockImplementationOnce(() => new Promise(resolve => { resolveAdd = resolve }))
+    const onSaved = vi.fn().mockResolvedValue(undefined)
+
+    render(<EditColumnDialog {...baseProps} onSaved={onSaved} />)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'created_at')
+
+    const save = screen.getByRole('button', { name: 'Add' })
+    expect(save).toBeEnabled()
+    await userEvent.click(save)
+
+    // In flight: the button is disabled for the whole round trip, so the
+    // second click below cannot fire a second ALTER.
+    await waitFor(() => expect(save).toBeDisabled())
+    await userEvent.click(save)
+    expect(addColumn).toHaveBeenCalledTimes(1)
+
+    resolveAdd({ ok: true, sql: 'ALTER TABLE `users` ADD COLUMN `created_at` VARCHAR(255)' })
+    await waitFor(() => expect(save).toBeEnabled())
+  })
+
+  it('reopens usable after a close abandoned a save in flight', async () => {
+    let resolveAdd: (value: { ok: boolean; sql: string }) => void = () => {}
+    addColumn.mockImplementationOnce(() => new Promise(resolve => { resolveAdd = resolve }))
+    const onSaved = vi.fn().mockResolvedValue(undefined)
+
+    const view = render(<EditColumnDialog {...baseProps} onSaved={onSaved} />)
+    await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'created_at')
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled())
+
+    // Close while the ALTER is still in flight, then reopen the same mounted
+    // instance — the schema view keeps this dialog mounted for its exit
+    // animation, so component state survives.
+    view.rerender(<EditColumnDialog {...baseProps} open={false} onSaved={onSaved} />)
+    view.rerender(<EditColumnDialog {...baseProps} onSaved={onSaved} />)
+
+    // The abandoned request's `finally` is fenced by the request id, so it never
+    // clears `saving`: the reset on open is the only thing that can, and without
+    // it Save stays disabled for the rest of the session.
+    const save = screen.getByRole('button', { name: 'Add' })
+    await waitFor(() => expect(save).toBeEnabled())
+
+    // The late completion must not close the reopened dialog either.
+    resolveAdd({ ok: true, sql: 'ALTER TABLE `users` ADD COLUMN `created_at` VARCHAR(255)' })
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
+    expect(baseProps.onClose).not.toHaveBeenCalled()
+    expect(save).toBeEnabled()
+  })
 })

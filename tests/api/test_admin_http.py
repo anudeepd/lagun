@@ -118,6 +118,193 @@ async def test_admin_overview_and_connections_report_the_inventory(
     assert body["window_hours"] == 24
 
 
+async def _admin_connection_pages(http_client, admin: dict, limit: int):
+    """Walk the inventory page by page, exactly as the console does."""
+    walked: list[dict] = []
+    page_count = 0
+    cursor: str | None = None
+    while True:
+        params: dict[str, object] = {"limit": limit}
+        if cursor is not None:
+            params["after"] = cursor
+        response = await http_client.get(
+            "/api/v1/admin/connections", params=params, headers=admin
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        page_count += 1
+        walked.extend(body["items"])
+        cursor = body["next_cursor"]
+        if cursor is None or page_count > 20:
+            break
+    return walked, page_count, cursor
+
+
+async def test_admin_connections_page_walks_a_mixed_inventory_exactly_once(
+    ldap_admin, http_client, monkeypatch, tmp_path
+):
+    """Managed, default and same-named rows all survive the page boundaries.
+
+    The display order mixes sort directions, so the two "Bravo" rows and the
+    managed/default split are what force the cursor to carry the whole sort
+    tuple: a name-only cursor would repeat or skip one of them.
+    """
+    import yaml
+
+    from lagun.db.connections_config import sync_connections_config
+
+    monkeypatch.setenv("LAGUN_TEST_MANAGED_PASSWORD", "managed-secret")
+    config = tmp_path / "connections.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "connections": [
+                    {
+                        "id": "zulu",
+                        "name": "Zulu",
+                        "password_env": "LAGUN_TEST_MANAGED_PASSWORD",
+                        "allowed_users": ["bob"],
+                        "selected_databases": ["app"],
+                    },
+                    {
+                        "id": "echo",
+                        "name": "Echo",
+                        "default": True,
+                        "password_env": "LAGUN_TEST_MANAGED_PASSWORD",
+                        "allowed_users": ["bob"],
+                        "selected_databases": ["app"],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    await sync_connections_config(str(config))
+    for name in ("Alpha", "Bravo", "Bravo", "Charlie", "Echo"):
+        await session_store.create_session(
+            SessionCreate(name=name, username="reporter", password="secret"), "bob"
+        )
+    admin = {"x-test-user": "alice"}
+
+    complete = await http_client.get(
+        "/api/v1/admin/connections", params={"limit": 100}, headers=admin
+    )
+    assert complete.status_code == 200
+    assert complete.json()["next_cursor"] is None
+    # Managed first, then the default profile, then names, with the primary key
+    # breaking the tie between the two "Bravo" rows.
+    assert [item["name"] for item in complete.json()["items"]] == [
+        "Echo",
+        "Zulu",
+        "Alpha",
+        "Bravo",
+        "Bravo",
+        "Charlie",
+        "Echo",
+    ]
+
+    walked, page_count, cursor = await _admin_connection_pages(http_client, admin, 2)
+
+    assert page_count == 4  # 2 + 2 + 2 + a short final page
+    assert cursor is None
+    assert [item["id"] for item in walked] == [
+        item["id"] for item in complete.json()["items"]
+    ]
+    assert len({item["id"] for item in walked}) == len(walked) == 7
+
+
+async def test_admin_connections_rejects_a_malformed_cursor(ldap_admin, http_client):
+    import base64
+
+    await session_store.create_session(
+        SessionCreate(name="Alpha", username="reporter", password="secret"), "bob"
+    )
+    admin = {"x-test-user": "alice"}
+
+    def encode(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).decode()
+
+    for after in (
+        "not a cursor",
+        "a",
+        encode(b"{}"),
+        encode(b'[true,false,"Alpha"]'),
+        encode(b'[true,false,"Alpha",7]'),
+        encode(b'[1,0,"Alpha","alpha"]'),
+    ):
+        response = await http_client.get(
+            "/api/v1/admin/connections", params={"after": after}, headers=admin
+        )
+
+        assert response.status_code == 400, after
+        assert response.json() == {"detail": "Invalid cursor"}, after
+
+
+async def test_admin_connections_clamps_the_page_size(ldap_admin, http_client):
+    await session_store.create_session(
+        SessionCreate(name="Alpha", username="reporter", password="secret"), "bob"
+    )
+    admin = {"x-test-user": "alice"}
+
+    too_small = await http_client.get(
+        "/api/v1/admin/connections", params={"limit": 0}, headers=admin
+    )
+    too_large = await http_client.get(
+        "/api/v1/admin/connections", params={"limit": 1000}, headers=admin
+    )
+    maximum = await http_client.get(
+        "/api/v1/admin/connections", params={"limit": 500}, headers=admin
+    )
+
+    assert too_small.status_code == 422
+    assert too_large.status_code == 422
+    assert maximum.status_code == 200
+
+
+async def test_admin_overview_counts_every_connection_not_just_one_page(
+    ldap_admin, http_client, monkeypatch, tmp_path
+):
+    import yaml
+
+    from lagun.db.connections_config import sync_connections_config
+
+    monkeypatch.setenv("LAGUN_TEST_MANAGED_PASSWORD", "managed-secret")
+    config = tmp_path / "connections.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "connections": [
+                    {
+                        "id": "shared",
+                        "name": "Shared",
+                        "password_env": "LAGUN_TEST_MANAGED_PASSWORD",
+                        "allowed_users": ["bob"],
+                        "selected_databases": ["app"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    await sync_connections_config(str(config))
+    for name in ("Alpha", "Bravo", "Charlie", "Delta"):
+        await session_store.create_session(
+            SessionCreate(name=name, username="reporter", password="secret"), "bob"
+        )
+    admin = {"x-test-user": "alice"}
+
+    page = await http_client.get(
+        "/api/v1/admin/connections", params={"limit": 2}, headers=admin
+    )
+    overview = await http_client.get("/api/v1/admin/overview", headers=admin)
+
+    assert len(page.json()["items"]) == 2  # the page is small …
+    body = overview.json()
+    assert body["connection_count"] == 5  # … the totals are not
+    assert body["managed_connection_count"] == 1
+    assert body["private_connection_count"] == 4
+
+
 async def test_admin_activity_and_retention_respond_over_http(ldap_admin, http_client):
     await session_store.record_audit_event(
         username="bob",

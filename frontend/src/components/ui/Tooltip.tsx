@@ -1,5 +1,8 @@
-import { cloneElement, useId, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { cloneElement, useEffect, useId, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
+import { AnimatePresence } from 'motion/react'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDuration } from '../../motion/tokens'
 
 interface TooltipChildProps {
   onMouseEnter?: React.MouseEventHandler
@@ -45,8 +48,21 @@ export default function Tooltip({ label, children, side = 'top', portal = false 
     }
   }, [open, portal, side])
 
+  // A hover-opened tip must be dismissible without moving the pointer or focus
+  // (WCAG 1.4.13): Escape closes it even when focus is somewhere else.
+  useEffect(() => {
+    if (!open) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [open])
+
+  const ownDescribedBy = children.props['aria-describedby']
   const child = cloneElement(children, {
-    'aria-describedby': open ? id : children.props['aria-describedby'],
+    // Added to the child's own description, never in place of it.
+    'aria-describedby': open ? [ownDescribedBy, id].filter(Boolean).join(' ') : ownDescribedBy,
     onMouseEnter: (event: React.MouseEvent) => {
       children.props.onMouseEnter?.(event)
       setOpen(true)
@@ -63,27 +79,30 @@ export default function Tooltip({ label, children, side = 'top', portal = false 
       children.props.onBlur?.(event)
       setOpen(false)
     },
-    onKeyDown: (event: React.KeyboardEvent) => {
-      children.props.onKeyDown?.(event)
-      if (event.key === 'Escape') setOpen(false)
-    },
   })
 
-  const tooltip = open ? (
-    <span
-      ref={tooltipRef}
-      id={id}
-      role="tooltip"
-      className={`pointer-events-none whitespace-nowrap rounded border border-surface-700 bg-surface-800 px-1.5 py-0.5 text-[11px] text-slate-200 shadow-lg ${
-        portal
-          ? 'fixed z-[100] -translate-x-1/2'
-          : `absolute left-1/2 z-popover -translate-x-1/2 ${side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`
-      }`}
-      style={portal ? { left: position.left, top: side === 'top' ? position.top - 6 : position.top + 6 } : undefined}
-    >
-      {label}
-    </span>
-  ) : null
+  const tooltip = (
+    <AnimatePresence>
+      {open && (
+        <m.span
+          ref={tooltipRef}
+          id={id}
+          role="tooltip"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: { duration: motionDuration.micro } }}
+          exit={{ opacity: 0, transition: exitTransition }}
+          className={`pointer-events-none whitespace-nowrap rounded border border-surface-700 bg-surface-800 px-1.5 py-0.5 text-[11px] text-slate-200 shadow-lg ${
+            portal
+              ? 'fixed z-[100] -translate-x-1/2'
+              : `absolute left-1/2 z-popover -translate-x-1/2 ${side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`
+          }`}
+          style={portal ? { left: position.left, top: side === 'top' ? position.top - 6 : position.top + 6 } : undefined}
+        >
+          {label}
+        </m.span>
+      )}
+    </AnimatePresence>
+  )
 
   return (
     <span ref={wrapperRef} className="relative inline-flex">

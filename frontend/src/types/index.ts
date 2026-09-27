@@ -217,6 +217,8 @@ export interface AdminConnection {
 
 export interface AdminConnectionsResponse {
   items: AdminConnection[]
+  /** Keyset cursor: pass as `after` to read the next page. Null when the page was the last one. */
+  next_cursor: string | null
   observed_at: number
 }
 

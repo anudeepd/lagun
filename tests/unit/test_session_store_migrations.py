@@ -83,8 +83,21 @@ async def _read_version() -> int:
 
 
 async def _read_session_columns() -> set[str]:
+    return await _read_columns("sessions")
+
+
+async def _read_tables() -> set[str]:
     async with session_store._connect() as db:
-        async with db.execute("PRAGMA table_info(sessions)") as cur:
+        async with db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ) as cur:
+            rows = await cur.fetchall()
+    return {row[0] for row in rows}
+
+
+async def _read_columns(table: str) -> set[str]:
+    async with session_store._connect() as db:
+        async with db.execute(f"PRAGMA table_info({table})") as cur:
             rows = await cur.fetchall()
     return {row[1] for row in rows}
 
@@ -102,6 +115,7 @@ async def test_legacy_database_upgrades_in_place(
 
     assert await _read_version() == session_store._SCHEMA_VERSION
     assert _CURRENT_COLUMNS <= await _read_session_columns()
+    assert "session_user_scope" in await _read_tables()
     async with session_store._connect() as db:
         async with db.execute(
             "SELECT id, username, selected_databases FROM sessions"
@@ -147,6 +161,46 @@ async def test_unversioned_current_schema_is_stamped(
     async with session_store._connect() as db:
         async with db.execute("SELECT name FROM sessions") as cur:
             assert await cur.fetchall() == [("Existing",)]
+
+
+@pytest.mark.asyncio
+async def test_fresh_database_is_stamped_with_the_current_version(
+    keep_event_loop_awake, monkeypatch, tmp_path
+):
+    path = tmp_path / "fresh.db"
+    monkeypatch.setattr(session_store, "_DB_PATH", path)
+
+    await session_store.init_db()
+
+    # Hard-coded on purpose: this is the assertion that catches a migration
+    # added without bumping _SCHEMA_VERSION (or the reverse).
+    assert session_store._SCHEMA_VERSION == 2
+    assert await _read_version() == 2
+    assert await _read_columns("session_user_scope") == {
+        "session_id",
+        "username",
+        "selected_databases",
+    }
+
+
+@pytest.mark.asyncio
+async def test_version_one_database_gains_the_user_scope_table(
+    keep_event_loop_awake, monkeypatch, tmp_path
+):
+    """A database written by the release before session_user_scope existed."""
+    path = tmp_path / "version-one.db"
+    monkeypatch.setattr(session_store, "_DB_PATH", path)
+    released = session_store._MIGRATIONS
+    monkeypatch.setattr(session_store, "_MIGRATIONS", released[:1])
+    await session_store.init_db()
+    assert await _read_version() == 1
+    assert "session_user_scope" not in await _read_tables()
+
+    monkeypatch.setattr(session_store, "_MIGRATIONS", released)
+    await session_store.init_db()
+
+    assert await _read_version() == session_store._SCHEMA_VERSION == 2
+    assert "session_user_scope" in await _read_tables()
 
 
 @pytest.mark.asyncio

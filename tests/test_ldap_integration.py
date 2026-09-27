@@ -33,6 +33,8 @@ def test_ensure_ldapgate_static_paths_preserves_existing_paths():
         "/favicon.svg",
         "/favicon.ico",
         "/THIRD_PARTY_LICENSES.txt",
+        "/healthz",
+        "/readyz",
     ]
 
 

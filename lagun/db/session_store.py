@@ -1,5 +1,7 @@
 """aiosqlite CRUD for saved sessions."""
 
+import base64
+import contextvars
 import json
 import logging
 import os
@@ -37,6 +39,32 @@ def _db_path() -> Path:
 
 def _connect() -> aiosqlite.Connection:
     return aiosqlite.connect(_db_path(), timeout=max(1, _SQLITE_BUSY_SECONDS))
+
+
+# The user the request being served acts as, installed by the audit middleware
+# in main.py from ``request.state.user`` (the same identity the audit row and the
+# session-access check use). It is None when LDAP is off — the local
+# single-user install — and in every non-request context (startup, tests,
+# background work), where a session's own ``selected_databases`` column is the
+# only narrowing there is.
+_ACTING_USERNAME: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "lagun_acting_username", default=None
+)
+
+
+def acting_username() -> str | None:
+    """The username the current request acts as, or None without LDAP."""
+    return _ACTING_USERNAME.get()
+
+
+def set_acting_username(username: str | None) -> contextvars.Token:
+    """Install *username* for this context; hand the token to the reset below."""
+    return _ACTING_USERNAME.set(username)
+
+
+def reset_acting_username(token: contextvars.Token) -> None:
+    """Restore the username that was acting before the matching set call."""
+    _ACTING_USERNAME.reset(token)
 
 
 _BASELINE_TABLES: tuple[str, ...] = (
@@ -127,6 +155,20 @@ _MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
         )
         + _BASELINE_INDEXES,
     ),
+    (
+        2,
+        "per-user narrowing of a shared connection",
+        (
+            """
+CREATE TABLE IF NOT EXISTS session_user_scope (
+    session_id          TEXT NOT NULL,
+    username            TEXT NOT NULL,
+    selected_databases  TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (session_id, username)
+)
+""",
+        ),
+    ),
 )
 _SCHEMA_VERSION = _MIGRATIONS[-1][0]
 
@@ -212,6 +254,64 @@ def _row_to_model(row: aiosqlite.Row) -> SessionRead:
 _READ_COLUMNS = "id, name, host, port, username, default_db, query_limit, ssl_enabled, created_at, updated_at, selected_databases, managed_selected_databases, managed, is_default"
 
 
+async def _user_selected_databases(
+    db: aiosqlite.Connection, session_id: str, username: str
+) -> list[str]:
+    """The databases *username* narrowed *session_id* to; empty means none."""
+    async with db.execute(
+        "SELECT selected_databases FROM session_user_scope "
+        "WHERE session_id = ? AND username = ?",
+        (session_id, username),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row or not row[0]:
+        return []
+    return json.loads(row[0])
+
+
+async def _with_user_scope(
+    db: aiosqlite.Connection, session: SessionRead, username: str | None
+) -> SessionRead:
+    """Point a managed session's list at the acting user's own narrowing.
+
+    A shared (connections.yaml) connection is one row every allowed user sees, so
+    the list a user picks belongs to that user and lives in
+    ``session_user_scope``; writing it to the row's ``selected_databases`` column
+    would rewrite every other user's scope. An unmanaged session, or one loaded
+    with no known user (the local single-user install), keeps reading the column.
+    """
+    if username and session.managed:
+        session.selected_databases = await _user_selected_databases(
+            db, session.id, username
+        )
+    return session
+
+
+async def _user_selected_databases_bulk(
+    db: aiosqlite.Connection, session_ids: list[str], username: str
+) -> dict[str, list[str]]:
+    """Batched ``_user_selected_databases`` for a page of managed sessions.
+
+    One query for the whole page instead of one per managed row: listing every
+    session for a user with several shared (connections.yaml) connections was
+    issuing a ``session_user_scope`` lookup per managed row on top of the list
+    query itself.
+    """
+    if not session_ids:
+        return {}
+    placeholders = ",".join("?" * len(session_ids))
+    async with db.execute(
+        "SELECT session_id, selected_databases FROM session_user_scope "
+        f"WHERE username = ? AND session_id IN ({placeholders})",
+        (username, *session_ids),
+    ) as cur:
+        rows = await cur.fetchall()
+    return {
+        session_id: json.loads(selected) if selected else []
+        for session_id, selected in rows
+    }
+
+
 async def list_sessions(owner_username: str | None = None) -> list[SessionRead]:
     async with _connect() as db:
         db.row_factory = aiosqlite.Row
@@ -222,40 +322,106 @@ async def list_sessions(owner_username: str | None = None) -> list[SessionRead]:
     return [_row_to_model(r) for r in rows]
 
 
-async def list_admin_connections() -> list[dict]:
-    """Return connection metadata for authorized administrators, never secrets."""
+_ADMIN_CONNECTION_SELECT = """
+SELECT
+    s.id,
+    s.name,
+    s.host,
+    s.port,
+    s.username,
+    s.default_db,
+    s.query_limit,
+    s.ssl_enabled,
+    s.created_at,
+    s.updated_at,
+    s.selected_databases,
+    s.managed_selected_databases,
+    s.managed,
+    s.is_default,
+    s.owner_username,
+    s.config_key,
+    (
+        SELECT COUNT(*)
+        FROM shared_session_access a
+        WHERE a.session_id = s.id
+    ) AS shared_user_count
+FROM sessions s
+"""
+
+# The display order is not unique on its own (two connections may share a name),
+# so the primary key closes it and the inventory has a total order to page over.
+_ADMIN_CONNECTION_ORDER = (
+    "ORDER BY s.managed DESC, s.is_default DESC, s.name ASC, s.id ASC"
+)
+
+
+def _encode_admin_connection_cursor(row: dict) -> str:
+    """Opaque keyset cursor: the whole sort tuple of the page's last row."""
+    payload = [row["managed"], row["is_default"], row["name"], row["id"]]
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
+def _decode_admin_connection_cursor(cursor: str) -> tuple[bool, bool, str, str]:
+    """Inverse of `_encode_admin_connection_cursor`; a bad cursor is a ValueError."""
+    try:
+        pad = "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(cursor + pad))
+    except (ValueError, TypeError) as error:  # binascii.Error is a ValueError
+        raise ValueError("invalid connection cursor") from error
+    if (
+        not isinstance(payload, list)
+        or len(payload) != 4
+        or not all(isinstance(flag, bool) for flag in payload[:2])
+        or not all(isinstance(part, str) for part in payload[2:])
+    ):
+        raise ValueError("invalid connection cursor")
+    managed, is_default, name, session_id = payload
+    return managed, is_default, name, session_id
+
+
+async def list_admin_connections(
+    after: str | None = None, limit: int = 100
+) -> tuple[list[dict], str | None]:
+    """Return one keyset page of connection metadata, never secrets.
+
+    `after` is the opaque cursor of the previous page. The resuming predicate
+    spells out the mixed sort directions of `_ADMIN_CONNECTION_ORDER`, so the
+    page never repeats or skips a row an earlier page returned.
+    """
+    where = ""
+    values: list[object] = []
+    if after is not None:
+        managed, is_default, name, session_id = _decode_admin_connection_cursor(after)
+        where = (
+            "WHERE ("
+            "s.managed < ? "
+            "OR (s.managed = ? AND s.is_default < ?) "
+            "OR (s.managed = ? AND s.is_default = ? AND s.name > ?) "
+            "OR (s.managed = ? AND s.is_default = ? AND s.name = ? AND s.id > ?)"
+            ")"
+        )
+        # Bound in the order the placeholders appear above: one cursor value per
+        # clause, so the predicate can only match rows strictly after the cursor.
+        values = [
+            managed,
+            managed,
+            is_default,
+            managed,
+            is_default,
+            name,
+            managed,
+            is_default,
+            name,
+            session_id,
+        ]
     async with _connect() as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """
-            SELECT
-                s.id,
-                s.name,
-                s.host,
-                s.port,
-                s.username,
-                s.default_db,
-                s.query_limit,
-                s.ssl_enabled,
-                s.created_at,
-                s.updated_at,
-                s.selected_databases,
-                s.managed_selected_databases,
-                s.managed,
-                s.is_default,
-                s.owner_username,
-                s.config_key,
-                (
-                    SELECT COUNT(*)
-                    FROM shared_session_access a
-                    WHERE a.session_id = s.id
-                ) AS shared_user_count
-            FROM sessions s
-            ORDER BY s.managed DESC, s.is_default DESC, s.name
-            """
+            f"{_ADMIN_CONNECTION_SELECT} {where} {_ADMIN_CONNECTION_ORDER} LIMIT ?",
+            (*values, limit),
         ) as cur:
             rows = await cur.fetchall()
-    return [
+    items = [
         {
             "id": row["id"],
             "name": row["name"],
@@ -281,6 +447,30 @@ async def list_admin_connections() -> list[dict]:
         }
         for row in rows
     ]
+    # A full page may still be the last one, so the cursor is only offered when
+    # the page really filled up; a short page means the inventory ended.
+    next_cursor = (
+        _encode_admin_connection_cursor(items[-1])
+        if items and len(items) == limit
+        else None
+    )
+    return items, next_cursor
+
+
+async def count_admin_connections() -> dict:
+    """Count every saved connection in one query, independent of any page size."""
+    async with _connect() as db:
+        async with db.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN managed = 1 THEN 1 ELSE 0 END), 0) AS managed,
+                COALESCE(SUM(CASE WHEN managed = 1 THEN 0 ELSE 1 END), 0) AS private
+            FROM sessions
+            """
+        ) as cur:
+            total, managed, private = await cur.fetchone()
+    return {"total": int(total), "managed": int(managed), "private": int(private)}
 
 
 async def audit_summary(since: str | None = None) -> dict[str, int]:
@@ -323,7 +513,13 @@ async def list_sessions_for_user(username: str) -> list[SessionRead]:
             (username, username, username),
         ) as cur:
             rows = await cur.fetchall()
-    return [_row_to_model(r) for r in rows]
+        sessions = [_row_to_model(r) for r in rows]
+        managed_ids = [s.id for s in sessions if s.managed]
+        scopes = await _user_selected_databases_bulk(db, managed_ids, username)
+        for s in sessions:
+            if s.managed:
+                s.selected_databases = scopes.get(s.id, [])
+        return sessions
 
 
 async def get_session(session_id: str) -> Optional[SessionRead]:
@@ -334,7 +530,9 @@ async def get_session(session_id: str) -> Optional[SessionRead]:
             (session_id,),
         ) as cur:
             row = await cur.fetchone()
-    return _row_to_model(row) if row else None
+        if not row:
+            return None
+        return await _with_user_scope(db, _row_to_model(row), acting_username())
 
 
 async def get_session_password(session_id: str) -> Optional[str]:
@@ -397,19 +595,42 @@ async def update_session(session_id: str, data: SessionUpdate) -> Optional[Sessi
         fields["query_limit"] = data.query_limit
     if data.ssl_enabled is not None:
         fields["ssl_enabled"] = int(data.ssl_enabled)
-    if data.selected_databases is not None:
-        fields["selected_databases"] = json.dumps(data.selected_databases)
 
-    if not fields:
+    if not fields and data.selected_databases is None:
         return await get_session(session_id)
 
-    fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    username = acting_username()
     async with _connect() as db:
-        await db.execute(
-            f"UPDATE sessions SET {set_clause} WHERE id = ?",
-            (*fields.values(), session_id),
-        )
+        # A shared (connections.yaml) session is one row for every user allowed
+        # on it, so a narrowing is written to the acting user's own row and the
+        # shared `selected_databases` column is left alone — otherwise the next
+        # user to read the row would inherit this user's view. Without a known
+        # user (local single-user install) the column keeps its old meaning, and
+        # an unmanaged session's own column is always the user's list.
+        per_user = bool(username) and data.selected_databases is not None
+        if per_user:
+            async with db.execute(
+                "SELECT managed FROM sessions WHERE id = ?", (session_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            per_user = bool(row and row[0])
+        if data.selected_databases is not None and not per_user:
+            fields["selected_databases"] = json.dumps(data.selected_databases)
+        if fields:
+            fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            await db.execute(
+                f"UPDATE sessions SET {set_clause} WHERE id = ?",
+                (*fields.values(), session_id),
+            )
+        if per_user:
+            await db.execute(
+                "INSERT INTO session_user_scope "
+                "(session_id, username, selected_databases) VALUES (?, ?, ?) "
+                "ON CONFLICT(session_id, username) DO UPDATE SET "
+                "selected_databases = excluded.selected_databases",
+                (session_id, username, json.dumps(data.selected_databases)),
+            )
         await db.commit()
     return await get_session(session_id)
 
@@ -417,6 +638,11 @@ async def update_session(session_id: str, data: SessionUpdate) -> Optional[Sessi
 async def delete_session(session_id: str) -> bool:
     async with _connect() as db:
         cur = await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        # Each user's narrowing belongs to the session; without this the rows are
+        # unreachable but kept forever.
+        await db.execute(
+            "DELETE FROM session_user_scope WHERE session_id = ?", (session_id,)
+        )
         await db.commit()
         ok = cur.rowcount > 0
     if ok:

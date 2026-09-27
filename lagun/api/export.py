@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import datetime
+from contextlib import asynccontextmanager
 import io
 import logging
 import os
@@ -15,9 +17,15 @@ import aiomysql
 from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from starlette.types import Receive, Scope, Send
 
+from lagun.api.query import _discard_lease_connection
 from lagun.db.pool import get_pool
-from lagun.api.scope import require_db_scope
+from lagun.api.scope import effective_scope, require_db_scope
+from lagun.api.sql_analysis import (
+    SCOPE_REFERENCE_EXEMPT_SCHEMAS,
+    referenced_schemas,
+)
 from lagun.db.session_store import get_session
 from lagun.db.utils import escape_value, format_mysql_time, quote_ident
 from lagun.api.sql_script import SqlScriptError, split_sql_script
@@ -29,14 +37,20 @@ router = APIRouter(tags=["export"])
 # and must not be treated as a comment.
 _EXECUTABLE_COMMENT = re.compile(r"/\*!")
 # Ordinary comments are removed before keyword scanning, or `INTO/**/OUTFILE`
-# slips past a pattern that expects whitespace between the two words.
-_COMMENT = re.compile(r"/\*.*?\*/|--[^\n]*|#[^\n]*", re.DOTALL)
+# slips past a pattern that expects whitespace between the two words. The `--`
+# alternative repeats MySQL's lexer rule (the second dash needs whitespace or a
+# control character after it) — reading `--(` as a comment let
+# `SELECT 1--(1) INTO OUTFILE '/tmp/x'` through this refusal.
+_COMMENT = re.compile(r"/\*.*?\*/|--(?=[\s\x00-\x1f])[^\n]*|#[^\n]*", re.DOTALL)
 _SERVER_FILE_WRITE = re.compile(r"\bINTO\s+(?:OUTFILE|DUMPFILE)\b", re.IGNORECASE)
 _DISALLOWED_FUNCTION = re.compile(
     r"\b(?:LOAD_FILE|SLEEP|BENCHMARK)\s*\(", re.IGNORECASE
 )
 _SAFE_FILENAME = re.compile(r"[^\w.\-]")
-_EXPORT_FETCH_ROWS = 100
+# Rows per `fetchmany`. Kept well below the request's 10,000-row ceiling so a
+# batch is still a bounded unit of work, but large enough that a big export is
+# not latency-bound on one await + deadline check per hundred rows.
+_EXPORT_FETCH_ROWS = 1000
 # Streaming a whole table had no deadline; the response body is produced after
 # the handler returns, so the bound has to be enforced inside the generator.
 _EXPORT_MAX_RUNTIME_SECONDS = float(
@@ -44,6 +58,16 @@ _EXPORT_MAX_RUNTIME_SECONDS = float(
 )
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 _EXPORT_STREAM_CHARS = 256 * 1024
+# Bulkhead for streaming exports: each stream holds a pooled connection plus an
+# open server-side cursor for its whole download, so a trickling client can pin
+# a lease indefinitely. Cap concurrent streams; excess requests fail fast with
+# 503 instead of queueing behind stuck leases and starving interactive queries.
+# Same pattern as the session-probe semaphore in lagun/api/sessions.py.
+_EXPORT_MAX_CONCURRENCY = max(1, int(os.getenv("LAGUN_EXPORT_MAX_CONCURRENCY", "3")))
+_EXPORT_QUEUE_TIMEOUT_SECONDS = max(
+    0.1, float(os.getenv("LAGUN_EXPORT_QUEUE_TIMEOUT_SECONDS", "10"))
+)
+_export_semaphore = asyncio.Semaphore(_EXPORT_MAX_CONCURRENCY)
 
 
 def _safe_filename_part(s: str) -> str:
@@ -137,13 +161,131 @@ def _completion_marker(rows: int) -> str:
     return f"-- Lagun export complete: {rows} rows\n"
 
 
+# Appended to a text/plain body when it raises after the headers went out. A
+# failure at that point cannot become a 4xx, so the body is the only place it can
+# be made visible; CSV has no comment syntax and cannot carry this.
+_EXPORT_FAILURE_MARKER = "-- Lagun export FAILED: "
+
+
+def _failure_marker(error: BaseException) -> str:
+    """Final line of a text/plain export whose body failed mid-stream."""
+    return f"{_EXPORT_FAILURE_MARKER}{error}\n"
+
+
+async def _await_with_remaining_deadline(
+    awaitable, deadline: float, timeout_error: Exception
+):
+    """Await a stalled database future without exceeding the export deadline.
+
+    A plain ``await cur.execute(...)`` has no bound: a stalled server holds the
+    pooled connection past the export's max runtime. The remaining budget
+    (never below 0.1s, so an already-expired deadline still fails fast instead
+    of raising ``TimeoutError(0)``) bounds each await while preserving the
+    export's error taxonomy — an expiry always surfaces as ``_ExportTimeout``.
+    """
+    remaining = max(0.1, deadline - time.monotonic())
+    try:
+        async with asyncio.timeout(remaining):
+            return await awaitable
+    except TimeoutError as exc:
+        raise timeout_error from exc
+
+
+def _export_timeout(exported: int) -> _ExportTimeout:
+    return _ExportTimeout(
+        f"Export exceeded the {_EXPORT_MAX_RUNTIME_SECONDS:g}-second limit "
+        f"after {exported} rows"
+    )
+
+
+async def _acquire_export_slot() -> None:
+    """Hold one export-concurrency slot for the whole stream, or raise 503.
+
+    Acquired after scope/validation (a 403/400 must never consume a slot) and
+    returned by :class:`_ExportStreamResponse` once the response has finished
+    (or the client disconnected), so at most ``_EXPORT_MAX_CONCURRENCY`` pooled
+    leases can be pinned by downloads. Same 503 + Retry-After shape as the
+    pool-capacity handler in lagun/main.py.
+    """
+    try:
+        await asyncio.wait_for(
+            _export_semaphore.acquire(), timeout=_EXPORT_QUEUE_TIMEOUT_SECONDS
+        )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Server is busy exporting. Try again shortly.",
+            headers={"Retry-After": "5"},
+        ) from exc
+
+
+class _ExportStreamResponse(StreamingResponse):
+    """Streams an export body and returns its concurrency slot afterwards.
+
+    Starlette sends ``http.response.start`` before it pulls the first body
+    chunk, so a client that disconnects at that point never drives the body
+    generator to completion: releasing the slot from the generator's ``finally``
+    would leave it pinned until the interpreter finalises the generator. Doing
+    it here makes the hand-back deterministic — including when the body raises
+    before its first chunk.
+
+    ``failure_marker`` is the prefix of the comment appended to a ``text/plain``
+    body when it raises after the headers went out (a deadline expiry, a pool
+    error, a nested-acquire failure). The status is already 200 by then and
+    cannot become a 4xx, so the body is the only place the failure can be made
+    visible. CSV passes ``None``: it has no comment syntax to carry a marker.
+    """
+
+    def __init__(self, *args, failure_marker: Optional[str] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._failure_marker = failure_marker
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        except Exception as error:
+            if self._failure_marker is not None:
+                # The socket may already be gone (the failure itself can be a
+                # disconnect), and a failed send must not replace the original
+                # exception, so it is swallowed here and the error re-raised.
+                try:
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": _failure_marker(error).encode(self.charset),
+                            "more_body": False,
+                        }
+                    )
+                except Exception:
+                    pass
+            raise
+        finally:
+            _export_semaphore.release()
+
+
+@asynccontextmanager
+async def _export_lease(pool):
+    """Lease a pooled connection, discarding it when the export times out.
+
+    Once ``asyncio.timeout`` fires, the driver connection may still own the
+    stuck statement; returning it to the pool would hand a busy, desynchronized
+    connection to the next request. ``_discard_lease_connection`` closes it,
+    and the pool's release discards it instead of recycling it.
+    """
+    async with pool.acquire() as conn:
+        try:
+            yield conn
+        except _ExportTimeout:
+            _discard_lease_connection(conn)
+            raise
+
+
 async def _next_batch(cur, fetch_size: int, deadline: float, exported: int):
     if time.monotonic() > deadline:
-        raise _ExportTimeout(
-            f"Export exceeded the {_EXPORT_MAX_RUNTIME_SECONDS:g}-second limit "
-            f"after {exported} rows"
-        )
-    return await cur.fetchmany(fetch_size)
+        raise _export_timeout(exported)
+    return await _await_with_remaining_deadline(
+        cur.fetchmany(fetch_size), deadline, _export_timeout(exported)
+    )
 
 
 def _where_value(column: str, value) -> str:
@@ -153,28 +295,41 @@ def _where_value(column: str, value) -> str:
 
 
 async def _resolve_ai_columns(
-    pool, database: str, table: str, cols: list[str]
+    pool, database: str, table: str, deadline: float, exported: int
 ) -> set[str]:
-    """Return set of column names that are auto_increment. Raises on lookup failure.
+    """Return the set of auto_increment column names for a table.
 
-    Cost: one extra information_schema round-trip per export call. Acceptable
-    because exports are user-initiated (not per-keystroke), the metadata
-    lookup is cheap, and the result is small. The round-trip is gated by
-    ``exclude_auto_increment`` and an empty ``req.table`` so query-tab
-    exports (which have no fixed table) skip it entirely.
+    Resolved on its own short-lived lease BEFORE the streaming cursor opens.
+    The cursor holds one pooled connection for the whole download, so resolving
+    while it is open would need a SECOND lease from the same per-session pool —
+    which never succeeds when ``LAGUN_DB_POOL_MAX_SIZE=1``. The table's own
+    ordinal column list is enough here (the filter only runs for table exports,
+    where the result set is the table's columns), so no SELECT result is needed.
+
+    Cost: one extra information_schema round-trip per opted-in export call.
+    Acceptable because exports are user-initiated (not per-keystroke), the
+    metadata lookup is cheap, and the result is small. The lookup shares the
+    export deadline so a stalled metadata query cannot hold a pooled connection
+    past max runtime.
     """
     try:
-        async with pool.acquire() as conn:
+        async with _export_lease(pool) as conn:
             async with conn.cursor() as cur:
-                placeholders = ",".join(["%s"] * len(cols))
-                await cur.execute(
-                    f"""SELECT COLUMN_NAME FROM information_schema.COLUMNS
-                       WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
-                       AND EXTRA LIKE '%%auto_increment%%'
-                       AND COLUMN_NAME IN ({placeholders})""",
-                    (database, table, *cols),
+                await _await_with_remaining_deadline(
+                    cur.execute(
+                        """SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                           WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
+                           AND EXTRA LIKE '%%auto_increment%%'
+                           ORDER BY ORDINAL_POSITION""",
+                        (database, table),
+                    ),
+                    deadline,
+                    _export_timeout(exported),
                 )
-                return {row[0] for row in await cur.fetchall()}
+                rows = await _await_with_remaining_deadline(
+                    cur.fetchall(), deadline, _export_timeout(exported)
+                )
+                return {row[0] for row in rows}
     except Exception:
         log.warning(
             "Failed to resolve auto-increment columns for %s.%s; export aborted",
@@ -185,16 +340,18 @@ async def _resolve_ai_columns(
         raise
 
 
-async def _apply_ai_filter(pool, req, cols: list[str]) -> list[str]:
-    """Drop auto_increment columns from ``cols`` when the export opts in.
+async def _apply_ai_filter(pool, req, deadline: float, exported: int) -> set[str]:
+    """Auto_increment columns to omit from the export, resolved up front.
 
-    No-op when ``req.exclude_auto_increment`` is False or ``req.table`` is
-    empty (query-tab export has no fixed table to query metadata for).
+    No-op (empty set) when ``req.exclude_auto_increment`` is False or
+    ``req.table`` is empty (a query-tab export has no fixed table to query
+    metadata for). A lookup failure aborts the export with the log line in
+    :func:`_resolve_ai_columns` and re-raises: continuing would emit INSERT/CSV
+    output that still contains the columns the user asked to drop.
     """
     if not req.exclude_auto_increment or not req.table:
-        return cols
-    ai_cols = await _resolve_ai_columns(pool, req.database, req.table, cols)
-    return [c for c in cols if c not in ai_cols]
+        return set()
+    return await _resolve_ai_columns(pool, req.database, req.table, deadline, exported)
 
 
 class ExportRequest(BaseModel):
@@ -266,7 +423,9 @@ _STREAM_RESPONSES = {
     200: {
         "description": (
             "The exported file. The body ends with `-- Lagun export complete: N rows` "
-            "for the SQL formats, so a truncated stream is detectable."
+            "for the SQL formats, so a truncated stream is detectable; if the stream "
+            "fails after the headers, a final `-- Lagun export FAILED: <message>` line "
+            "is appended instead. CSV carries no marker."
         ),
         # A file stream, so the schema is a string body rather than a JSON model.
         "content": {
@@ -306,7 +465,15 @@ async def _export_response(session_id: str, req: ExportRequest):
     if req.sql and req.table:
         raise HTTPException(400, "Provide either 'table' or 'sql', not both")
     # Same rule as every other data path: refuse before opening a connection.
+    # A raw export SELECT may qualify another schema, so every referenced
+    # schema is checked too — not just the request's database. MySQL's own
+    # catalogs stay readable; ``mysql`` (grants, credentials) does not.
     require_db_scope(s, req.database)
+    if req.sql and effective_scope(s) is not None:
+        for schema in referenced_schemas(req.sql):
+            if schema.lower() in SCOPE_REFERENCE_EXEMPT_SCHEMAS:
+                continue
+            require_db_scope(s, schema)
 
     if req.sql:
         try:
@@ -351,12 +518,22 @@ async def _export_response(session_id: str, req: ExportRequest):
     async def _generate_insert():
         exported = 0
         deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
-        async with pool.acquire() as conn:
+        # Resolved before the streaming lease: the metadata lookup takes its own
+        # pooled connection, and a second lease from the same per-session pool
+        # never succeeds when LAGUN_DB_POOL_MAX_SIZE=1.
+        ai_cols = await _apply_ai_filter(pool, req, deadline, exported)
+        async with _export_lease(pool) as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
-                await cur.execute(f"USE {quote_ident(req.database)}")
-                await cur.execute(select_sql)
+                await _await_with_remaining_deadline(
+                    cur.execute(f"USE {quote_ident(req.database)}"),
+                    deadline,
+                    _export_timeout(exported),
+                )
+                await _await_with_remaining_deadline(
+                    cur.execute(select_sql), deadline, _export_timeout(exported)
+                )
                 cols = [d[0] for d in cur.description]
-                cols_filtered = await _apply_ai_filter(pool, req, cols)
+                cols_filtered = [c for c in cols if c not in ai_cols]
                 # Values are taken by position: two result columns can share a
                 # name (a self-join) and a name-keyed dict kept only the last.
                 keep = _kept_indexes(cols, cols_filtered)
@@ -414,21 +591,36 @@ async def _export_response(session_id: str, req: ExportRequest):
     async def _generate_delete():
         exported = 0
         deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
-        async with pool.acquire() as conn:
+        async with _export_lease(pool) as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
-                await cur.execute(f"USE {quote_ident(req.database)}")
-                await cur.execute(
-                    """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
-                       WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
-                       AND CONSTRAINT_NAME='PRIMARY'
-                       ORDER BY ORDINAL_POSITION""",
-                    (req.database, req.table),
+                await _await_with_remaining_deadline(
+                    cur.execute(f"USE {quote_ident(req.database)}"),
+                    deadline,
+                    _export_timeout(exported),
                 )
-                pk_cols = [row[0] for row in await cur.fetchall()]
+                await _await_with_remaining_deadline(
+                    cur.execute(
+                        """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+                           WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
+                           AND CONSTRAINT_NAME='PRIMARY'
+                           ORDER BY ORDINAL_POSITION""",
+                        (req.database, req.table),
+                    ),
+                    deadline,
+                    _export_timeout(exported),
+                )
+                pk_cols = [
+                    row[0]
+                    for row in await _await_with_remaining_deadline(
+                        cur.fetchall(), deadline, _export_timeout(exported)
+                    )
+                ]
                 tbl_q = _target_table_sql(
                     req.database, req.table or "tbl", req.include_schema
                 )
-                await cur.execute(select_sql)
+                await _await_with_remaining_deadline(
+                    cur.execute(select_sql), deadline, _export_timeout(exported)
+                )
                 cols = [d[0] for d in cur.description]
                 where_cols = pk_cols if pk_cols else cols
 
@@ -453,23 +645,40 @@ async def _export_response(session_id: str, req: ExportRequest):
     async def _generate_delete_insert():
         exported = 0
         deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
-        async with pool.acquire() as conn:
+        # Resolved before the streaming lease: see _generate_insert.
+        ai_cols = await _apply_ai_filter(pool, req, deadline, exported)
+        async with _export_lease(pool) as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
-                await cur.execute(f"USE {quote_ident(req.database)}")
-                await cur.execute(
-                    """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
-                       WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
-                       AND CONSTRAINT_NAME='PRIMARY'
-                       ORDER BY ORDINAL_POSITION""",
-                    (req.database, req.table),
+                await _await_with_remaining_deadline(
+                    cur.execute(f"USE {quote_ident(req.database)}"),
+                    deadline,
+                    _export_timeout(exported),
                 )
-                pk_cols = [row[0] for row in await cur.fetchall()]
+                await _await_with_remaining_deadline(
+                    cur.execute(
+                        """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+                           WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
+                           AND CONSTRAINT_NAME='PRIMARY'
+                           ORDER BY ORDINAL_POSITION""",
+                        (req.database, req.table),
+                    ),
+                    deadline,
+                    _export_timeout(exported),
+                )
+                pk_cols = [
+                    row[0]
+                    for row in await _await_with_remaining_deadline(
+                        cur.fetchall(), deadline, _export_timeout(exported)
+                    )
+                ]
                 tbl_q = _target_table_sql(
                     req.database, req.table or "tbl", req.include_schema
                 )
-                await cur.execute(select_sql)
+                await _await_with_remaining_deadline(
+                    cur.execute(select_sql), deadline, _export_timeout(exported)
+                )
                 cols = [d[0] for d in cur.description]
-                cols_filtered = await _apply_ai_filter(pool, req, cols)
+                cols_filtered = [c for c in cols if c not in ai_cols]
                 keep = _kept_indexes(cols, cols_filtered)
                 cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
                 where_cols = pk_cols if pk_cols else cols
@@ -536,12 +745,20 @@ async def _export_response(session_id: str, req: ExportRequest):
         else:
             byte_enc, enc_errors = "utf-8", "strict"
 
-        async with pool.acquire() as conn:
+        # Resolved before the streaming lease: see _generate_insert.
+        ai_cols = await _apply_ai_filter(pool, req, deadline, exported)
+        async with _export_lease(pool) as conn:
             async with conn.cursor(aiomysql.SSCursor) as cur:
-                await cur.execute(f"USE {quote_ident(req.database)}")
-                await cur.execute(select_sql)
+                await _await_with_remaining_deadline(
+                    cur.execute(f"USE {quote_ident(req.database)}"),
+                    deadline,
+                    _export_timeout(exported),
+                )
+                await _await_with_remaining_deadline(
+                    cur.execute(select_sql), deadline, _export_timeout(exported)
+                )
                 cols = [d[0] for d in cur.description]
-                cols_filtered = await _apply_ai_filter(pool, req, cols)
+                cols_filtered = [c for c in cols if c not in ai_cols]
                 keep = _kept_indexes(cols, cols_filtered)
                 if req.csv_encoding == "utf-8-sig":
                     yield b"\xef\xbb\xbf"
@@ -590,8 +807,18 @@ async def _export_response(session_id: str, req: ExportRequest):
     else:
         raise HTTPException(400, f"Unknown format: {req.format!r}")
 
-    return StreamingResponse(
+    # Acquired last, after every step that can raise (session lookup, pool
+    # acquisition, format validation): _ExportStreamResponse only releases a
+    # slot while the response is actually streamed, so a slot taken before a
+    # failure here would never be returned and would permanently shrink the
+    # export pool.
+    await _acquire_export_slot()
+    # Only a text/plain body can carry a failure comment; CSV has no comment
+    # syntax, so a truncated CSV is the only signal there.
+    failure_marker = _EXPORT_FAILURE_MARKER if media.startswith("text/plain") else None
+    return _ExportStreamResponse(
         gen,
         media_type=media,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        failure_marker=failure_marker,
     )

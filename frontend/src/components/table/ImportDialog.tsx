@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { CircleAlert, Upload, ChevronRight, ChevronDown } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
+import Progress from '../ui/Progress'
 import { LoadingState } from '../ui/Spinner'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
@@ -72,12 +73,20 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
 
   // Status
   const [importing, setImporting] = useState(false)
+  // Percent of the upload body sent, or null while that count is unknowable —
+  // before the first progress event and again once the server takes over.
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [dropWaitState, setDropWaitState] = useState<DropWaitState>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragOverlayTimerRef = useRef<number | null>(null)
   const dropDelayTimerRef = useRef<number | null>(null)
+  // Bumped on every close. Callers keep this dialog mounted so it can play its
+  // exit animation, so an import started before the last close can still be in
+  // flight when it is reopened; its completion must not touch this dialog's
+  // state (see handleImport).
+  const requestIdRef = useRef(0)
   const tables = useSchemaStore(s => s.tables[`${sessionId}/${database}`] ?? [])
   const loadTables = useSchemaStore(s => s.loadTables)
 
@@ -90,7 +99,12 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   // fresh open no longer remounts and resets the wizard. Reset it here instead;
   // the reset lands while the dialog is still fully transparent.
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      // Closing abandons whatever import is still in flight: bumping here
+      // keeps a late completion from touching the next open of this dialog.
+      requestIdRef.current += 1
+      return
+    }
     setFormat('csv')
     setFile(null)
     setPreview(null)
@@ -107,6 +121,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
     setPreserveEmptyStrings(false)
     setShowAdvanced(false)
     setImporting(false)
+    setUploadPercent(null)
     setResult(null)
     setDropWaitState(null)
   }, [open, preselectedTable])
@@ -226,21 +241,33 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
 
   const handleImport = async () => {
     if (!file || (format === 'csv' && !targetTable)) return
+    const requestId = requestIdRef.current
     setImporting(true)
+    setUploadPercent(null)
     setResult(null)
     try {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('config', buildConfigJson())
-      const data = await api.importFile<ImportResult>(sessionId, formData)
+      const data = await api.importFile<ImportResult>(sessionId, formData, progress => {
+        if (requestId !== requestIdRef.current) return
+        setUploadPercent(
+          progress && progress.total > 0
+            ? Math.min(100, Math.max(0, Math.round((progress.loaded / progress.total) * 100)))
+            : null,
+        )
+      })
+      if (requestId !== requestIdRef.current) return
       setResult(data)
       if (data.ok) {
         onImportComplete?.()
       }
     } catch (e) {
-      setResult({ ok: false, rows_processed: 0, rows_imported: 0, method: 'unknown', error: String(e) })
+      if (requestId === requestIdRef.current) {
+        setResult({ ok: false, rows_processed: 0, rows_imported: 0, method: 'unknown', error: String(e) })
+      }
     } finally {
-      setImporting(false)
+      if (requestId === requestIdRef.current) setImporting(false)
     }
   }
 
@@ -319,6 +346,15 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             )}
             <Button variant="ghost" size="sm" onClick={clearDropFeedback}>Dismiss</Button>
           </div>
+        )}
+        {/* The upload is the only part of an import with a knowable total; once
+            the body is sent the server reports nothing until it is done, so the
+            bar goes indeterminate. */}
+        {importing && (
+          <Progress
+            value={uploadPercent}
+            label={uploadPercent === null ? 'Importing' : 'Uploading file'}
+          />
         )}
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted">Preview reads at most first 1 MB. Import still reads complete file.</p>

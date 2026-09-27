@@ -53,11 +53,21 @@ export default function SessionForm({ open, onClose, session }: Props) {
   const usernameRef = useRef<HTMLInputElement>(null)
   const portRef = useRef<HTMLInputElement>(null)
   const queryLimitRef = useRef<HTMLInputElement>(null)
+  // Bumped on every open. The dialog is no longer remounted per open, so a
+  // request started before the last close can still be in flight when it is
+  // reopened; each handler ignores a result that lands after a newer open.
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
     // Callers keep this dialog mounted so Modal can play its exit animation;
     // reset on open so a close mid-animation does not blank the visible form.
-    if (!open) return
+    if (!open) {
+      // Closing abandons whatever is still in flight: bumping here (only on the
+      // close, never on an unrelated prop change) keeps a late completion from
+      // closing or repainting the dialog on the next open.
+      requestIdRef.current += 1
+      return
+    }
     if (session) {
       setForm({
         name: session.name,
@@ -78,6 +88,12 @@ export default function SessionForm({ open, onClose, session }: Props) {
     setTestResult(null)
     setAvailableDbs([])
     setFetchDbError(null)
+    // In-flight flags belong to the previous open: leaving them set shows a
+    // disabled Save/Test with a spinner the user cannot clear until the
+    // abandoned request settles.
+    setSaving(false)
+    setTesting(false)
+    setFetchingDbs(false)
   }, [session, open])
 
   const set = (field: string, val: string | boolean) =>
@@ -110,6 +126,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
       return
     }
 
+    const requestId = requestIdRef.current
     setSaving(true)
     try {
       const data = {
@@ -135,11 +152,12 @@ export default function SessionForm({ open, onClose, session }: Props) {
       } else {
         await createSession({ ...data, password: form.password })
       }
+      if (requestId !== requestIdRef.current) return
       onClose()
     } catch (e) {
-      setError(errorMessage(e))
+      if (requestId === requestIdRef.current) setError(errorMessage(e))
     } finally {
-      setSaving(false)
+      if (requestId === requestIdRef.current) setSaving(false)
     }
   }
 
@@ -154,6 +172,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
   }
 
   const handleTest = async () => {
+    const requestId = requestIdRef.current
     setTesting(true)
     setTestResult(null)
     try {
@@ -171,19 +190,21 @@ export default function SessionForm({ open, onClose, session }: Props) {
           ssl_enabled: form.ssl_enabled,
         })
       }
+      if (requestId !== requestIdRef.current) return
       if (r.ok) {
         setTestResult({ ok: true, msg: `Connected! MySQL ${r.server_version} — ${r.latency_ms}ms` })
       } else {
         setTestResult({ ok: false, msg: r.error ?? 'Connection failed' })
       }
     } catch (e) {
-      setTestResult({ ok: false, msg: errorMessage(e) })
+      if (requestId === requestIdRef.current) setTestResult({ ok: false, msg: errorMessage(e) })
     } finally {
-      setTesting(false)
+      if (requestId === requestIdRef.current) setTesting(false)
     }
   }
 
   const handleFetchDbs = async () => {
+    const requestId = requestIdRef.current
     setFetchingDbs(true)
     setFetchDbError(null)
     try {
@@ -201,6 +222,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
           ssl_enabled: form.ssl_enabled,
         })
       }
+      if (requestId !== requestIdRef.current) return
       if (r.ok) {
         const fetched = r.databases ?? []
         // Never offer a database outside the administrator's allowlist: the
@@ -214,9 +236,9 @@ export default function SessionForm({ open, onClose, session }: Props) {
         setFetchDbError(r.error ?? 'Connection failed')
       }
     } catch (e) {
-      setFetchDbError(String(e))
+      if (requestId === requestIdRef.current) setFetchDbError(String(e))
     } finally {
-      setFetchingDbs(false)
+      if (requestId === requestIdRef.current) setFetchingDbs(false)
     }
   }
 

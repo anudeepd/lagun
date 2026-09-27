@@ -15,7 +15,11 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 
 from lagun.api.scope import effective_scope, require_db_scope
 from lagun.api.sql_analysis import (
+    SCOPE_REFERENCE_EXEMPT_SCHEMAS,
+    _WRITE_KINDS,
+    referenced_schemas,
     statement_kind,
+    target_database,
     target_table,
     unwrap_executable_comments,
 )
@@ -38,7 +42,32 @@ _USE_STATEMENT_RE = re.compile(
 
 # Statements whose target cannot be known before execution: a dump that prepares
 # or calls dynamic SQL cannot be checked, so scoped connections refuse it.
+# Database-level DDL without an explicit schema (or of an unrecognised form)
+# and any other recognised write with no determinable target fail closed too.
 _UNINSPECTABLE_KINDS = frozenset({"PREPARE", "EXECUTE", "DEALLOCATE", "CALL"})
+_DATABASE_DDL_KINDS = frozenset({"CREATE", "DROP", "ALTER"})
+
+
+def _database_ddl_schema(statement: str) -> tuple[bool, str | None]:
+    """Whether *statement* is database-level DDL, and the schema it names."""
+    kind = statement_kind(unwrap_executable_comments(statement))
+    if kind not in _DATABASE_DDL_KINDS:
+        return False, None
+    stripped = unwrap_executable_comments(statement)
+    if re.search(
+        rf"(?i)\b{kind}\s+(?:DATABASE|SCHEMA)\b",
+        stripped,
+    ):
+        return True, target_database(statement)
+    if kind == "CREATE" and re.search(
+        r"(?i)\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMPORARY\s+)?TABLE\b", stripped
+    ):
+        return False, None
+    if kind == "DROP" and re.search(r"(?i)\bDROP\s+(?:TEMPORARY\s+)?TABLE\b", stripped):
+        return False, None
+    if kind == "ALTER" and re.search(r"(?i)\bALTER\s+TABLE\b", stripped):
+        return False, None
+    return False, None
 
 
 def _out_of_scope_schema(statement: str, scope: frozenset[str] | None) -> str | None:
@@ -50,12 +79,29 @@ def _out_of_scope_schema(statement: str, scope: frozenset[str] | None) -> str | 
     if unwrapped != statement:
         candidates.append(unwrapped)
     for candidate in candidates:
+        is_db_ddl, db_schema = _database_ddl_schema(candidate)
+        if is_db_ddl:
+            if db_schema and db_schema not in scope:
+                return db_schema
+            return None
         target = target_table(candidate)
         if target is not None:
             database, _ = target
-            if database and database not in scope:
-                return database
+            if database:
+                if database not in scope:
+                    return database
+                return None
+            # Unqualified write: resolves to the dump's current schema, which
+            # the loop cannot prove in-scope — fail closed via uninspectable.
             return None
+        for schema in referenced_schemas(candidate):
+            # Same exemption as the query and export paths: the introspection
+            # schemas are not data, and a dump that reads one must not be
+            # refused on a scoped connection.
+            if schema in SCOPE_REFERENCE_EXEMPT_SCHEMAS:
+                continue
+            if schema not in scope:
+                return schema
         if statement_kind(candidate) == "USE":
             match = _USE_STATEMENT_RE.match(candidate)
             if match:
@@ -70,7 +116,28 @@ def _uninspectable_statement(statement: str, scope: frozenset[str] | None) -> bo
     """True when the statement's target cannot be determined before running."""
     if scope is None:
         return False
-    return statement_kind(unwrap_executable_comments(statement)) in _UNINSPECTABLE_KINDS
+    if statement_kind(unwrap_executable_comments(statement)) in _UNINSPECTABLE_KINDS:
+        return True
+    is_db_ddl, db_schema = _database_ddl_schema(statement)
+    # Database-level DDL names its schema via ``target_database``; an empty
+    # name is not analysable, so it fails closed. A named schema is checked by
+    # ``_out_of_scope_schema`` instead — in-scope DDL must still run, and
+    # out-of-scope DDL is rejected there with the schema name.
+    if is_db_ddl and not db_schema:
+        return True
+    if is_db_ddl:
+        return False
+    kind = statement_kind(unwrap_executable_comments(statement))
+    # A recognised write whose target cannot be determined at all fails
+    # closed. ``MERGE`` has no table-target pattern, and any other write kind
+    # with no table target and no schema reference cannot be proven in-scope.
+    # Plain unqualified INSERT/UPDATE/DELETE/REPLACE resolve via the dump's
+    # USE/current schema and stay checkable, so they are not refused here.
+    if kind in _WRITE_KINDS:
+        if target_table(statement) is None and not referenced_schemas(statement):
+            if kind == "MERGE" or kind not in ("INSERT", "UPDATE", "DELETE", "REPLACE"):
+                return True
+    return False
 
 
 IMPORT_MAX_FILE_BYTES = int(
@@ -327,6 +394,53 @@ def _import_deadline() -> float:
     return time.monotonic() + IMPORT_MAX_RUNTIME_SECONDS
 
 
+def _import_timeout(rows_processed: int, unit: str = "rows") -> ImportTimeout:
+    return ImportTimeout(
+        f"Import exceeded the {IMPORT_MAX_RUNTIME_SECONDS:g}-second "
+        f"limit after {rows_processed} {unit}"
+    )
+
+
+async def _await_with_remaining_import_deadline(
+    awaitable, deadline: float, rows_processed: int, unit: str = "rows"
+):
+    """Bound a stalled database await by the import's remaining runtime.
+
+    The import loop only checked the deadline between batches, so a stalled
+    ``executemany``/``execute``/``fetchall`` held the pooled connection past
+    the max runtime. Each await gets the remaining budget (floored at 0.1s so
+    an expired deadline fails fast), and expiry keeps the import taxonomy as
+    ``ImportTimeout`` with row counts preserved by the caller's counters.
+    """
+    remaining = max(0.1, deadline - time.monotonic())
+    try:
+        async with asyncio.timeout(remaining):
+            return await awaitable
+    except TimeoutError as exc:
+        raise _import_timeout(rows_processed, unit) from exc
+
+
+async def _rollback(cur, conn) -> bool:
+    """Roll back, or discard the connection when that fails.
+
+    A rollback that fails or times out leaves the transaction open, and the
+    ``SET autocommit=1`` the caller runs next would implicitly COMMIT it — the
+    partial batch committed while the response reports ``rows_imported=0``.
+    Closing the connection drops the transaction instead, and the pool discards
+    a closed connection rather than handing it to the next request.
+    """
+    try:
+        async with asyncio.timeout(5):
+            await cur.execute("ROLLBACK")
+        return True
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return False
+
+
 async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResult:
     staged.seek(0)
     deadline = _import_deadline()
@@ -358,13 +472,19 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
         if not cfg.first_row_header:
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute(
-                        """SELECT COLUMN_NAME FROM information_schema.COLUMNS
-                           WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
-                           ORDER BY ORDINAL_POSITION""",
-                        (cfg.database, cfg.table),
+                    await _await_with_remaining_import_deadline(
+                        cur.execute(
+                            """SELECT COLUMN_NAME FROM information_schema.COLUMNS
+                               WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
+                               ORDER BY ORDINAL_POSITION""",
+                            (cfg.database, cfg.table),
+                        ),
+                        deadline,
+                        rows_processed,
                     )
-                    col_rows = await cur.fetchall()
+                    col_rows = await _await_with_remaining_import_deadline(
+                        cur.fetchall(), deadline, rows_processed
+                    )
                     if not col_rows:
                         raise HTTPException(
                             400,
@@ -380,18 +500,21 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
             "replace": "REPLACE",
         }[cfg.strategy]
         stmt = f"{prefix} INTO {db_q}.{tbl_q} ({cols_sql}) VALUES ({placeholders})"
-
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
+                # True until a rollback fails; the finally must not run
+                # SET autocommit=1 against a connection with an open transaction.
+                rolled_back = True
                 try:
-                    await cur.execute(f"USE {db_q}")
-                    await cur.execute("SET autocommit=0")
+                    await _await_with_remaining_import_deadline(
+                        cur.execute(f"USE {db_q}"), deadline, rows_processed
+                    )
+                    await _await_with_remaining_import_deadline(
+                        cur.execute("SET autocommit=0"), deadline, rows_processed
+                    )
                     while True:
                         if time.monotonic() > deadline:
-                            raise ImportTimeout(
-                                f"Import exceeded the {IMPORT_MAX_RUNTIME_SECONDS:g}-second "
-                                f"limit after {rows_processed} rows"
-                            )
+                            raise _import_timeout(rows_processed)
                         batch, pending, eof = await asyncio.to_thread(
                             _read_csv_batch,
                             reader,
@@ -415,17 +538,18 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                             _coerce_row(row, cfg.preserve_empty_strings)
                             for row in batch
                         ]
-                        await cur.executemany(stmt, params)
+                        await _await_with_remaining_import_deadline(
+                            cur.executemany(stmt, params), deadline, rows_processed
+                        )
                         rows_processed += len(batch)
                         rows_imported += max(cur.rowcount, 0)
                         if eof:
                             break
-                    await cur.execute("COMMIT")
+                    await _await_with_remaining_import_deadline(
+                        cur.execute("COMMIT"), deadline, rows_processed
+                    )
                 except HTTPException as error:
-                    try:
-                        await cur.execute("ROLLBACK")
-                    except Exception:
-                        pass
+                    rolled_back = await _rollback(cur, conn)
                     return ImportResult(
                         ok=False,
                         rows_processed=rows_processed,
@@ -435,10 +559,7 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                         warnings=warnings,
                     )
                 except (CsvImportError, csv.Error, UnicodeDecodeError) as error:
-                    try:
-                        await cur.execute("ROLLBACK")
-                    except Exception:
-                        pass
+                    rolled_back = await _rollback(cur, conn)
                     return ImportResult(
                         ok=False,
                         rows_processed=rows_processed,
@@ -448,10 +569,7 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                         warnings=warnings,
                     )
                 except Exception as error:
-                    try:
-                        await cur.execute("ROLLBACK")
-                    except Exception:
-                        pass
+                    rolled_back = await _rollback(cur, conn)
                     return ImportResult(
                         ok=False,
                         rows_processed=rows_processed,
@@ -461,10 +579,14 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
                         warnings=warnings,
                     )
                 finally:
-                    try:
-                        await cur.execute("SET autocommit=1")
-                    except Exception:
-                        conn.close()
+                    # Only restore the session default once the transaction is
+                    # closed: `SET autocommit=1` implicitly commits an open one.
+                    if rolled_back:
+                        try:
+                            async with asyncio.timeout(5):
+                                await cur.execute("SET autocommit=1")
+                        except Exception:
+                            conn.close()
         return ImportResult(
             ok=True,
             rows_processed=rows_processed,
@@ -498,20 +620,22 @@ async def _mysql_dump_import(
     error_statement: str | None = None
     error_line: int | None = None
     error: str | None = None
+    deadline = _import_deadline()
     try:
         async with pool.acquire() as conn:
             try:
                 async with conn.cursor() as cur:
                     try:
-                        await cur.execute(f"USE {quote_ident(cfg.database)}")
+                        await _await_with_remaining_import_deadline(
+                            cur.execute(f"USE {quote_ident(cfg.database)}"),
+                            deadline,
+                            processed,
+                            "statements",
+                        )
                         iterator = iter_sql_statements(text)
-                        deadline = _import_deadline()
                         while True:
                             if time.monotonic() > deadline:
-                                raise ImportTimeout(
-                                    f"Import exceeded the {IMPORT_MAX_RUNTIME_SECONDS:g}-second "
-                                    f"limit after {processed} statements"
-                                )
+                                raise _import_timeout(processed, "statements")
                             item = await asyncio.to_thread(
                                 _next_sql_statement, iterator
                             )
@@ -535,7 +659,12 @@ async def _mysql_dump_import(
                                 error_statement = _statement_preview(item.sql)
                                 break
                             try:
-                                await cur.execute(item.sql)
+                                await _await_with_remaining_import_deadline(
+                                    cur.execute(item.sql),
+                                    deadline,
+                                    processed,
+                                    "statements",
+                                )
                             except Exception as exc:
                                 error = str(exc)
                                 error_statement = _statement_preview(item.sql)
@@ -559,7 +688,8 @@ async def _mysql_dump_import(
                         error_line = None
                     if error is not None:
                         try:
-                            await cur.execute("ROLLBACK")
+                            async with asyncio.timeout(5):
+                                await cur.execute("ROLLBACK")
                         except Exception:
                             pass
             finally:

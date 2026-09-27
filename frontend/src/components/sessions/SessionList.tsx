@@ -23,8 +23,15 @@ export default function SessionList() {
   const [editSession, setEditSession] = useState<Session | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null)
   const [menuId, setMenuId] = useState<string | null>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
-  useMenuKeyboard(menuRef, () => setMenuId(null), Boolean(menuId))
+  // One ref per row. A single ref object shared by every row's menu is both
+  // nulled by React when the exiting menu unmounts and stable in identity, so
+  // the keyboard hook would stay bound to the previous row's detached node and
+  // never re-arm when another row's menu opens. Resolving a distinct object per
+  // open menu gives the hook a dependency that actually changes.
+  const rowMenuRefs = useRef<Record<string, { current: HTMLDivElement | null }>>({})
+  const inactiveMenuRef = useRef<HTMLDivElement>(null)
+  const menuRefFor = (id: string) => (rowMenuRefs.current[id] ??= { current: null })
+  useMenuKeyboard(menuId ? menuRefFor(menuId) : inactiveMenuRef, () => setMenuId(null), Boolean(menuId))
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return
@@ -100,7 +107,7 @@ export default function SessionList() {
                 exit={{ opacity: 0, scale: 0.92, y: -motionDistance.surface, transition: exitTransition }}
               >
                 <div
-                  ref={menuRef}
+                  ref={menuRefFor(s.id)}
                   role="menu"
                   aria-label={`Actions for ${s.name}`}
                   className="absolute right-0 top-6 z-popover w-40 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"

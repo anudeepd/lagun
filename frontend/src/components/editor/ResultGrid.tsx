@@ -600,6 +600,12 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       }
 
       if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === 'Enter') {
+        // While the find bar is open Shift+Enter steps to the previous match
+        // (handleNavKey below). Both listeners sit on window in the capture
+        // phase, so without this bail-out one keystroke would also open the
+        // large cell editor. stopPropagation cannot help: same target, same
+        // phase — the other listener runs regardless.
+        if (findOpen) return
         if (!canEditColumnRef.current(activeCell.columnName)) return
         e.preventDefault()
         openLargeCellEditorRef.current(activeCell)

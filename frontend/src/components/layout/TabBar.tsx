@@ -14,6 +14,7 @@ import useMenuKeyboard from '../../hooks/useMenuKeyboard'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+import { clampToViewport } from '../../utils/clampToViewport'
 
 interface ContextMenuState {
   tabId: string
@@ -45,11 +46,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
   const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
   useLayoutEffect(() => {
     if (!contextMenu || !contextMenuRef.current) return
-    const menu = contextMenuRef.current.getBoundingClientRect()
-    setMenuPosition({
-      left: Math.max(8, Math.min(contextMenu.x, window.innerWidth - menu.width - 8)),
-      top: Math.max(8, Math.min(contextMenu.y, window.innerHeight - menu.height - 8)),
-    })
+    setMenuPosition(clampToViewport(contextMenu.x, contextMenu.y, contextMenuRef.current))
   }, [contextMenu])
   useLayoutEffect(() => {
     const tab = activeTabId ? tabButtonRefs.current[activeTabId]?.parentElement : null

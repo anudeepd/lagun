@@ -1,10 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import { clipboardWrite } from '../../utils/clipboard'
-import { API_BASE, api, apiFetch } from '../../api/client'
+import { API_BASE, api, apiFetch, errorMessageFromResponse } from '../../api/client'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
+import Progress from '../ui/Progress'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
 import { showToast } from '../../utils/toast'
@@ -195,6 +196,13 @@ export const buildFrontendContent = (
 }
 const COPY_LIMIT_BYTES = 16 * 1024 * 1024
 
+// Server markers. The SQL formats end with a completion line so a truncated
+// download is detectable; a body that fails mid-stream (the HTTP status is
+// already 200 by then) ends with a FAILED line instead. CSV has no comment
+// syntax, so it can carry neither.
+const EXPORT_FAILURE_MARKER = '-- Lagun export FAILED: '
+const EXPORT_COMPLETION_RE = /\n-- Lagun export complete: \d+ rows\n$/
+
 export async function responseTextWithLimit(response: Response, limit = COPY_LIMIT_BYTES): Promise<string> {
   if (!response.body) {
     const text = await response.text()
@@ -271,12 +279,19 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const [csvEscapechar, setCsvEscapechar] = useState('"')
   const [csvLineterminator, setCsvLineterminator] = useState('crlf')
   const [csvEncoding, setCsvEncoding] = useState('utf-8')
+  const requestIdRef = useRef(0)
 
   // Callers keep this dialog mounted so Modal can play its exit animation, so a
   // fresh open no longer remounts and resets the form. Reset it here instead;
   // the reset lands while the dialog is still fully transparent.
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      // Closing abandons whatever is still in flight: bumping here (only on the
+      // close, never on an unrelated prop change) keeps a late copy or export
+      // from closing or repainting the dialog on the next open.
+      requestIdRef.current += 1
+      return
+    }
     setFormat(customSql ? 'csv' : 'insert')
     setInsertMode('single')
     setBatchSize('500')
@@ -354,6 +369,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const handleExport = async () => {
     setExporting(true)
     setError(null)
+    const requestId = requestIdRef.current
     try {
       ensureValidCsvOptions()
       if (rowsOverride) {
@@ -375,20 +391,23 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           },
         )
       }
+      if (requestId !== requestIdRef.current) return
       onClose()
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
+      if (requestId !== requestIdRef.current) return
       const message = `Export failed: ${error instanceof Error ? error.message : String(error)}`
       setError(message)
       showToast(message, 'error')
     } finally {
-      setExporting(false)
+      if (requestId === requestIdRef.current) setExporting(false)
     }
   }
 
   const handleCopy = async () => {
     setCopying(true)
     setError(null)
+    const requestId = requestIdRef.current
     try {
       ensureValidCsvOptions()
       let text: string
@@ -406,18 +425,36 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           headers: { 'Content-Type': 'application/json' },
           body: buildBody(),
         })
-        if (!res.ok) throw new Error(await res.text())
+        if (!res.ok) throw new Error(await errorMessageFromResponse(res))
         text = await responseTextWithLimit(res)
+        if (format !== 'csv') {
+          // CSV has no comment syntax, so a truncated CSV cannot carry a marker
+          // and there is nothing to verify here. The SQL formats end with a
+          // completion line; a body that failed mid-stream ends with a FAILED
+          // line instead (the status is already 200 by then).
+          const failedAt = text.indexOf(EXPORT_FAILURE_MARKER)
+          if (failedAt !== -1) {
+            const message = text
+              .slice(failedAt + EXPORT_FAILURE_MARKER.length)
+              .split('\n', 1)[0]
+            throw new Error(message || 'the export failed before it finished')
+          }
+          if (!EXPORT_COMPLETION_RE.test(text)) {
+            throw new Error('the download ended before the export finished')
+          }
+        }
       }
       await clipboardWrite(text)
+      if (requestId !== requestIdRef.current) return
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch (error) {
+      if (requestId !== requestIdRef.current) return
       const message = `Copy failed: ${error instanceof Error ? error.message : String(error)}`
       setError(message)
       showToast(message, 'error')
     } finally {
-      setCopying(false)
+      if (requestId === requestIdRef.current) setCopying(false)
     }
   }
 
@@ -439,6 +476,11 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       }
     >
       <div className="flex flex-col gap-4">
+        {/* The export response is an unbounded stream with no Content-Length, so
+            a percentage cannot be honest; the bar stays indeterminate. */}
+        {(exporting || copying) && (
+          <Progress label={copying ? 'Copying export' : 'Exporting'} />
+        )}
         {error && <p role="alert" className="rounded border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
         <Select
           label="Format"

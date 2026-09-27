@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import useMenuKeyboard from '../../hooks/useMenuKeyboard'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+import { clampToViewport } from '../../utils/clampToViewport'
 
 export type ContextMenuItem =
   | { type: 'item'; label: string; icon?: ReactNode; danger?: boolean; onClick: () => void }
@@ -20,14 +21,11 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
   const [pos, setPos] = useState({ left: x, top: y })
   useMenuKeyboard(ref, onClose)
 
-  // Clamp position to viewport after first render
+  // Clamp position to viewport after first render.
   useLayoutEffect(() => {
-    if (!ref.current) return
-    const { width, height } = ref.current.getBoundingClientRect()
-    setPos({
-      left: Math.max(8, Math.min(x, window.innerWidth - width - 8)),
-      top: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
-    })
+    const el = ref.current
+    if (!el) return
+    setPos(clampToViewport(x, y, el))
   }, [x, y])
 
   useEffect(() => {

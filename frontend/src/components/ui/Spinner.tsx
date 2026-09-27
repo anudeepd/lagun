@@ -1,4 +1,6 @@
 import clsx from 'clsx'
+import * as m from 'motion/react-m'
+import { exitTransition, motionDuration } from '../../motion/tokens'
 
 export default function Spinner({ size = 'md', className }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
   return (
@@ -24,9 +26,12 @@ export default function Spinner({ size = 'md', className }: { size?: 'sm' | 'md'
 
 export function LoadingState({ label, compact = false, className }: { label: string; compact?: boolean; className?: string }) {
   return (
-    <div
+    <m.div
       role="status"
       aria-live="polite"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, transition: { duration: motionDuration.micro } }}
+      exit={{ opacity: 0, transition: exitTransition }}
       className={clsx(
         'flex items-center justify-center text-muted',
         compact ? 'gap-2 text-xs' : 'h-full flex-col gap-3 text-sm',
@@ -35,6 +40,6 @@ export function LoadingState({ label, compact = false, className }: { label: str
     >
       <Spinner size={compact ? 'sm' : 'md'} />
       <span>{label}</span>
-    </div>
+    </m.div>
   )
 }
