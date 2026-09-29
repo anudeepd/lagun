@@ -8,6 +8,11 @@ test.describe('motion system', () => {
     // "New Query" only renders once a session is active, and the app store is
     // empty on an isolated run.
     sessionId = await createTestSession(page)
+    // Seed before the first paint. The schema tree fetches a session's databases
+    // when it activates, and a database created after that fetch never appears in
+    // it — so a spec that seeds afterwards waits on a row the tree will not show.
+    // This is the order the shared fixture uses for the same reason.
+    await seedDatabase(page, sessionId)
     await page.goto('/')
     await expect(page.getByText('Query Log')).toBeVisible()
   })
@@ -55,9 +60,8 @@ test.describe('motion system', () => {
 
   test('fades a Select listbox out instead of unmounting it in one frame', async ({ page }) => {
     // The schema view's Add Column dialog is the shortest path to a Select that
-    // lives in a table tab. This file's beforeEach creates a session but no
-    // database, so seed the table first.
-    await seedDatabase(page, sessionId)
+    // lives in a table tab. This file's beforeEach seeds e2e_test.products before
+    // the page loads, so the tree already lists both.
     await page.locator('span.text-xs.truncate', { hasText: 'E2E Test Session' }).click()
     await page.getByText('e2e_test').click()
     await page.getByText('products').click()
