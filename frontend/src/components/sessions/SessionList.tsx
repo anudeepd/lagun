@@ -82,7 +82,7 @@ export default function SessionList() {
           >
             <Wifi size={12} className="flex-shrink-0 text-green-400" aria-hidden="true" />
             <span className="min-w-0 flex-1 truncate text-xs">{s.name}</span>
-            <span className="text-muted text-xs">{s.host}</span>
+            <span className="min-w-0 max-w-[50%] truncate text-muted text-xs">{s.host}</span>
           </button>
 
           {/* Context menu trigger */}
@@ -110,26 +110,26 @@ export default function SessionList() {
                   ref={menuRefFor(s.id)}
                   role="menu"
                   aria-label={`Actions for ${s.name}`}
-                  className="absolute right-0 top-6 z-popover w-40 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"
+                  className="absolute right-0 top-6 z-popover w-40 rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-lg"
                   onMouseLeave={() => setMenuId(null)}
                 >
                   {!s.managed && <button
                     role="menuitem"
-                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                     onClick={e => { e.stopPropagation(); openQueryTab(s.id); setMenuId(null) }}
                   >
                     <Terminal size={12} aria-hidden="true" /> New Query
                   </button>}
                   <button
                     role="menuitem"
-                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                     onClick={e => { e.stopPropagation(); setEditSession(s); setMenuId(null) }}
                   >
                     <Edit size={12} aria-hidden="true" /> Edit
                   </button>
                   <button
                     role="menuitem"
-                    className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-red-400"
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                     onClick={e => { e.stopPropagation(); setDeleteTarget(s); setMenuId(null) }}
                   >
                     <Trash2 size={12} aria-hidden="true" /> {s.managed ? 'Remove' : 'Delete'}

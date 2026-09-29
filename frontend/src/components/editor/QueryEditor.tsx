@@ -17,6 +17,16 @@ import { AnimatePresence, useAnimationControls } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, surfaceTransition } from '../../motion/tokens'
 
+// One Dark ships its own grey-blue surface (#282c34); repaint the chrome with
+// the app's slate surfaces so the editor sits flush with the toolbar above it.
+// Prec.highest: theme rule order otherwise depends on extension order.
+const editorSurfaceTheme: Extension = Prec.highest(EditorView.theme({
+  '&': { backgroundColor: '#0f172a' },
+  '.cm-gutters': { backgroundColor: '#0f172a', borderRight: '1px solid #1e293b' },
+  '.cm-activeLine': { backgroundColor: 'rgba(51, 65, 85, 0.25)' },
+  '.cm-activeLineGutter': { backgroundColor: 'rgba(51, 65, 85, 0.25)' },
+}, { dark: true }))
+
 // Extract the current SQL statement from the document at the given position
 export const extractStatementAt = (doc: string, pos: number): string => {
   let start = 0
@@ -198,8 +208,8 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
 
   const extensions = useMemo(
     () => wordWrap
-      ? [sqlExtension, EditorView.lineWrapping, runKeymap, tooltipExtensions]
-      : [sqlExtension, runKeymap, tooltipExtensions],
+      ? [sqlExtension, EditorView.lineWrapping, runKeymap, tooltipExtensions, editorSurfaceTheme]
+      : [sqlExtension, runKeymap, tooltipExtensions, editorSurfaceTheme],
     [sqlExtension, runKeymap, tooltipExtensions, wordWrap]
   )
 
@@ -213,7 +223,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               whileHover={{ scale: 1.025 }}
               whileTap={{ scale: 0.96 }}
               transition={{ duration: 0.28, ease: 'easeOut' }}
-              className="rounded"
+              className="rounded-md"
             >
             <Select
               compact
@@ -221,7 +231,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               onChange={e => onDatabaseChange?.(e.target.value)}
               aria-label="Database"
               className={clsx(
-                'focus:ring-1 max-w-[220px]',
+                'max-w-[220px]',
                 database
                   ? 'border-surface-700 text-slate-300'
                   : 'border-amber-600 text-amber-400'
@@ -246,7 +256,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
               whileHover={{ scale: 1.025 }}
               whileTap={{ scale: 0.96 }}
               transition={surfaceTransition}
-              className="flex items-center gap-1 text-xs text-muted rounded"
+              className="flex items-center gap-1 text-xs text-muted rounded-md"
             >
               <span>Limit</span>
               <LimitSelect value={limit} options={LIMIT_OPTIONS} onChange={onLimitChange} />
@@ -254,14 +264,14 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
 )}
           {onWordWrapChange && ( // Only shown when parent provides the callback (TabContent always does)
             <Button
-              variant="icon" 
+              variant="icon"
               size="sm"
               onClick={handleWordWrapChange}
               aria-pressed={wordWrap}
               aria-label="Toggle word wrap"
               title={wordWrap ? 'Disable word wrap' : 'Enable word wrap'}
             >
-              <WrapText size={12} />
+              <WrapText size={14} />
             </Button>
           )}
           <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted bg-surface-800 border border-surface-700 rounded">
@@ -269,7 +279,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
           </kbd>
           {running && onCancel && (
             <Button variant="ghost" size="sm" onClick={onCancel} title="Cancel query">
-              <X size={12} />
+              <X size={14} />
               Cancel
             </Button>
           )}
@@ -285,11 +295,11 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
             disabled={running || !value.trim()}
             title={`Run (${modKey}Enter)`}
           >
-            <span className="relative inline-flex h-3 w-3 items-center justify-center">
+            <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
               <AnimatePresence initial={false} mode="sync">
                 {running
-                  ? <m.span key="running" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="absolute"><Loader2 size={12} className="animate-spin" /></m.span>
-                  : <m.span key="ready" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="absolute"><Play size={12} /></m.span>}
+                  ? <m.span key="running" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="absolute"><Loader2 size={14} className="animate-spin" /></m.span>
+                  : <m.span key="ready" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="absolute"><Play size={14} /></m.span>}
               </AnimatePresence>
             </span>
             Run

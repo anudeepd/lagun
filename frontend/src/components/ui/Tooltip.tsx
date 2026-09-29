@@ -93,7 +93,7 @@ export default function Tooltip({ label, children, side = 'top', portal = false 
           exit={{ opacity: 0, transition: exitTransition }}
           className={`pointer-events-none whitespace-nowrap rounded border border-surface-700 bg-surface-800 px-1.5 py-0.5 text-[11px] text-slate-200 shadow-lg ${
             portal
-              ? 'fixed z-[100] -translate-x-1/2'
+              ? 'fixed z-critical -translate-x-1/2'
               : `absolute left-1/2 z-popover -translate-x-1/2 ${side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`
           }`}
           style={portal ? { left: position.left, top: side === 'top' ? position.top - 6 : position.top + 6 } : undefined}

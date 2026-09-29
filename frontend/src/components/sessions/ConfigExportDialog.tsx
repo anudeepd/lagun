@@ -56,7 +56,7 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
         <>
           <Button variant="ghost" onClick={handleClose} disabled={loading}>Cancel</Button>
           <Button variant="primary" onClick={handleExport} disabled={loading}>
-            {loading ? <Loader2 size={12} className="animate-spin mr-1" /> : <Download size={12} className="mr-1" />}
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
             Download
           </Button>
         </>
@@ -66,7 +66,7 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
         {/* The footer button spins but keeps its "Download" label, so the busy
             state needs exactly one announcement of its own. */}
         {loading && <LoadingState label="Exporting connections…" compact className="sr-only" />}
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-muted">
           Export all saved connections to an encrypted JSON file. You will need this
           passphrase to import the file on any Lagun instance.
         </p>

@@ -49,11 +49,11 @@ export default function GridSearchBar({
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.85, y: -12, transition: exitTransition }}
       transition={FIND_BAR_SPRING}
-      className="absolute right-2 top-2 z-20 flex w-[calc(100%-1rem)] max-w-2xl items-center gap-1 overflow-hidden rounded-xl border border-surface-600 bg-surface-900/95 px-2 py-1.5 shadow-2xl ring-1 ring-brand-400/30 backdrop-blur sm:w-auto sm:min-w-[22rem]"
+      className="absolute right-2 top-2 z-raised flex w-[calc(100%-1rem)] max-w-2xl items-center gap-1 overflow-hidden rounded-lg border border-surface-600 bg-surface-900/95 px-2 py-1.5 shadow-lg ring-1 ring-brand-400/30 backdrop-blur sm:w-auto sm:min-w-[22rem]"
       role="search"
       aria-label="Find in grid"
     >
-      <Search className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+      <Search className="h-3.5 w-3.5 shrink-0 text-muted" />
       <input
         ref={inputRef}
         type="search"
@@ -73,11 +73,11 @@ export default function GridSearchBar({
           }
         }}
         placeholder="Find in grid"
-        className="h-7 min-w-0 flex-1 rounded bg-surface-950 px-2 text-xs text-slate-200 outline-none placeholder:text-muted focus:ring-1 focus:ring-brand-400 sm:w-44 sm:flex-none"
+        className="h-7 min-w-0 flex-1 rounded-md bg-surface-950 px-2 text-xs text-slate-200 focus:outline-none placeholder:text-muted focus:ring-2 focus:ring-brand-400 sm:w-44 sm:flex-none"
       />
       <span
         aria-live="polite"
-        className={`whitespace-nowrap px-1 text-[10px] ${hasMatches ? 'text-slate-400' : 'text-amber-400'}`}
+        className={`whitespace-nowrap px-1 text-[10px] ${hasMatches ? 'text-muted' : 'text-amber-400'}`}
       >
         {hasMatches ? `${currentMatch} of ${matchCount}` : 'No matches'}
       </span>
@@ -86,7 +86,7 @@ export default function GridSearchBar({
         onClick={onPrev}
         title="Previous match (Shift+Enter)"
         aria-label="Previous match"
-        className="rounded p-1 text-slate-400 hover:bg-surface-800 hover:text-slate-200"
+        className="rounded p-1 text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       >
         <ChevronUp className="h-3.5 w-3.5" />
       </button>
@@ -95,7 +95,7 @@ export default function GridSearchBar({
         onClick={onNext}
         title="Next match (Enter)"
         aria-label="Next match"
-        className="rounded p-1 text-slate-400 hover:bg-surface-800 hover:text-slate-200"
+        className="rounded p-1 text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       >
         <ChevronDown className="h-3.5 w-3.5" />
       </button>
@@ -104,7 +104,7 @@ export default function GridSearchBar({
         onClick={onClose}
         title="Close find (Esc)"
         aria-label="Close find"
-        className="rounded p-1 text-slate-400 hover:bg-surface-800 hover:text-slate-200"
+        className="rounded p-1 text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       >
         <X className="h-3.5 w-3.5" />
       </button>

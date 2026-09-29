@@ -46,7 +46,7 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
       initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
       animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
       exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
-      className="fixed z-popover min-w-[180px] rounded-md border border-surface-700 bg-surface-900 py-1 shadow-2xl"
+      className="fixed z-popover min-w-[180px] rounded-lg border border-surface-700 bg-surface-900 py-1 shadow-lg"
       style={{ left: pos.left, top: pos.top }}
       onContextMenu={e => e.preventDefault()}
     >
@@ -57,10 +57,10 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
           <button
             key={i}
             role="menuitem"
-            className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left ${
+            className={`flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-brand-400 ${
               item.danger
-                ? 'text-red-400 hover:bg-red-950/40'
-                : 'text-slate-300 hover:bg-surface-800'
+                ? 'text-red-400 hover:bg-red-950/40 focus-visible:bg-red-950/40'
+                : 'text-slate-300 hover:bg-surface-800 focus-visible:bg-surface-800'
             }`}
             onClick={item.onClick}
           >

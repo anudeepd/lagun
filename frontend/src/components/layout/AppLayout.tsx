@@ -155,7 +155,7 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
           aria-valuemin={MIN_SIDEBAR}
           aria-valuemax={MAX_SIDEBAR}
           tabIndex={0}
-          className="group absolute inset-y-0 right-0 z-10 hidden w-2 translate-x-1/2 cursor-col-resize focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:block"
+          className="group absolute inset-y-0 right-0 z-raised hidden w-2 translate-x-1/2 cursor-col-resize focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 lg:block"
         >
           <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-brand-700" />
         </div>
@@ -163,11 +163,11 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
 
       <div ref={mainAreaRef} className="flex flex-col flex-1 min-w-0 min-h-0">
         <div className="flex min-h-[46px] items-center border-b border-surface-800 lg:hidden">
-          <button ref={mobileOpenButtonRef} type="button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open navigation" className="lagun-icon-button m-1 rounded p-2 text-slate-300 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
+          <button ref={mobileOpenButtonRef} type="button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open navigation" className="lagun-icon-button m-1 rounded-md p-2 text-slate-400 hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
             <Menu size={18} />
           </button>
           <span className="text-sm font-medium text-slate-300">Lagun</span>
-          <button type="button" onClick={() => setCommandPaletteOpen(true)} aria-label="Open command palette" className="lagun-icon-button ml-auto mr-2 rounded p-2 text-slate-400 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
+          <button type="button" onClick={() => setCommandPaletteOpen(true)} aria-label="Open command palette" className="lagun-icon-button ml-auto mr-2 rounded-md p-2 text-slate-400 hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">
             <Command size={18} />
           </button>
         </div>

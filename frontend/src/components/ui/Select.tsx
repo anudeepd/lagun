@@ -185,7 +185,7 @@ export default function Select({ label, error, className, containerClassName, co
         whileTap={disabled ? undefined : { scale: 0.985 }}
         transition={surfaceTransition}
         className={clsx(
-          'lagun-interactive flex w-full items-center justify-between rounded-md border border-surface-700 bg-surface-800 text-left text-slate-100',
+          'lagun-field flex w-full items-center justify-between rounded-md border border-surface-700 bg-surface-800 text-left text-slate-100',
           compact ? 'gap-2 px-2 py-0.5 text-xs' : 'gap-3 px-3 py-1.5 text-sm',
           'focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-50',
           error && 'border-red-500', className,
@@ -208,7 +208,7 @@ export default function Select({ label, error, className, containerClassName, co
               exit={{ opacity: 0, scale: 0.96, y: -6, transition: exitTransition }}
               transition={surfaceTransition}
               style={{ position: 'fixed', top: menuPosition.top, bottom: menuPosition.bottom, left: menuPosition.left, width: menuPosition.width, maxHeight: menuPosition.maxHeight }}
-              className={clsx(isInsideDialog ? 'z-critical' : 'z-popover', menuPosition.placement === 'above' ? 'origin-bottom' : 'origin-top', 'overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-xl')}
+              className={clsx(isInsideDialog ? 'z-critical' : 'z-popover', menuPosition.placement === 'above' ? 'origin-bottom' : 'origin-top', 'overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-lg')}
             >
               {enabledOptions.map((option, index) => (
                 <button
@@ -230,7 +230,7 @@ export default function Select({ label, error, className, containerClassName, co
                   )}
                 >
                   <span>{option.label}</span>
-                  <Check size={compact ? 11 : 13} className={option.value === selectedValue ? 'opacity-100' : 'opacity-0'} />
+                  <Check size={compact ? 12 : 14} className={option.value === selectedValue ? 'opacity-100' : 'opacity-0'} />
                 </button>
               ))}
             </m.div>

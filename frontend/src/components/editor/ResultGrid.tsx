@@ -814,13 +814,13 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       {
         type: 'item',
         label: 'Copy cell',
-        icon: <Copy size={12} />,
+        icon: <Copy size={14} />,
         onClick: () => { clipboardWrite(String(menu.cellValue ?? '')).catch(() => {}); closeMenu() },
       },
       {
         type: 'item',
         label: 'Copy row as JSON',
-        icon: <Braces size={12} />,
+        icon: <Braces size={14} />,
         onClick: () => { clipboardWrite(JSON.stringify(displayRow, null, 2)).catch(() => {}); closeMenu() },
       },
     ]
@@ -830,7 +830,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       items.push({
         type: 'item',
         label: 'Edit cell...',
-        icon: <PencilLine size={12} />,
+        icon: <PencilLine size={14} />,
         onClick: () => openLargeCellEditor({
           columnName: menu.columnName,
           value: menu.cellValue,
@@ -841,7 +841,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         items.push({
           type: 'item',
           label: 'Set to NULL',
-          icon: <Slash size={12} />,
+          icon: <Slash size={14} />,
           onClick: () => { onCellEdit?.({ column: menu.columnName, newValue: null, oldValue: menu.rowData[menu.columnName], data: menu.rowData }); closeMenu() },
         })
       }
@@ -850,7 +850,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         items.push({
           type: 'item',
           label: `Set to NOW()  ${nowStr}`,
-          icon: <Clock size={12} />,
+          icon: <Clock size={14} />,
           onClick: () => { onCellEdit?.({ column: menu.columnName, newValue: nowStr, oldValue: menu.rowData[menu.columnName], data: menu.rowData }); closeMenu() },
         })
       }
@@ -861,13 +861,13 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       items.push({
         type: 'item',
         label: 'Duplicate row with keys',
-        icon: <CopyPlus size={12} />,
+        icon: <CopyPlus size={14} />,
         onClick: () => { onDuplicateRow(menu.rowData, 'withKeys'); closeMenu() },
       })
       items.push({
         type: 'item',
         label: 'Duplicate row without keys',
-        icon: <CopyPlus size={12} />,
+        icon: <CopyPlus size={14} />,
         onClick: () => { onDuplicateRow(menu.rowData, 'withoutKeys'); closeMenu() },
       })
     }
@@ -879,7 +879,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         type: 'item',
         label,
         danger: true,
-        icon: <Trash2 size={12} />,
+        icon: <Trash2 size={14} />,
         onClick: () => { onDeleteRows(targetRows); closeMenu() },
       })
     }
@@ -892,7 +892,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     return [{
       type: 'item',
       label: 'Insert empty row',
-      icon: <Plus size={12} />,
+      icon: <Plus size={14} />,
       onClick: () => {
         onCreateEmptyRow()
         closeMenu()
@@ -991,7 +991,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         width="max-w-3xl"
         footer={(
           <>
-            <Button variant="secondary" onClick={() => setCellEditor(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setCellEditor(null)}>Cancel</Button>
             <Button variant="primary" onClick={handleApplyCellEditor}>Apply</Button>
           </>
         )}
@@ -1001,7 +1001,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="lagun-data-text font-data text-slate-300">{cellEditor.columnName}</span>
               {cellEditor.wasNull && (
-                <span className="px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700 text-slate-400">
+                <span className="px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700 text-muted">
                   NULL
                 </span>
               )}
@@ -1009,7 +1009,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
             <textarea
               ref={focusTextareaAtEnd}
               aria-label={`Edit ${cellEditor.columnName}`}
-              className="min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400"
+              className="min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 lagun-field focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400"
               value={cellEditor.value}
               onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
               spellCheck={false}

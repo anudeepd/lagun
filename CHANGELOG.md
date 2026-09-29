@@ -5,6 +5,41 @@ All notable changes to Lagun are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.98] - 2026-09-29
+
+### Fixed
+
+- **Two eye icons on the LDAP login page in Firefox.** Firefox can draw its own reveal button
+  inside `<input type="password">` (`layout.forms.reveal-password-button.enabled`: on in
+  Nightly, some forks and any profile that sets it), next to the page's own toggle. The
+  existing `::-ms-reveal` rule only hides Edge's. Page CSS cannot hide Firefox's:
+  `::-moz-reveal` is user-agent-only, and painting it invisible is undone by Firefox's
+  `input:autofill { color: FieldText !important }`. The page now measures whether the browser
+  reserves room for its own button and, if it does, shows only that one. The
+  `login-reveal` e2e spec runs the real template in Firefox with the button on and off.
+- The login pages of lagun, xwing, torrus and ldapgate (its template and its built-in fallback)
+  are now one page apart from branding (palette, logo, name, title, asset paths). Shared
+  behaviour: guarded `sessionStorage` access, so blocked storage can no longer throw after a
+  failed sign-in; `aria-invalid` on both fields after a failure; the error takes focus and the
+  username is only autofocused when there is no error; the floating error banner (xwing's used
+  to sit in the flow); an `<h1>` and `<main>` landmark everywhere (torrus used a hidden
+  heading, ldapgate a `<span>`); `color-scheme: dark`; safe-area padding with `theme-color`;
+  focus-visible outlines; and the "Signing in…" label.
+- **UI consistency pass.** Tailwind emitted no CSS for `surface-600`, `brand-200/300/800/950`
+  and other shades the components used, so `Button` secondary borders rendered near-white and
+  `text-brand-300` / `bg-brand-950` fell back to inherited colours. Both palettes are now complete.
+- Text fields (`Input`, `Select`, `LimitSelect`) no longer lift on hover or squash on press;
+  they use the new `.lagun-field` transition. Compact toolbar icon buttons
+  (`Button variant="icon" size="sm"`) match the height of neighbouring `sm` controls.
+- Dialogs use one error/warning/success banner style, Cancel-then-primary button order,
+  `accent-brand-500` checkboxes and one focus ring; hand-rolled buttons and fields in the admin
+  console use the shared `Button`, `Label` and field classes; amber replaces yellow and green
+  replaces emerald for warning/success.
+- Sticky Columns-table cells match the page surface, the SQL editor uses the app's slate palette,
+  the logout button no longer renders with a permanent red background, views show an eye
+  icon in the schema tree, and a table tab's truncated label carries a `title` with the full
+  `database.table`.
+
 ## [0.1.97] - 2026-09-27
 
 ### Tests and CI

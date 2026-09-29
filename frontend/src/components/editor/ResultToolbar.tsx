@@ -21,22 +21,22 @@ export default function ResultToolbar({ result, running }: Props) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1, transition: surfaceTransition }}
           exit={{ opacity: 0, transition: exitTransition }}
-          className="flex min-h-7 items-center gap-4 border-t border-surface-800 bg-surface-900 px-3 py-1.5 text-xs"
+          className="flex min-h-7 items-center gap-4 bg-surface-900 px-3 py-1.5 text-xs"
         >
           {running ? (
-            <span className="text-slate-400">Executing…</span>
+            <span className="text-muted">Executing…</span>
           ) : result?.error ? (
             <span className="flex items-center gap-1 text-red-400">
-              <AlertCircle size={11} /> Error
+              <AlertCircle size={12} /> Error
             </span>
           ) : result ? (
             <>
-              <span className="flex items-center gap-1 text-slate-400">
-                <Hash size={11} />
+              <span className="flex items-center gap-1 text-muted">
+                <Hash size={12} />
                 {formatRowCount(result.row_count)}
               </span>
-              {result.affected_rows != null && <span className="text-slate-400">{result.affected_rows} affected</span>}
-              <span className="flex items-center gap-1 text-muted"><Clock size={11} />{result.exec_time_ms}ms</span>
+              {result.affected_rows != null && <span className="text-muted">{result.affected_rows} affected</span>}
+              <span className="flex items-center gap-1 text-muted"><Clock size={12} />{result.exec_time_ms}ms</span>
               {result.insert_id ? <span className="text-muted">insert_id={result.insert_id}</span> : null}
             </>
           ) : null}

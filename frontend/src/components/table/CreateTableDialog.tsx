@@ -108,7 +108,7 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
       }
     >
       <div className="flex flex-col gap-4">
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="rounded-md border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
 
         <div className="grid grid-cols-2 gap-3">
           <Input label="Table Name" value={tableName} onChange={e => setTableName(e.target.value)} placeholder="my_table" />
@@ -123,7 +123,7 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
           <div className="flex items-center justify-between mb-2">
             <Label as="span">Columns</Label>
             <Button variant="ghost" size="sm" onClick={() => setCols(prev => [...prev, defaultCol()])}>
-              <Plus size={12} /> Add Column
+              <Plus size={14} /> Add Column
             </Button>
           </div>
 
@@ -139,7 +139,7 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
             {cols.map((col, i) => (
               <div key={i} className="grid grid-cols-12 gap-1 items-center">
                 <input
-                  className="col-span-3 bg-surface-800 border border-surface-700 rounded px-2 py-1 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-400"
+                  className="col-span-3 bg-surface-800 border border-surface-700 rounded-md px-2 py-1 text-xs text-slate-100 placeholder-muted lagun-field focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400"
                   value={col.name}
                   onChange={e => updateCol(i, { name: e.target.value })}
                   placeholder="column_name"
@@ -147,7 +147,6 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
                 <Select
                   compact
                   containerClassName="col-span-4"
-                  className="focus:ring-1"
                   aria-label={`Type for column ${i + 1}`}
                   value={col.type}
                   onChange={e => updateCol(i, { type: e.target.value })}
@@ -155,17 +154,17 @@ export default function CreateTableDialog({ open, onClose, sessionId, database, 
                   {COMMON_TYPES.map(t => <option key={t}>{t}</option>)}
                 </Select>
                 <div className="col-span-1 flex justify-center">
-                  <input type="checkbox" checked={col.nullable} onChange={e => updateCol(i, { nullable: e.target.checked })} />
+                  <input type="checkbox" className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" checked={col.nullable} onChange={e => updateCol(i, { nullable: e.target.checked })} />
                 </div>
                 <div className="col-span-1 flex justify-center">
-                  <input type="checkbox" checked={col.primary_key} onChange={e => updateCol(i, { primary_key: e.target.checked })} />
+                  <input type="checkbox" className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" checked={col.primary_key} onChange={e => updateCol(i, { primary_key: e.target.checked })} />
                 </div>
                 <div className="col-span-1 flex justify-center">
-                  <input type="checkbox" checked={col.auto_increment} onChange={e => updateCol(i, { auto_increment: e.target.checked })} />
+                  <input type="checkbox" className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" checked={col.auto_increment} onChange={e => updateCol(i, { auto_increment: e.target.checked })} />
                 </div>
                 <div className="col-span-2 flex justify-end">
-                  <button onClick={() => removeCol(i)} className="p-0.5 text-muted hover:text-red-400">
-                    <Trash2 size={11} />
+                  <button onClick={() => removeCol(i)} className="p-1 text-muted hover:text-red-400 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" title="Remove column" aria-label={`Remove column ${i + 1}`}>
+                    <Trash2 size={12} />
                   </button>
                 </div>
               </div>

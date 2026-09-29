@@ -64,8 +64,9 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
           </span>
         )}
         <button
+          type="button"
           onClick={() => setExpanded(e => !e)}
-          className="flex items-center gap-1 text-xs text-muted hover:text-slate-300 transition-colors"
+          className="flex items-center gap-1 rounded text-xs text-muted hover:text-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
         >
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           Details
@@ -91,14 +92,14 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
           {result.failed_statement_preview && (
             <div>
               <div className="text-muted mb-1">Failed statement:</div>
-              <pre className="bg-surface-800 rounded p-2 text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap break-all">
+              <pre className="bg-surface-800 rounded-md p-2 text-slate-300 font-mono overflow-x-auto whitespace-pre-wrap break-all">
                 {result.failed_statement_preview}
               </pre>
             </div>
           )}
 
           {result.error && (
-            <div className="bg-red-950/30 border border-red-800/30 rounded p-2 space-y-1">
+            <div className="bg-red-950/30 border border-red-800/30 rounded-md p-2 space-y-1">
               <div className="flex items-center gap-1 text-red-400 font-medium">
                 <AlertTriangle size={12} />
                 {result.error.code}
@@ -114,7 +115,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
               <div className="text-muted mb-1">First statements:</div>
               <div className="space-y-1">
                 {previewList(statements, [0, 1, 2]).map((s, i) => (
-                  <pre key={i} className="bg-surface-800 rounded p-2 text-slate-400 font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                  <pre key={i} className="bg-surface-800 rounded-md p-2 text-slate-400 font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all">
                     {i + 1}. {s}
                   </pre>
                 ))}
@@ -132,7 +133,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
                 <div className="text-muted mb-1">Last executed statements:</div>
                 <div className="space-y-1">
                   {lastStmts.map((s, i) => (
-                    <pre key={i} className="bg-surface-800 rounded p-2 text-slate-400 font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                    <pre key={i} className="bg-surface-800 rounded-md p-2 text-slate-400 font-mono text-xs overflow-x-auto whitespace-pre-wrap break-all">
                       {result.statements_executed - 2 + i}. {s}
                     </pre>
                   ))}

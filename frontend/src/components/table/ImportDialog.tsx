@@ -310,7 +310,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         />
         <button
           type="button"
-          className="w-full border-2 border-dashed border-surface-700 rounded-lg p-6 text-center cursor-pointer hover:border-surface-600 focus:outline-none focus:ring-2 focus:ring-brand-400 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full border-2 border-dashed border-surface-700 rounded-lg p-6 text-center cursor-pointer hover:border-surface-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
           onClick={() => fileInputRef.current?.click()}
           onDragOver={e => { e.preventDefault(); refreshDropFeedback() }}
           onDragLeave={e => { if (e.currentTarget === e.target) clearDropFeedback() }}
@@ -332,7 +332,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           )}
         </button>
         {dropWaitState && (
-          <div className="flex min-h-9 items-center gap-2 rounded border border-surface-700 border-l-2 border-l-brand-400 bg-surface-900 px-3 py-1.5 font-mono text-[11px] text-slate-300">
+          <div className="flex min-h-9 items-center gap-2 rounded-md border border-surface-700 border-l-2 border-l-brand-400 bg-surface-900 px-3 py-1.5 font-mono text-[11px] text-slate-300">
             {dropWaitState === 'preparing' ? (
               <LoadingState label="Preparing upload…" compact className="min-w-0 flex-1 justify-start py-0" />
             ) : (
@@ -368,10 +368,10 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           <LoadingState label="Reading file preview…" compact className="justify-start py-2" />
         )}
         {previewError && (
-          <p role="alert" className="text-xs text-red-400">{previewError}</p>
+          <p role="alert" className="rounded-md border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{previewError}</p>
         )}
         {preview && preview.format === 'mysql_dump' ? (
-          <div className="overflow-x-auto max-h-48 border border-surface-700 rounded p-2">
+          <div className="overflow-x-auto max-h-48 border border-surface-700 rounded-md p-2">
             <p className="text-xs text-slate-400 mb-2">Previewing up to 10 SQL statements</p>
             <ol className="text-xs font-mono text-slate-300 space-y-1">
               {(preview.statements ?? []).map((statement, i) => (
@@ -380,12 +380,12 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             </ol>
           </div>
         ) : preview ? (
-          <div className="overflow-auto max-h-48 border border-surface-700 rounded">
+          <div className="overflow-auto max-h-48 border border-surface-700 rounded-md">
             <table className="text-xs w-full">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-surface-800">
                   {preview.columns.map((col, i) => (
-                    <th key={i} className="px-2 py-1 text-left text-slate-300 font-medium whitespace-nowrap border-b border-surface-700">
+                    <th key={i} className="px-2 py-1.5 text-left text-slate-400 font-medium whitespace-nowrap border-b border-surface-700">
                       {col}
                     </th>
                   ))}
@@ -393,9 +393,9 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
               </thead>
               <tbody>
                 {preview.rows.map((row, ri) => (
-                  <tr key={ri} className="hover:bg-surface-800/50">
+                  <tr key={ri} className="hover:bg-surface-800">
                     {row.map((cell, ci) => (
-                      <td key={ci} className="px-2 py-1 text-slate-400 whitespace-nowrap border-b border-surface-800">
+                      <td key={ci} className="px-2 py-1.5 text-slate-400 whitespace-nowrap border-b border-surface-800">
                         {cell}
                       </td>
                     ))}
@@ -447,12 +447,12 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           </Select>
         </div>
 
-        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+        <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
           <input
             type="checkbox"
             checked={firstRowHeader}
             onChange={e => setFirstRowHeader(e.target.checked)}
-            className="rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-400"
+            className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           />
           First row contains column names
         </label>
@@ -461,7 +461,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         <div>
           <button
             type="button"
-            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            className="flex items-center gap-1 rounded text-xs text-slate-400 hover:text-slate-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             onClick={() => setShowAdvanced(!showAdvanced)}
           >
             {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -522,12 +522,12 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
                   <option value="ascii">ASCII</option>
                 </Select>
               </div>
-              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={preserveEmptyStrings}
                   onChange={e => setPreserveEmptyStrings(e.target.checked)}
-                  className="rounded border-surface-600 bg-surface-800 text-brand-500 focus:ring-brand-400"
+                  className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                 />
                 Preserve blank fields as empty strings instead of NULL
               </label>
@@ -538,21 +538,21 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
           </>
         )}
         {format === 'mysql_dump' && (
-          <p className="text-xs text-amber-300 bg-amber-950/30 border border-amber-800 rounded p-3">
+          <p className="text-xs text-amber-300 bg-amber-950 border border-amber-800 rounded-md px-3 py-2">
             MySQL dump imports execute SQL from the file, including DDL and transaction/session statements. Review source before importing.
           </p>
         )}
 
         {/* Result banner */}
         {result && (
-          <div role={result.ok ? 'status' : 'alert'} className={`p-3 rounded text-xs ${result.ok ? 'bg-green-900/30 border border-green-800 text-green-300' : 'bg-red-900/30 border border-red-800 text-red-300'}`}>
+          <div role={result.ok ? 'status' : 'alert'} className={`px-3 py-2 rounded-md text-xs ${result.ok ? 'bg-green-950 border border-green-800 text-green-200' : 'bg-red-950 border border-red-800 text-red-200'}`}>
             {result.ok ? (
               <>
                 {result.method === 'mysql_dump'
                   ? <>Executed {result.statements_succeeded ?? 0} of {result.statements_processed ?? 0} dump statements; {result.rows_imported} affected rows.</>
                   : <>Imported {result.rows_imported} rows via batch insert.</>}
                 {result.warnings && result.warnings.length > 0 && (
-                  <ul className="mt-1 list-disc list-inside text-yellow-400">
+                  <ul className="mt-1 list-disc list-inside text-amber-300">
                     {result.warnings.slice(0, 5).map((w, i) => <li key={i}>{w}</li>)}
                     {result.warnings.length > 5 && <li>…and {result.warnings.length - 5} more</li>}
                   </ul>

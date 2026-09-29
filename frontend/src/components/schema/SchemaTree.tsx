@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { ChevronRight, Database, Table2, Terminal, Trash2, Scissors, Upload, Search, X, Star, Plus } from 'lucide-react'
+import { ChevronRight, Database, Eye, Table2, Terminal, Trash2, Scissors, Upload, Search, X, Star, Plus } from 'lucide-react'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useTabStore } from '../../store/tabStore'
 import { api } from '../../api/client'
@@ -273,9 +273,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             transition={surfaceTransition}
             aria-label={showBookmarksOnly ? 'Show all tables' : 'Show bookmarks only'}
             aria-pressed={showBookmarksOnly}
-            className={`lagun-hit-target transition-colors ${showBookmarksOnly ? 'text-yellow-400' : 'text-muted hover:text-slate-300'}`}
+            className={`lagun-hit-target rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${showBookmarksOnly ? 'text-amber-400' : 'text-muted hover:text-slate-300'}`}
           >
-            <Star size={10} aria-hidden="true" fill={showBookmarksOnly ? 'currentColor' : 'none'} />
+            <Star size={12} aria-hidden="true" fill={showBookmarksOnly ? 'currentColor' : 'none'} />
           </m.button>
           </Tooltip>
           <Tooltip label="Refresh databases">
@@ -284,22 +284,22 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             whileTap={{ scale: 0.9 }}
             transition={surfaceTransition}
             disabled={loadingDbs.has(sessionId)}
-            className="lagun-hit-target rounded text-muted hover:text-slate-300 transition-colors disabled:cursor-wait"
+            className="lagun-hit-target rounded text-muted hover:text-slate-300 transition-colors disabled:cursor-wait focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             aria-label="Refresh databases"
           >
-            <RefreshIcon refreshing={loadingDbs.has(sessionId)} size={10} />
+            <RefreshIcon refreshing={loadingDbs.has(sessionId)} size={12} />
           </m.button>
           </Tooltip>
         </div>
       </div>
 
       {dbError && (
-        <div role="alert" className="mx-2 mb-1 rounded border border-red-900/60 bg-red-950/40 px-2 py-1.5 text-[11px] text-red-300">
+        <div role="alert" className="mx-2 mb-1 rounded-lg border border-red-900 bg-red-950/40 px-2 py-1.5 text-[11px] text-red-300">
           <p className="leading-snug">Could not load databases: {dbError}</p>
           <button
             type="button"
             onClick={refresh}
-            className="mt-1 font-medium text-red-200 underline underline-offset-2 hover:text-white"
+            className="mt-1 rounded font-medium text-red-200 underline underline-offset-2 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           >
             Retry
           </button>
@@ -307,8 +307,8 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       )}
 
       <div className="flex-shrink-0 px-2 pb-1">
-        <div className="flex items-center gap-1.5 bg-surface-800 rounded px-2 py-1">
-          <Search size={10} className="text-muted flex-shrink-0" />
+        <div className="lagun-field flex items-center gap-1.5 rounded-md border border-surface-700 bg-surface-800 px-2 py-1 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-400">
+          <Search size={12} className="text-muted flex-shrink-0" />
           <input
             type="text"
             value={query}
@@ -327,9 +327,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             <button
               onClick={() => setQuery('')}
               aria-label="Clear search"
-              className="lagun-hit-target text-muted hover:text-slate-300"
+              className="lagun-hit-target rounded text-muted hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
-              <X size={10} aria-hidden="true" />
+              <X size={12} aria-hidden="true" />
             </button>
           )}
         </div>
@@ -347,7 +347,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           <LoadingState label="Loading databases…" compact className="px-3 py-4" />
         ) : noBookmarks ? (
           <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-            <Star size={18} className="text-slate-700" />
+            <Star size={18} className="text-muted opacity-50" />
             <p className="text-xs text-muted">No bookmarks yet.<br />Hover a table and click ★ to add one.</p>
           </div>
         ) : (
@@ -364,7 +364,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                 )}
                 <div className="group flex items-center hover:bg-surface-800">
                   <button
-                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1 text-slate-300"
+                    className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1 text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                     onClick={() => toggleDb(db)}
                     onContextMenu={e => handleTableContext(e, db)}
                     title={db}
@@ -373,7 +373,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                     {tablesLoading
                       ? <Spinner size="sm" className="flex-shrink-0" />
                       : <ChevronRight size={12} className={`flex-shrink-0 transition-transform duration-150 ${isOpen ? 'rotate-90' : ''}`} />}
-                    <Database size={12} className="flex-shrink-0 text-yellow-400" />
+                    <Database size={12} className="flex-shrink-0 text-amber-400" />
                     <span className="text-xs truncate flex-1 text-left">{db}</span>
                   </button>
                   <button
@@ -383,7 +383,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                     onClick={() => openQueryTab(sessionId, db)}
                     className="lagun-hit-target mr-1 rounded text-muted opacity-0 transition-opacity hover:text-brand-400 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 group-hover:opacity-100"
                   >
-                    <Terminal size={10} />
+                    <Terminal size={12} />
                   </button>
                 </div>
 
@@ -402,12 +402,14 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                   return (
                     <m.div key={tbl.name} layout="position" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0, transition: surfaceTransition }} exit={{ opacity: 0, x: -8, transition: exitTransition }} className="group flex items-center hover:bg-surface-800">
                       <button
-                        className="flex min-w-0 flex-1 items-center gap-1.5 py-0.5 pl-7 pr-2 text-slate-400 hover:text-slate-200"
+                        className="flex min-w-0 flex-1 items-center gap-1.5 py-0.5 pl-7 pr-2 text-slate-400 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                         onClick={() => openTableTab(sessionId, db, tbl.name)}
                         onContextMenu={e => handleTableContext(e, db, tbl.name)}
                         title={`${db}.${tbl.name}`}
                       >
-                        <Table2 size={11} className="flex-shrink-0 text-muted" />
+                        {tbl.table_type === 'VIEW'
+                          ? <Eye size={12} className="flex-shrink-0 text-muted" />
+                          : <Table2 size={12} className="flex-shrink-0 text-muted" />}
                         <span className="text-xs truncate flex-1 text-left">{tbl.name}</span>
                       </button>
                       <m.button
@@ -418,9 +420,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                         whileTap={{ scale: 0.7, rotate: -18 }}
                         animate={{ scale: starred ? [1, 1.45, 1] : 1, rotate: starred ? [0, 14, 0] : 0 }}
                         transition={{ duration: 0.28, ease: 'easeOut' }}
-                        className={`mr-1 rounded p-1 transition-colors hover:text-yellow-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${starred ? 'text-yellow-400' : 'text-muted opacity-0 focus:opacity-100 group-hover:opacity-100'}`}
+                        className={`mr-1 rounded p-1 transition-colors hover:text-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${starred ? 'text-amber-400' : 'text-muted opacity-0 focus:opacity-100 group-hover:opacity-100'}`}
                       >
-                        <Star size={10} fill={starred ? 'currentColor' : 'none'} />
+                        <Star size={12} fill={starred ? 'currentColor' : 'none'} />
                       </m.button>
                     </m.div>
                   )
@@ -445,7 +447,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
           animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
           exit={{ opacity: 0, scale: 0.92, y: -motionDistance.subtle, transition: exitTransition }}
-          className="fixed z-popover w-44 rounded border border-surface-700 bg-surface-800 py-1 shadow-lg"
+          className="fixed z-popover w-44 rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-lg"
           style={{ top: menuPosition.top, left: menuPosition.left }}
           onClick={e => e.stopPropagation()}
         >
@@ -453,21 +455,21 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             <>
               <button
                 role="menuitem"
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => { openTableTab(sessionId, contextMenu.db, contextMenu.table!); closeMenu() }}
               >
                 <Table2 size={12} /> Open Table
               </button>
               <button
                 role="menuitem"
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => { openQueryTab(sessionId, contextMenu.db); closeMenu() }}
               >
                 <Terminal size={12} /> New Query
               </button>
               <button
                 role="menuitem"
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => { setImportTarget({ db: contextMenu.db, table: contextMenu.table! }); closeMenu() }}
               >
                 <Upload size={12} /> Import CSV
@@ -475,14 +477,14 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
               <hr className="border-surface-700 my-1" />
               <button
                 role="menuitem"
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-yellow-400"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-amber-400 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => { setDestructiveTarget({ action: 'truncate', db: contextMenu.db, table: contextMenu.table! }); closeMenu() }}
               >
                 <Scissors size={12} /> Truncate
               </button>
               <button
                 role="menuitem"
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-red-400"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => { setDestructiveTarget({ action: 'drop', db: contextMenu.db, table: contextMenu.table! }); closeMenu() }}
               >
                 <Trash2 size={12} /> Drop Table
@@ -492,14 +494,14 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             <>
               <button
                 role="menuitem"
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => { openQueryTab(sessionId, contextMenu.db); closeMenu() }}
               >
                 <Terminal size={12} /> New Query
               </button>
               <button
                 role="menuitem"
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-xs hover:bg-surface-700 text-slate-200"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => { setCreateTableTarget({ db: contextMenu.db }); closeMenu() }}
               >
                 <Plus size={12} /> Create Table

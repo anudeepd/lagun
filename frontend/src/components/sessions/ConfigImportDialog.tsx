@@ -61,7 +61,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
           <>
             <Button variant="ghost" onClick={handleClose} disabled={loading}>Cancel</Button>
             <Button variant="primary" onClick={handleImport} disabled={loading || !file}>
-              {loading ? <Loader2 size={12} className="animate-spin mr-1" /> : <Upload size={12} className="mr-1" />}
+              {loading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
               Import
             </Button>
           </>
@@ -72,7 +72,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
         <div className="flex flex-col items-center gap-3 py-4">
           <CheckCircle size={32} className="text-green-400" />
           <p className="text-sm text-slate-200 font-medium">Import complete</p>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-muted">
             {result.imported} connection{result.imported !== 1 ? 's' : ''} imported
             {result.skipped > 0 ? `, ${result.skipped} skipped` : ''}.
           </p>
@@ -90,7 +90,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
               its "Import" label. */}
           {loading && <LoadingState label="Importing connections…" compact className="sr-only" />}
           <fieldset disabled={loading} aria-busy={loading} className="flex flex-col gap-4">
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted">
               Select a Lagun export file (.json) to restore saved connections.
             </p>
             <div>
@@ -113,9 +113,9 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
                   setFile(selected)
                   setError(null)
                 }}
-                className="text-sm text-slate-300 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0
+                className="cursor-pointer rounded-md text-sm text-slate-300 file:mr-3 file:rounded-md file:border-0 file:px-3 file:py-1
                            file:text-xs file:font-medium file:bg-surface-700 file:text-slate-200
-                           hover:file:bg-surface-600 cursor-pointer"
+                           hover:file:bg-surface-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
               />
             </div>
             <Input

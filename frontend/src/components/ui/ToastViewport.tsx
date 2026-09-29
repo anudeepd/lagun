@@ -29,10 +29,10 @@ function ToastItem({ toast, dismiss, pause, resume }: ToastItemProps) {
       onBlurCapture={event => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) resume(toast.id, 'focus')
       }}
-      className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-xl ${isPresent ? 'pointer-events-auto' : 'pointer-events-none'} ${
+      className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-2xl ${isPresent ? 'pointer-events-auto' : 'pointer-events-none'} ${
         toast.kind === 'error'
           ? 'border-red-800 bg-red-950 text-red-100'
-          : 'border-emerald-800 bg-emerald-950 text-emerald-100'
+          : 'border-green-800 bg-green-950 text-green-100'
       }`}
     >
       {toast.kind === 'error' ? <CircleAlert size={16} className="mt-0.5 shrink-0" /> : <CheckCircle2 size={16} className="mt-0.5 shrink-0" />}

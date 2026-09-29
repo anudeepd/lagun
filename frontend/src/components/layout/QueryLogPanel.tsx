@@ -68,9 +68,9 @@ export default function QueryLogPanel() {
           className="flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-0.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
         >
           <Terminal size={12} className="text-muted" aria-hidden="true" />
-          <span className="text-xs text-slate-400 font-medium">Query Log</span>
+          <span className="text-xs text-muted font-medium">Query Log</span>
           {entries.length > 0 && (
-            <span className="text-xs bg-surface-800 text-slate-400 rounded px-1 py-0.5 leading-none">
+            <span className="text-[10px] bg-surface-800 text-muted rounded-full px-1.5 py-0.5 leading-none tabular-nums">
               {entries.length}
             </span>
           )}
@@ -83,7 +83,7 @@ export default function QueryLogPanel() {
             exit={{ opacity: 0, scale: 0.8, transition: exitTransition }}
             onClick={clearLog}
             aria-label="Clear query log"
-            className="text-xs text-muted hover:text-slate-300 transition-colors px-1"
+            className="rounded px-1 text-xs text-muted transition-colors hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
           >
             Clear
           </m.button>
@@ -152,13 +152,13 @@ export default function QueryLogPanel() {
                           </span>
                         ) : entry.sql}
                       </td>
-                      <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{formatRows(entry)}</td>
-                      <td className="px-2 py-0.5 text-slate-400 tabular-nums whitespace-nowrap">{entry.execTimeMs}</td>
+                      <td className="px-2 py-0.5 text-muted tabular-nums whitespace-nowrap">{formatRows(entry)}</td>
+                      <td className="px-2 py-0.5 text-muted tabular-nums whitespace-nowrap">{entry.execTimeMs}</td>
                       <td className="px-2 py-0.5 whitespace-nowrap">
                         {entry.error ? (
                           <span className="text-red-400" title={entry.error}>✗</span>
                         ) : entry.cancelled ? (
-                          <span title="Cancelled"><Ban size={10} className="text-amber-500" /></span>
+                          <span title="Cancelled"><Ban size={12} className="text-amber-400" /></span>
                         ) : (
                           <span className="text-green-400">✓</span>
                         )}
@@ -167,17 +167,19 @@ export default function QueryLogPanel() {
                         <div className="flex items-center gap-1">
                           <Tooltip label="Copy SQL">
                           <button
+                            type="button"
                             onClick={() => { if (replaySql) clipboardWrite(replaySql).catch(() => {}) }}
                             disabled={!canReplay}
                             title={canReplay ? 'Copy SQL' : 'Full write script unavailable after reload'}
                             aria-label="Copy SQL"
-                            className="lagun-hit-target text-muted hover:text-slate-300 transition-colors disabled:opacity-40 disabled:hover:text-muted"
+                            className="lagun-hit-target rounded text-muted hover:text-slate-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                           >
-                            <Copy size={10} aria-hidden="true" />
+                            <Copy size={12} aria-hidden="true" />
                           </button>
                           </Tooltip>
                           <Tooltip label={hasQueryTab ? 'Load into editor' : 'Open in new query tab'}>
                           <button
+                            type="button"
                             onClick={() => {
                               if (!replaySql) return
                               if (hasQueryTab) {
@@ -189,9 +191,9 @@ export default function QueryLogPanel() {
                             disabled={!canReplay}
                             title={canReplay ? (hasQueryTab ? 'Load into editor' : 'Open in new query tab') : 'Full write script unavailable after reload'}
                             aria-label={hasQueryTab ? 'Load into editor' : 'Open in new query tab'}
-                            className="lagun-hit-target text-muted hover:text-brand-400 transition-colors disabled:opacity-40 disabled:hover:text-muted"
+                            className="lagun-hit-target rounded text-muted hover:text-brand-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                           >
-                            <CornerDownLeft size={10} aria-hidden="true" />
+                            <CornerDownLeft size={12} aria-hidden="true" />
                           </button>
                           </Tooltip>
                         </div>

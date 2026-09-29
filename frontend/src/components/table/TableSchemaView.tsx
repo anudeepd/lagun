@@ -229,13 +229,13 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
             disabled={analyzing}
             title="Recompute this table's row count and size statistics"
           >
-            <RefreshIcon refreshing={analyzing} size={11} /> Refresh Stats
+            <RefreshIcon refreshing={analyzing} size={14} /> Refresh Stats
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setConfirmTruncate(true)}>
-            <AlertTriangle size={11} /> Truncate
+            <AlertTriangle size={14} /> Truncate
           </Button>
           <Button variant="ghost" size="sm" onClick={openSchemaExport}>
-            <Code2 size={11} /> Export Schema
+            <Code2 size={14} /> Export Schema
           </Button>
         </div>
       )}
@@ -243,16 +243,16 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
       {/* Columns section */}
       <section className={loading ? 'opacity-60' : ''}>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1">
+          <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
             Columns
-            {loading && <Loader2 size={11} className="animate-spin" />}
+            {loading && <Loader2 size={12} className="animate-spin" />}
           </h3>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => setShowManagePK(true)}>
-              <Key size={11} /> Manage PK
+              <Key size={14} /> Manage PK
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowAddCol(true)}>
-              <Plus size={11} /> Add Column
+              <Plus size={14} /> Add Column
             </Button>
           </div>
         </div>
@@ -260,7 +260,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
           <table className="w-full text-xs">
             <thead className="sticky top-0 z-20 bg-surface-800 text-slate-400">
               <tr>
-                <th key="#" className="sticky left-0 z-20 bg-surface-800 w-10 text-right px-2 py-1.5 font-medium">#</th>
+                <th className="sticky left-0 z-20 bg-surface-800 w-10 text-right px-2 py-1.5 font-medium">#</th>
                 <th className="sticky left-10 z-10 bg-surface-800 text-left px-2 py-1.5 font-medium min-w-[10rem]">Name</th>
                 <th className="text-left px-2 py-1.5 font-medium min-w-[8rem]">Type</th>
                 <th className="text-left px-2 py-1.5 font-medium min-w-[5rem]">Nullable</th>
@@ -273,9 +273,9 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
             </thead>
             <tbody>
               {columns.map((col, idx) => (
-                <tr key={col.name} className="border-t border-surface-700 hover:bg-surface-800/50 group">
-                  <td className="sticky left-0 z-raised bg-surface-900 group-hover:bg-surface-800/50 w-10 text-right px-2 py-1.5 text-muted tabular-nums">{idx + 1}</td>
-                  <td className="sticky left-10 z-raised bg-surface-900 group-hover:bg-surface-800/50 min-w-[10rem] px-2 py-1.5 font-mono text-slate-200">
+                <tr key={col.name} className="border-t border-surface-700 hover:bg-surface-800 group">
+                  <td className="sticky left-0 z-raised bg-surface-950 group-hover:bg-surface-800 w-10 text-right px-2 py-1.5 text-muted tabular-nums">{idx + 1}</td>
+                  <td className="sticky left-10 z-raised bg-surface-950 group-hover:bg-surface-800 min-w-[10rem] px-2 py-1.5 font-mono text-slate-200">
                     <span className="block truncate max-w-[12rem]" title={col.name}>{col.name}</span>
                   </td>
                   <td className="px-2 py-1.5 text-slate-300 min-w-[8rem]">
@@ -290,14 +290,15 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
                   <td className="px-2 py-1.5 text-muted italic min-w-[10rem]">
                     <span className="block truncate max-w-[16rem]" title={col.comment}>{col.comment}</span>
                   </td>
-                  <td className="sticky right-0 z-raised bg-surface-900 group-hover:bg-surface-800/50 w-16 px-2 py-1.5">
+                  <td className="sticky right-0 z-raised bg-surface-950 group-hover:bg-surface-800 w-16 px-2 py-1.5">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => setEditCol(col)}
-                        className="p-0.5 text-muted hover:text-slate-200 transition-colors"
+                        className="p-1 text-muted hover:text-slate-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                         title="Edit column"
+                        aria-label="Edit column"
                       >
-                        <Pencil size={11} />
+                        <Pencil size={12} />
                       </button>
                       {!col.is_primary_key && (
                         <button
@@ -306,7 +307,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
                           title={`Drop column ${col.name}`}
                           aria-label={`Drop column ${col.name}`}
                         >
-                          <Trash2 size={11} />
+                          <Trash2 size={12} />
                         </button>
                       )}
                     </div>
@@ -323,21 +324,21 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Indexes</h3>
           <Button variant="ghost" size="sm" onClick={() => setShowAddIndex(true)}>
-            <Plus size={11} /> Add Index
+            <Plus size={14} /> Add Index
           </Button>
         </div>
         <div className="max-h-[32vh] overflow-auto border border-surface-700 rounded-md">
           <table className="w-full text-xs">
             <thead className="sticky top-0 z-10 bg-surface-800 text-slate-400">
               <tr>
-                {['Name', 'Columns', 'Unique', 'Type', ''].map(h => (
-                  <th key={h} className="text-left px-2 py-1.5 font-medium">{h}</th>
+                {['Name', 'Columns', 'Unique', 'Type', ''].map((h, i) => (
+                  <th key={h || i} className={h ? 'text-left px-2 py-1.5 font-medium' : 'text-left px-2 py-1.5 font-medium w-16'}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {indexes.map(idx => (
-                <tr key={idx.name} className="border-t border-surface-700 hover:bg-surface-800/50">
+                <tr key={idx.name} className="border-t border-surface-700 hover:bg-surface-800">
                   <td className="px-2 py-1.5 font-mono text-slate-200">{idx.name}</td>
                   <td className="px-2 py-1.5 text-slate-300">{idx.columns.join(', ')}</td>
                   <td className="px-2 py-1.5 text-slate-400">{idx.is_unique ? 'YES' : 'NO'}</td>
@@ -350,7 +351,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
                         title={`Drop index ${idx.name}`}
                         aria-label={`Drop index ${idx.name}`}
                       >
-                        <Trash2 size={11} />
+                        <Trash2 size={12} />
                       </button>
                     )}
                   </td>
@@ -367,7 +368,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
       </section>
 
       {statusMsg && (
-        <div className="px-3 py-1.5 bg-surface-800 rounded text-xs font-mono text-slate-400">
+        <div className="px-3 py-1.5 bg-surface-800 rounded-md text-xs font-mono text-slate-400">
           {statusMsg}
         </div>
       )}
@@ -420,10 +421,10 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
         footer={(
           <>
             <Button variant="ghost" size="sm" onClick={handleCopy}>
-              <Copy size={11} /> {copied ? 'Copied!' : 'Copy'}
+              <Copy size={14} /> {copied ? 'Copied!' : 'Copy'}
             </Button>
             <Button variant="ghost" size="sm" onClick={handleDownload}>
-              <Download size={11} /> Download
+              <Download size={14} /> Download
             </Button>
           </>
         )}

@@ -481,7 +481,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
         {(exporting || copying) && (
           <Progress label={copying ? 'Copying export' : 'Exporting'} />
         )}
-        {error && <p role="alert" className="rounded border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
+        {error && <p role="alert" className="rounded-md border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
         <Select
           label="Format"
           value={format}
@@ -508,7 +508,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
               type="checkbox"
               checked={includeSchema}
               onChange={e => setIncludeSchema(e.target.checked)}
-              className="accent-brand-500"
+              className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             />
             <span>Include schema name</span>
           </label>
@@ -519,7 +519,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             checked={includeAutoIncrement}
             onChange={e => setIncludeAutoIncrement(e.target.checked)}
             disabled={aiCheckboxDisabled}
-            className="accent-brand-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 disabled:cursor-not-allowed"
             title="When unchecked, auto-increment columns are excluded from INSERT values and CSV output. DELETE WHERE clauses always reference primary keys (or all columns if no primary key exists) regardless of this setting. Has no effect for DELETE-only exports. Not available for query results or when auto-increment metadata is unavailable."
           />
           <span>Include auto-increment columns</span>
@@ -534,7 +534,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           <div>
             <button
               type="button"
-              className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+              className="flex items-center gap-1 rounded text-xs text-slate-400 hover:text-slate-200 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
               onClick={() => setShowAdvanced(!showAdvanced)}
             >
               {showAdvanced ? <ChevronDown size={12} /> : <ChevronRight size={12} />}

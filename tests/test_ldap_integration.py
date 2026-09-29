@@ -64,7 +64,6 @@ def test_login_template_uses_nonce_for_inline_assets():
     assert 'type="password"' in template
     assert 'class="password-toggle"' in template
     assert 'input[type="password"]::-ms-reveal' in template
-    assert "::-moz-reveal" not in template
     # Shared login card: the error is announced once (role=alert) and linked to
     # the fields, and the username is restored only after a failed attempt.
     assert 'id="login-error" role="alert"' in template

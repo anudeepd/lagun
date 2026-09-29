@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { Activity, ArrowLeft, CircleStop, Database, PanelsTopLeft, RefreshCw, Shield, Terminal, UserRound, Users, X } from 'lucide-react'
+import { Activity, ArrowLeft, CheckCircle2, CircleAlert, CircleStop, Database, PanelsTopLeft, RefreshCw, Shield, Terminal, UserRound, Users } from 'lucide-react'
 import * as m from 'motion/react-m'
 import { AnimatePresence } from 'motion/react'
 import { api } from '../../api/client'
 import type { AdminActivityEvent, AdminActivityFilters, AdminConnection, AdminOverview, AdminPresence, AdminQuery, AdminRetention, AdminUser } from '../../types'
+import Button from '../ui/Button'
 import ConfirmDialog from '../ui/ConfirmDialog'
+import Label from '../ui/Label'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 
 type View = 'overview' | 'connections' | 'activity' | 'retention' | 'live' | 'users'
@@ -29,6 +31,11 @@ const NOTICE_TIMEOUT_MS = 5_000
 const LIVE_QUERY_COLLAPSE_THRESHOLD = 240
 const LIVE_SESSION_TAB_PREVIEW_LIMIT = 4
 const CONNECTION_TAB_PREVIEW_LIMIT = 4
+
+// Same look as ui/Input: every admin text field shares it.
+const FIELD_CLASS = 'lagun-field min-h-10 rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm text-slate-100 placeholder-muted focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400'
+// Outlined destructive trigger (the solid `danger` Button is reserved for the confirm dialog).
+const DANGER_OUTLINE_CLASS = 'lagun-interactive inline-flex items-center justify-center gap-1.5 rounded-md border border-red-800 font-medium text-red-300 hover:bg-red-950 hover:text-red-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-50'
 
 function age(timestamp: number): string {
   const seconds = Math.max(0, Math.floor(Date.now() / 1000 - timestamp))
@@ -304,7 +311,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
     >
       <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 px-4 sm:px-5">
         {onClose && (
-          <button type="button" onClick={onClose} className="lagun-icon-button rounded-md p-1.5 text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" aria-label="Back to workspace">
+          <button type="button" onClick={onClose} className="lagun-interactive lagun-icon-button rounded-md p-1.5 text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" aria-label="Back to workspace">
             <ArrowLeft className="h-4 w-4" />
           </button>
         )}
@@ -316,10 +323,10 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
         <span className="sr-only text-[11px] text-muted sm:not-sr-only" aria-live="polite">
           {lastUpdated ? `Updated ${age(lastUpdated / 1000)}` : 'Loading'}
         </span>
-        <button type="button" onClick={() => void refresh()} disabled={loading} className="lagun-interactive flex min-h-9 items-center gap-1.5 rounded-md border border-surface-700 px-2.5 py-1.5 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50">
+        <Button type="button" size="sm" onClick={() => void refresh()} disabled={loading} className="min-h-9">
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Refresh</span>
-        </button>
+        </Button>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -330,21 +337,21 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
               <Icon className="h-3.5 w-3.5" /> {label}
             </button>
           ))}
-          <div className="mt-6 rounded-md border border-surface-800 bg-surface-950/60 p-3 text-[11px] leading-relaxed text-muted">LDAP and connections.yaml remain source of truth for access policy. This console never reveals stored database passwords.</div>
+          <div className="mt-6 rounded-lg border border-surface-800 bg-surface-950/60 p-3 text-[11px] leading-relaxed text-muted">LDAP and connections.yaml remain source of truth for access policy. This console never reveals stored database passwords.</div>
         </nav>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 sm:p-6">
           <div className="mx-auto max-w-6xl">
             <div className="mb-4 flex flex-wrap gap-1 sm:hidden" role="tablist" aria-label="Admin views">
               {views.map(([key, , label]) => (
-                <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => selectView(key)} className={`min-h-10 rounded-md px-3 py-1.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-muted hover:bg-surface-800'}`}>{label}</button>
+                <button key={key} type="button" role="tab" aria-selected={view === key} onClick={() => selectView(key)} className={`min-h-10 rounded-md px-3 py-1.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-muted hover:bg-surface-800 hover:text-slate-300'}`}>{label}</button>
               ))}
             </div>
             <AnimatePresence>
-              {notice && <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="mb-3 flex items-center gap-2 rounded-md border border-green-900/50 bg-green-950/30 px-3 py-2 text-xs text-green-300" role="status"><Shield className="h-3.5 w-3.5" /> {notice}</m.div>}
+              {notice && <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="mb-3 flex items-center gap-2 rounded-lg border border-green-900/50 bg-green-950/30 px-3 py-2 text-xs text-green-300" role="status"><CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {notice}</m.div>}
             </AnimatePresence>
             <AnimatePresence>
-              {error && <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="mb-3 flex items-center gap-2 rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-300" role="alert"><X className="h-3.5 w-3.5" /> {error.message}</m.div>}
+              {error && <m.div initial={{ opacity: 0, y: -motionDistance.subtle }} animate={{ opacity: 1, y: 0, transition: surfaceTransition }} exit={{ opacity: 0, transition: exitTransition }} className="mb-3 flex items-center gap-2 rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-300" role="alert"><CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {error.message}</m.div>}
             </AnimatePresence>
             <AnimatePresence mode="wait" initial={false}>
               <m.div key={view} initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }} transition={surfaceTransition}>
@@ -423,7 +430,7 @@ function UsersPanel({
       <form onSubmit={submit} className="mb-4 rounded-lg border border-surface-800 bg-surface-900 p-4" aria-label="Add LDAP user">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="min-w-0 flex-1">
-            <label className="block text-xs text-slate-400">
+            <Label className="flex flex-col gap-1">
               LDAP username
               <input
                 id="admin-username"
@@ -437,16 +444,16 @@ function UsersPanel({
                 autoComplete="off"
                 aria-invalid={usernameError ? true : undefined}
                 aria-describedby={usernameError ? 'admin-username-error' : undefined}
-                className={`mt-1.5 min-h-10 w-full rounded-md border bg-surface-950 px-3 py-2 text-sm text-slate-200 outline-none placeholder:text-slate-700 focus:border-brand-400 focus:ring-1 focus:ring-brand-400 ${usernameError ? 'border-red-500' : 'border-surface-700'}`}
+                className={`${FIELD_CLASS} w-full font-sans normal-case tracking-normal font-normal ${usernameError ? 'border-red-500' : ''}`}
               />
-            </label>
-            {usernameError && <p id="admin-username-error" role="alert" className="mt-1.5 text-[11px] text-red-400">{usernameError}</p>}
+            </Label>
+            {usernameError && <p id="admin-username-error" role="alert" className="mt-1 text-xs text-red-400">{usernameError}</p>}
           </div>
-          <button type="submit" disabled={Boolean(busyUsername)} className="min-h-10 rounded-md bg-brand-600 px-3 py-2 text-xs font-medium text-white hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-50">
+          <Button type="submit" variant="primary" disabled={Boolean(busyUsername)} className="min-h-10">
             {busyUsername ? 'Applying…' : 'Allow user'}
-          </button>
+          </Button>
         </div>
-        <p className="mt-2 text-[11px] text-muted">User must also exist in LDAP. Existing sessions are not changed when access is added.</p>
+        <p className="mt-2 text-xs text-muted">User must also exist in LDAP. Existing sessions are not changed when access is added.</p>
       </form>
 
       <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
@@ -455,34 +462,34 @@ function UsersPanel({
           <colgroup><col className="w-[32%]" /><col className="w-[18%]" /><col className="w-[16%]" /><col className="w-[14%]" /><col className="w-[20%]" /></colgroup>
           <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted">
             <tr>
-              <th scope="col" className="px-4 py-2">User</th>
-              <th scope="col" className="px-4 py-2">Policy</th>
-              <th scope="col" className="px-4 py-2">Active clients</th>
-              <th scope="col" className="px-4 py-2">Open tabs</th>
-              <th scope="col" className="px-4 py-2 text-right">Action</th>
+              <th scope="col" className="px-3 py-2">User</th>
+              <th scope="col" className="px-3 py-2">Policy</th>
+              <th scope="col" className="px-3 py-2">Active clients</th>
+              <th scope="col" className="px-3 py-2">Open tabs</th>
+              <th scope="col" className="px-3 py-2 text-right">Action</th>
             </tr>
           </thead>
           <tbody>
             {users.map(user => (
               <tr key={user.username} className="border-b border-surface-800/70 last:border-0">
-                <td className="align-top break-words px-4 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
-                <td className="align-top px-4 py-3">
-                  <span className={`rounded-full px-2 py-1 text-[10px] ${user.policy_state === 'allowed' ? 'bg-green-950/40 text-green-300' : 'bg-slate-800 text-muted'}`}>
+                <td className="align-top break-words px-3 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
+                <td className="align-top px-3 py-3">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] ${user.policy_state === 'allowed' ? 'bg-green-950/40 text-green-300' : 'bg-surface-800 text-muted'}`}>
                     {user.policy_state === 'allowed' ? 'Allowed' : 'Observed only'}
                   </span>
                 </td>
-                <td className="align-top px-4 py-3 font-mono tabular-nums text-slate-400">{user.active_clients}</td>
-                <td className="align-top px-4 py-3 font-mono tabular-nums text-slate-400">{user.active_tabs}</td>
-                <td className="align-top px-4 py-3 text-right">
+                <td className="align-top px-3 py-3 font-mono tabular-nums text-slate-400">{user.active_clients}</td>
+                <td className="align-top px-3 py-3 font-mono tabular-nums text-slate-400">{user.active_tabs}</td>
+                <td className="align-top px-3 py-3 text-right">
                   {user.policy_state === 'allowed' && (
-                    <button type="button" disabled={Boolean(busyUsername)} onClick={() => onRequestRemove(user.username)} className="min-h-8 rounded border border-red-900/60 px-2.5 py-1.5 text-[11px] text-red-300 hover:bg-red-950/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50">
+                    <button type="button" disabled={Boolean(busyUsername)} onClick={() => onRequestRemove(user.username)} className={`${DANGER_OUTLINE_CLASS} min-h-8 px-2.5 py-1 text-xs`}>
                       {busyUsername === user.username ? 'Applying…' : 'Remove'}
                     </button>
                   )}
                 </td>
               </tr>
             ))}
-            {users.length === 0 && <tr><td colSpan={5} className="px-4 py-10 text-center text-xs text-muted">No users in LDAP access policy.</td></tr>}
+            {users.length === 0 && <tr><td colSpan={5} className="px-3 py-10 text-center text-xs text-muted">No users in LDAP access policy.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -510,13 +517,13 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted">See which connection profiles exist, who has workspaces open, and which queries are running now.</p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={onViewLive} className="min-h-9 rounded border border-brand-800/60 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-brand-950/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">Open live view</button>
-          <span className="rounded-full border border-surface-700 px-2.5 py-1 text-[11px] font-mono text-muted">LDAP protected</span>
+          <Button type="button" size="sm" onClick={onViewLive} className="min-h-9">Open live view</Button>
+          <span className="rounded-full border border-surface-700 px-2.5 py-1 font-mono text-[11px] text-muted">LDAP protected</span>
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {metrics.map(([label, value, hint]) => (
-          <article key={label} className="flex min-h-28 flex-col rounded-lg border border-surface-800 bg-surface-900 p-4 shadow-lg shadow-black/10">
+          <article key={label} className="flex min-h-28 flex-col rounded-lg border border-surface-800 bg-surface-900 p-4">
             <span className="text-xs text-muted">{label}</span>
             <strong className="mt-auto font-mono text-2xl font-semibold tabular-nums tracking-tight text-slate-100">{value}</strong>
             <small className="mt-2 text-[11px] leading-snug text-muted">{hint}</small>
@@ -526,15 +533,15 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
       <div className="relative mt-4 max-h-[24rem] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <div className="flex items-center justify-between gap-3 border-b border-surface-800 px-4 py-3">
           <div><h3 className="text-sm font-semibold">Connection posture</h3><p className="mt-1 text-xs text-muted">Managed profiles are read-only here; edit connections.yaml and restart Lagun.</p></div>
-          <button type="button" onClick={onViewConnections} className="min-h-9 shrink-0 rounded border border-surface-700 px-2.5 py-1.5 text-xs text-brand-300 hover:bg-surface-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">View all</button>
+          <Button type="button" size="sm" onClick={onViewConnections} className="min-h-9 shrink-0">View all</Button>
         </div>
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Connection posture preview</caption>
           <colgroup><col className="w-[36%]" /><col className="w-[14%]" /><col className="w-[28%]" /><col className="w-[22%]" /></colgroup>
-        <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-4 py-2">Connection</th><th scope="col" className="px-4 py-2">Type</th><th scope="col" className="px-4 py-2">Access</th><th scope="col" className="px-4 py-2">Scope</th></tr></thead>
+        <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Type</th><th scope="col" className="px-3 py-2">Access</th><th scope="col" className="px-3 py-2">Scope</th></tr></thead>
           <tbody>
             {connections.slice(0, 5).map(connection => <ConnectionRow key={connection.id} connection={connection} />)}
-            {connections.length === 0 && <tr><td colSpan={4} className="px-4 py-10 text-center text-muted">No saved connections.</td></tr>}
+            {connections.length === 0 && <tr><td colSpan={4} className="px-3 py-10 text-center text-xs text-muted">No saved connections.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -545,11 +552,11 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
 function ConnectionRow({ connection }: { connection: AdminConnection }) {
   return (
     <tr className="border-b border-surface-800/70 last:border-0">
-      <td className="align-top break-words px-4 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
-      <td className="align-top break-words px-4 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
+      <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
+      <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
 
-      <td className="align-top break-words px-4 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
-      <td className="align-top break-words px-4 py-3 text-muted [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
+      <td className="align-top break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
+      <td className="align-top break-words px-3 py-3 text-muted [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
     </tr>
   )
 }
@@ -610,11 +617,11 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                   type="button"
                   aria-pressed={activeUser === username}
                   onClick={() => setSelectedUser(username)}
-                  className={`w-full px-4 py-3 text-left transition-colors ${activeUser === username ? 'bg-brand-500/10 text-brand-200' : 'text-slate-400 hover:bg-surface-800/60 hover:text-slate-200'}`}
+                  className={`lagun-field w-full px-4 py-3 text-left ${activeUser === username ? 'bg-brand-500/10 text-brand-200' : 'text-slate-400 hover:bg-surface-800/60 hover:text-slate-200'} focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400`}
                 >
                   <span className="flex items-center justify-between gap-2">
                     <strong className="break-words text-sm [overflow-wrap:anywhere]">{username}</strong>
-                    {userQueries > 0 && <span className="rounded-full bg-amber-950/50 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">{userQueries} running</span>}
+                    {userQueries > 0 && <span className="rounded-full bg-amber-950/50 px-2 py-0.5 font-mono text-[10px] text-amber-300">{userQueries} running</span>}
                   </span>
                   <span className="mt-1 block text-[10px] text-muted">{userSessions} session{userSessions === 1 ? '' : 's'} · {userTabs} tab{userTabs === 1 ? '' : 's'}</span>
                 </button>
@@ -690,7 +697,7 @@ function LiveWorkspacePanel({ presence, queries, connections }: { presence: Admi
                       <>
                         <p className="mt-2 line-clamp-2 rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-muted">{sql.slice(0, 200)}…</p>
                         <details className="mt-2">
-                          <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200">Show full SQL ({sql.length} characters)</summary>
+                          <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">Show full SQL ({sql.length} characters)</summary>
                           <pre className="mt-2 max-h-64 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[11px] leading-relaxed text-slate-400 [overflow-wrap:anywhere]">{sql}</pre>
                         </details>
                       </>
@@ -719,12 +726,12 @@ function LivePresenceTab({ tab, active, defaultDatabase }: { tab: AdminPresence[
 
   return (
     <li className="min-w-0 rounded border border-surface-800 bg-surface-950/50 px-2.5 py-2 text-[11px] text-slate-400">
-      <div className="flex min-w-0 items-start gap-1.5"><PanelsTopLeft className="mt-0.5 h-3 w-3 shrink-0 text-muted" /><span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{tab.label}</span>{active && <span className="ml-auto shrink-0 text-[9px] uppercase tracking-wider text-brand-300">active</span>}</div>
+      <div className="flex min-w-0 items-start gap-1.5"><PanelsTopLeft className="mt-0.5 h-3 w-3 shrink-0 text-muted" /><span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{tab.label}</span>{active && <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wider text-brand-300">active</span>}</div>
       <div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{tab.database || defaultDatabase || 'No database'}{tab.table ? ` · ${tab.table}` : ''}{isTable ? ` · ${viewLabel}` : ''}</div>
       {isTable && (tab.global_search || tab.where_filter) && (
         <div className="mt-2 grid min-w-0 gap-1.5 border-t border-surface-800/80 pt-2">
-          {tab.global_search && <div className="min-w-0"><span className="text-[9px] font-semibold uppercase tracking-wider text-brand-400">Partial match</span><code className="ml-2 break-words font-mono text-[10px] text-slate-300 [overflow-wrap:anywhere]">{tab.global_search}</code></div>}
-          {tab.where_filter && <div className="min-w-0"><span className="text-[9px] font-semibold uppercase tracking-wider text-brand-400">WHERE</span><code className="mt-1 block max-h-28 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-1.5 font-mono text-[10px] leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{tab.where_filter}</code></div>}
+          {tab.global_search && <div className="min-w-0"><span className="text-[10px] font-semibold uppercase tracking-wider text-brand-400">Partial match</span><code className="ml-2 break-words font-mono text-[10px] text-slate-300 [overflow-wrap:anywhere]">{tab.global_search}</code></div>}
+          {tab.where_filter && <div className="min-w-0"><span className="text-[10px] font-semibold uppercase tracking-wider text-brand-400">WHERE</span><code className="mt-1 block max-h-28 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-1.5 font-mono text-[10px] leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{tab.where_filter}</code></div>}
         </div>
       )}
     </li>
@@ -739,7 +746,7 @@ function ConnectionsPanel({ connections, presence, onLoadMore, hasMore, loadingM
   const [expandedTabLists, setExpandedTabLists] = useState<Set<string>>(new Set())
   return (
     <section aria-labelledby="connections-title">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-muted">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner. The inventory loads <strong className="font-medium text-slate-300">100 connections</strong> at a time; use <strong className="font-medium text-slate-300">Load more connections</strong> to fetch the next page.</p></div>
+      <div className="mb-5"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight text-slate-100">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-muted">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner. The inventory loads <strong className="font-medium text-slate-300">100 connections</strong> at a time; use <strong className="font-medium text-slate-300">Load more connections</strong> to fetch the next page.</p></div>
       <div id="connection-inventory-table" className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="w-full table-fixed text-left text-xs">
           <caption className="sr-only">Saved connection inventory and active users</caption>
@@ -754,7 +761,7 @@ function ConnectionsPanel({ connections, presence, onLoadMore, hasMore, loadingM
               })
               return (
                 <m.tr key={connection.id} initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="border-b border-surface-800/70 last:border-0">
-                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-1.5 py-0.5 text-[9px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
+                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-2 py-0.5 text-[10px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
                   <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-muted [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
                   <td className="align-top break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
                   <td className="align-top break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
@@ -796,20 +803,15 @@ function ConnectionsPanel({ connections, presence, onLoadMore, hasMore, loadingM
                 </m.tr>
               )
             })}
-            {connections.length === 0 && <tr><td colSpan={6} className="px-3 py-12 text-center text-muted">No saved connections.</td></tr>}
+            {connections.length === 0 && <tr><td colSpan={6} className="px-3 py-10 text-center text-xs text-muted">No saved connections.</td></tr>}
           </tbody>
         </table>
       </div>
       {hasMore && (
         <div className="mt-3 flex justify-center">
-          <button
-            type="button"
-            onClick={onLoadMore}
-            disabled={loadingMore}
-            className="min-h-10 rounded border border-surface-700 px-4 py-2 text-xs text-slate-300 hover:bg-surface-800 hover:text-slate-100 disabled:opacity-60"
-          >
+          <Button type="button" onClick={onLoadMore} disabled={loadingMore} className="min-h-10">
             {loadingMore ? 'Loading…' : 'Load more connections'}
-          </button>
+          </Button>
         </div>
       )}
     </section>
@@ -853,14 +855,14 @@ function ActivityPanel({ events, filters, onApply, onLoadOlder, hasOlder, loadin
 
   return (
     <section aria-labelledby="activity-title">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Audit trail</p><h2 id="activity-title" className="text-xl font-semibold tracking-tight">Query &amp; API audit</h2><p className="mt-1 text-pretty text-sm leading-relaxed text-muted">Request targets include query parameters. Search performs a case-insensitive partial match across user, method, path, SQL, filters, and raw JSON. Press Enter to apply. The list loads the <strong className="font-medium text-slate-300">latest 100</strong> matching events; use <strong className="font-medium text-slate-300">Load 100 older</strong> to page further back through the same filters, or narrow the filters first.</p></div>
+      <div className="mb-5"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Audit trail</p><h2 id="activity-title" className="text-xl font-semibold tracking-tight text-slate-100">Query &amp; API audit</h2><p className="mt-1 text-pretty text-sm leading-relaxed text-muted">Request targets include query parameters. Search performs a case-insensitive partial match across user, method, path, SQL, filters, and raw JSON. Press Enter to apply. The list loads the <strong className="font-medium text-slate-300">latest 100</strong> matching events; use <strong className="font-medium text-slate-300">Load 100 older</strong> to page further back through the same filters, or narrow the filters first.</p></div>
       <form onSubmit={submit} onKeyDown={submitOnEnter} className="mb-4 grid gap-2 rounded-lg border border-surface-800 bg-surface-900 p-3 sm:grid-cols-2 xl:grid-cols-[0.9fr_1.15fr_1.4fr_0.8fr_0.6fr_auto] xl:items-end">
         <FilterInput id="admin-activity-user" label="User contains" value={username} onChange={setUsername} placeholder="ali" />
         <FilterInput id="admin-activity-path" label="Path contains" value={path} onChange={setPath} placeholder="/sessions" />
         <FilterInput id="admin-activity-search" label="Partial match" value={search} onChange={setSearch} placeholder="SQL, filters, path, user…" />
         <FilterInput id="admin-activity-since" label="Since" value={since} onChange={setSince} type="date" />
         <FilterInput id="admin-activity-status" label="Status" value={statusCode} onChange={setStatusCode} placeholder="Any" inputMode="numeric" />
-        <div className="flex gap-2"><button type="submit" className="min-h-10 rounded border border-brand-700/60 px-3 py-2 text-xs text-brand-300 hover:bg-brand-950/40">Search</button><button type="button" onClick={clear} className="min-h-10 rounded border border-surface-700 px-3 py-2 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200">Clear</button></div>
+        <div className="flex gap-2"><Button type="submit" variant="primary" className="min-h-10">Search</Button><Button type="button" onClick={clear} className="min-h-10">Clear</Button></div>
       </form>
       <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
         <table className="block w-full table-fixed text-left text-xs lg:table">
@@ -869,20 +871,15 @@ function ActivityPanel({ events, filters, onApply, onLoadOlder, hasOlder, loadin
           <thead className="hidden sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted lg:table-header-group"><tr><th scope="col" className="px-3 py-2">When</th><th scope="col" className="px-3 py-2">Actor</th><th scope="col" className="px-3 py-2">Request</th><th scope="col" className="px-3 py-2">Status</th><th scope="col" className="px-3 py-2 text-right">Duration</th></tr></thead>
           <tbody className="block lg:table-row-group">
             {events.map(event => <ActivityEventRow key={`${event.occurred_at}-${event.path}-${event.duration_ms}`} event={event} />)}
-            {events.length === 0 && <tr className="block lg:table-row"><td colSpan={5} className="block px-3 py-12 text-center text-muted lg:table-cell">No matching audit events.</td></tr>}
+            {events.length === 0 && <tr className="block lg:table-row"><td colSpan={5} className="block px-3 py-10 text-center text-xs text-muted lg:table-cell">No matching audit events.</td></tr>}
           </tbody>
         </table>
       </div>
       {hasOlder && (
         <div className="mt-3 flex justify-center">
-          <button
-            type="button"
-            onClick={onLoadOlder}
-            disabled={loadingOlder}
-            className="min-h-10 rounded border border-surface-700 px-4 py-2 text-xs text-slate-300 hover:bg-surface-800 hover:text-slate-100 disabled:opacity-60"
-          >
+          <Button type="button" onClick={onLoadOlder} disabled={loadingOlder} className="min-h-10">
             {loadingOlder ? 'Loading…' : 'Load 100 older'}
-          </button>
+          </Button>
         </div>
       )}
     </section>
@@ -904,14 +901,14 @@ function ActivityEventRow({ event }: { event: AdminActivityEvent }) {
           </details>
         )}
       </td>
-      <td className="flex justify-between gap-3 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">Status</span><span className={`rounded-full px-2 py-1 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-emerald-950/40 text-emerald-300'}`}>{event.status_code}</span></td>
+      <td className="flex justify-between gap-3 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">Status</span><span className={`rounded-full px-2 py-0.5 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-green-950/40 text-green-300'}`}>{event.status_code}</span></td>
       <td className="flex justify-between gap-3 py-1 font-mono text-[10px] text-muted lg:table-cell lg:px-3 lg:py-3 lg:text-right lg:align-top"><span className="font-sans uppercase tracking-wider text-muted lg:hidden">Duration</span><span>{event.duration_ms} ms</span></td>
     </tr>
   )
 }
 
 function FilterInput({ id, label, value, onChange, placeholder, type = 'search', inputMode }: { id: string; label: string; value: string; onChange: (value: string) => void; placeholder?: string; type?: 'search' | 'date'; inputMode?: 'numeric' }) {
-  return <label htmlFor={id} className="flex min-w-0 flex-col gap-1 text-[11px] font-medium text-slate-400">{label}<input id={id} type={type} inputMode={inputMode} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} className="min-h-10 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-700 focus:border-brand-400 focus:ring-2 focus:ring-brand-400/30" /></label>
+  return <Label htmlFor={id} className="flex min-w-0 flex-col gap-1">{label}<input id={id} type={type} inputMode={inputMode} value={value} onChange={event => onChange(event.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} className={`${FIELD_CLASS} font-sans font-normal normal-case tracking-normal`} /></Label>
 }
 
 function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: { retention: AdminRetention | null; days: number; onDaysChange: (days: number) => void; onRefresh: () => void; onPurge: () => void }) {
@@ -933,9 +930,9 @@ function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: {
 
   return (
     <section aria-labelledby="retention-title" className="max-w-2xl">
-      <div className="mb-4"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Lifecycle</p><h2 id="retention-title" className="text-xl font-semibold tracking-tight">Audit retention</h2><p className="mt-1 text-sm leading-relaxed text-muted">Remove old API audit events from Lagun's local SQLite store. Connection profiles and encrypted credentials are not affected.</p></div>
+      <div className="mb-5"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Lifecycle</p><h2 id="retention-title" className="text-xl font-semibold tracking-tight text-slate-100">Audit retention</h2><p className="mt-1 text-sm leading-relaxed text-muted">Remove old API audit events from Lagun's local SQLite store. Connection profiles and encrypted credentials are not affected.</p></div>
       <div className="rounded-lg border border-surface-800 bg-surface-900 p-4 sm:p-5">
-        <label htmlFor="admin-retention-days" className="text-xs font-medium text-slate-300">Delete events older than</label>
+        <Label htmlFor="admin-retention-days" className="block">Delete events older than</Label>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input
             id="admin-retention-days"
@@ -953,13 +950,13 @@ function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: {
                 commitDays()
               }
             }}
-            className="min-h-10 w-28 rounded border border-surface-700 bg-surface-950 px-2.5 py-2 text-sm text-slate-200 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400/30"
+            className={`${FIELD_CLASS} w-28`}
           />
           <span className="text-xs text-muted">days</span>
-          <button type="button" onClick={onRefresh} className="ml-auto min-h-10 rounded border border-surface-700 px-3 py-2 text-xs text-slate-400 hover:bg-surface-800 hover:text-slate-200">Check eligibility</button>
+          <Button type="button" onClick={onRefresh} className="ml-auto min-h-10">Check eligibility</Button>
         </div>
         <dl className="mt-5 grid gap-3 border-t border-surface-800 pt-4 text-xs sm:grid-cols-3"><div><dt className="text-muted">Eligible events</dt><dd className="mt-1 font-mono text-lg text-slate-200">{retention?.eligible_count ?? '—'}</dd></div><div><dt className="text-muted">Minimum age</dt><dd className="mt-1 font-mono text-lg text-slate-200">{minimumAge} days</dd></div><div><dt className="text-muted">Scope</dt><dd className="mt-1 text-slate-400">Audit events only</dd></div></dl>
-        <button type="button" disabled={!retention?.eligible_count} onClick={onPurge} className="mt-5 min-h-10 rounded border border-red-900/60 px-3 py-2 text-xs text-red-300 hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-40">Review purge</button>
+        <button type="button" disabled={!retention?.eligible_count} onClick={onPurge} className={`${DANGER_OUTLINE_CLASS} mt-5 min-h-10 px-3 py-1.5 text-sm`}>Review purge</button>
       </div>
     </section>
   )

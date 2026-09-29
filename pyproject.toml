@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lagun"
-version = "0.1.97"
+version = "0.1.98"
 description = "A web-based MySQL/MariaDB GUI editor"
 readme = "README.md"
 # The query runner uses `asyncio.timeout` (lagun/api/query.py), which is 3.11+.
@@ -71,7 +71,7 @@ dev = [
     "uvicorn[standard]>=0.29.0,<1",
 ]
 ldap = [
-    "ldapgate>=0.1.28",
+    "ldapgate>=0.1.29",
 ]
 
 [tool.pytest.ini_options]

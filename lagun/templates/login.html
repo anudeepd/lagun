@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#020617">
   <title>Sign in — Lagun</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style nonce="{{ csrf_nonce }}">
@@ -18,6 +19,7 @@
       --bg: #020617;
       --card: #0f172a;
       --card-border: #1e293b;
+      --hover: #1e293b;
       --field: #1e293b;
       --field-border: #334155;
       --label: #94a3b8;
@@ -47,7 +49,9 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 1.5rem;
+      /* Viewport-fit=cover: keep the card clear of the notch and home indicator. */
+      padding: calc(1.5rem + env(safe-area-inset-top)) calc(1.5rem + env(safe-area-inset-right))
+        calc(1.5rem + env(safe-area-inset-bottom)) calc(1.5rem + env(safe-area-inset-left));
       -webkit-font-smoothing: antialiased;
     }
 
@@ -159,6 +163,19 @@
     input[type="password"]::-ms-reveal {
       display: none;
     }
+    /* The browser's own reveal control is the only one shown when it draws one
+       (see browserDrawsRevealButton below), so the room reserved for the custom
+       toggle goes back to the text. */
+    .password-field.native-reveal input {
+      padding-inline-end: 0.75rem;
+    }
+    /* Measuring stick for browserDrawsRevealButton: same box as the password
+       input, never seen, never focused. */
+    .reveal-probe {
+      position: absolute;
+      visibility: hidden;
+      pointer-events: none;
+    }
 
     .password-toggle {
       position: absolute;
@@ -183,7 +200,7 @@
     }
 
     .password-toggle:hover {
-      background: var(--card-border);
+      background: var(--hover);
       color: var(--text);
     }
 
@@ -345,7 +362,7 @@
 
     <div class="card">
       <div class="logo-wrap">
-        <svg class="brand-logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+        <svg class="brand-logo" aria-hidden="true" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
           <rect x="4" y="4" width="120" height="120" rx="24" fill="#f0f9ff"/>
           <g fill="none" stroke="#2563eb" stroke-width="3" stroke-linecap="round">
             <path d="M 28 34 Q 38 26 48 34 T 68 34 T 88 34 T 100 34"/>
@@ -369,13 +386,13 @@
 
         <div class="field">
           <label for="username">Username</label>
-          <input type="text" id="username" name="username" autocomplete="username"{% if error %} aria-describedby="login-error"{% endif %}{% if not error %} autofocus{% endif %} required>
+          <input type="text" id="username" name="username" autocomplete="username"{% if error %} aria-describedby="login-error" aria-invalid="true"{% endif %}{% if not error %} autofocus{% endif %} required spellcheck="false">
         </div>
 
         <div class="field">
           <label for="password">Password</label>
           <div class="password-field">
-            <input type="password" id="password" name="password" autocomplete="current-password"{% if error %} aria-describedby="login-error"{% endif %} required>
+            <input type="password" id="password" name="password" autocomplete="current-password"{% if error %} aria-describedby="login-error" aria-invalid="true"{% endif %} required>
             <button type="button" class="password-toggle" id="password-toggle" aria-label="Show password" aria-controls="password" aria-pressed="false" hidden>
               <svg class="eye-open" aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/>
@@ -417,15 +434,40 @@
     const hasError = {{ 'true' if error else 'false' }};
     let loginSubmitting = false;
 
+    // Firefox draws its own reveal button inside <input type="password"> when
+    // layout.forms.reveal-password-button.enabled is on (Nightly, some forks, any
+    // profile that sets it), next to the custom toggle. Page CSS cannot remove it:
+    // ::-moz-reveal is user-agent-only, ::-ms-reveal is Edge's, and painting it
+    // invisible is undone by Firefox's `input:autofill { color: FieldText !important }`,
+    // which is the normal state of a login page. What it does do is reserve room at
+    // the end of the field, so the password input reports a smaller clientWidth than
+    // an identical text input. When it does, the browser's control is the only one shown.
+    function browserDrawsRevealButton(field) {
+      const probe = document.createElement('input');
+      probe.type = 'text';
+      probe.tabIndex = -1;
+      probe.autocomplete = 'off';
+      probe.className = 'reveal-probe';
+      probe.setAttribute('aria-hidden', 'true');
+      field.parentNode.appendChild(probe);
+      const reserved = probe.clientWidth - field.clientWidth;
+      probe.remove();
+      return reserved > 2;
+    }
+
     if (password && passwordToggle) {
-      passwordToggle.hidden = false;
-      passwordToggle.addEventListener('click', function() {
-        const showing = password.type === 'password';
-        password.type = showing ? 'text' : 'password';
-        passwordToggle.setAttribute('aria-label', showing ? 'Hide password' : 'Show password');
-        passwordToggle.setAttribute('aria-pressed', String(showing));
-        password.focus();
-      });
+      if (browserDrawsRevealButton(password)) {
+        password.parentNode.classList.add('native-reveal');
+      } else {
+        passwordToggle.hidden = false;
+        passwordToggle.addEventListener('click', function() {
+          const showing = password.type === 'password';
+          password.type = showing ? 'text' : 'password';
+          passwordToggle.setAttribute('aria-label', showing ? 'Hide password' : 'Show password');
+          passwordToggle.setAttribute('aria-pressed', String(showing));
+          password.focus();
+        });
+      }
     }
 
 

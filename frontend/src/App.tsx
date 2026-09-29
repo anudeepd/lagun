@@ -82,7 +82,7 @@ export default function App() {
   return (
     <>
       <PresenceReporter />
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-critical rounded bg-brand-600 px-3 py-2 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-white">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-critical rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-brand-400 focus:ring-offset-2 focus:ring-offset-surface-950">
         Skip to main content
       </a>
       <div className="relative h-dvh overflow-hidden">

@@ -910,11 +910,12 @@ function QueryTab({ tab }: Props) {
             {results.map((entry, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => setResultIdx(i)}
-                className={`relative px-3 py-1 text-xs whitespace-nowrap border-r border-surface-800 transition-colors ${
+                className={`relative px-3 py-1 text-xs whitespace-nowrap border-r border-surface-800 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 ${
                   resultIdx === i
                     ? 'bg-surface-950 text-slate-200'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800'
+                    : 'text-muted hover:text-slate-200 hover:bg-surface-800'
                 }`}
               >
                 {resultIdx === i && <m.span layoutId={`active-result-${tab.id}`} className="absolute inset-x-0 top-0 h-0.5 bg-brand-500" transition={surfaceTransition} />}
@@ -972,25 +973,27 @@ function QueryTab({ tab }: Props) {
         {results[resultIdx] && !results[resultIdx].result.error && results[resultIdx].result.columns.length > 0 && (
           <div className="flex items-center">
             <button
+              type="button"
               onClick={() => gridRef.current?.clearSort()}
               disabled={!resultSortActive}
-              className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors disabled:cursor-default ${
+              className={`flex items-center gap-1 px-3 py-1.5 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400 disabled:cursor-default ${
                 resultSortActive
                   ? 'text-brand-400 hover:text-brand-300'
                   : 'text-muted'
               }`}
               title="Clear result sorting"
             >
-              <ArrowUpDown size={11} /> Clear Sort
+              <ArrowUpDown size={12} /> Clear Sort
             </button>
             <button
+              type="button"
               onClick={() => {
                 setQueryExportContext(buildQueryExportContext(results[resultIdx], gridRef.current))
               }}
-              className="flex items-center gap-1 px-3 py-1.5 text-xs text-muted hover:text-slate-300 transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 text-xs text-muted hover:text-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
               title="Export result"
             >
-              <Download size={11} /> Export
+              <Download size={12} /> Export
             </button>
           </div>
         )}
@@ -1025,7 +1028,7 @@ function QueryTab({ tab }: Props) {
       </Suspense>
 
       {(running || bulkConfirm || bulkValidation) && bulkStatements.length >= FAST_EXECUTE_THRESHOLD && results.length === 0 && (
-        <div className="flex-shrink-0 bg-surface-900 border-t border-surface-800 px-3 py-1.5 text-xs text-slate-400">
+        <div className="flex-shrink-0 bg-surface-900 border-t border-surface-800 px-3 py-1.5 text-xs text-muted">
           Large write script: {(bulkValidation?.statement_count ?? bulkStatements.length).toLocaleString()} statements
           <span className="ml-1">
             ({Object.entries(bulkOperationCounts).filter(([, n]) => n > 0).map(([op, n]) => `${n} ${op}`).join(', ')})
@@ -1036,7 +1039,7 @@ function QueryTab({ tab }: Props) {
 
       {running && bulkStatements.length >= FAST_EXECUTE_THRESHOLD && (
         <div className="flex-shrink-0 bg-brand-950 border-t border-brand-800/50 px-3 py-1.5 text-xs text-brand-300">
-          {bulkCancelled ? 'Cancelling and rolling back...' : `Executing ${bulkStatements.length.toLocaleString()} statements in one transaction...`}
+          {bulkCancelled ? 'Cancelling and rolling back…' : `Executing ${bulkStatements.length.toLocaleString()} statements in one transaction…`}
         </div>
       )}
     </div>
@@ -1794,7 +1797,7 @@ function TableTab({ tab, active = true }: Props) {
     <div className="flex flex-col h-full min-h-0">
       {/* Toolbar */}
       <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
-        <span className="text-xs text-slate-400 min-w-0 truncate max-w-full">{tab.database}.{tab.table}</span>
+        <span className="text-xs text-muted min-w-0 truncate max-w-full" title={`${tab.database}.${tab.table}`}>{tab.database}.{tab.table}</span>
         <div className="flex-1 min-w-4" />
         {/* Global search input — shown in data view */}
         {view === 'data' && (
@@ -1803,10 +1806,10 @@ function TableTab({ tab, active = true }: Props) {
               ? { y: -1, scale: 1.018, boxShadow: '0 7px 18px rgba(2, 6, 23, 0.28)' }
               : { y: 0, scale: 1, boxShadow: '0 0 0 rgba(2, 6, 23, 0)' }}
             transition={surfaceTransition}
-            className="relative flex items-center min-w-40 rounded origin-center"
+            className="relative flex items-center min-w-40 rounded-md origin-center"
           >
             <span className="absolute left-2 z-10 pointer-events-none">
-                <Search size={11} className={`${searchFocused ? 'text-brand-400 scale-112' : 'text-muted'} transition-colors duration-200`} />
+                <Search size={12} className={`${searchFocused ? 'text-brand-400 scale-112' : 'text-muted'} transition-colors duration-200`} />
             </span>
             <input
               type="text"
@@ -1831,7 +1834,7 @@ function TableTab({ tab, active = true }: Props) {
               onBlur={() => setSearchFocused(false)}
               placeholder="Search all columns…"
               aria-label="Search all columns"
-              className="bg-surface-800 border border-surface-700 rounded pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-1 focus:ring-brand-400 w-44 max-w-full"
+              className="lagun-field bg-surface-800 border border-surface-700 rounded-md pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400 w-44 max-w-full"
             />
             <AnimatePresence>
             {globalSearch && (
@@ -1839,11 +1842,12 @@ function TableTab({ tab, active = true }: Props) {
                 initial={{ opacity: 0, scale: 0.65, rotate: -35 }}
                 animate={{ opacity: 1, scale: 1, rotate: 0, transition: surfaceTransition }}
                 exit={{ opacity: 0, scale: 0.65, rotate: 25, transition: exitTransition }}
+                type="button"
                 onClick={handleClearSearch}
-                className="absolute right-1.5 text-muted hover:text-slate-300"
+                className="absolute right-1.5 rounded text-muted hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                 aria-label="Clear column search"
               >
-                <X size={10} />
+                <X size={12} />
               </m.button>
             )}
             </AnimatePresence>
@@ -1858,9 +1862,9 @@ function TableTab({ tab, active = true }: Props) {
               onClick={handleCreateEmptyRow}
               disabled={!(columns.length > 0 && !initialLoading && !refreshing)}
               title="Add a row to insert"
-              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors text-muted hover:text-slate-200 disabled:opacity-40 disabled:hover:text-muted"
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors text-muted hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted"
             >
-              <Plus size={11} aria-hidden="true" />
+              <Plus size={14} aria-hidden="true" />
               Add row
             </button>
             <button
@@ -1872,9 +1876,9 @@ function TableTab({ tab, active = true }: Props) {
                   ? `Delete ${formatRowCount(selectedRows.filter(row => !row.__lagun_insertDraft).length)}`
                   : 'Select rows to delete'
               }
-              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors text-muted hover:text-red-400 disabled:opacity-40 disabled:hover:text-muted"
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors text-muted hover:text-red-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted"
             >
-              <Trash2 size={11} aria-hidden="true" />
+              <Trash2 size={14} aria-hidden="true" />
               Delete{selectedRows.some(row => !row.__lagun_insertDraft) ? ` ${selectedRows.filter(row => !row.__lagun_insertDraft).length}` : ''}
             </button>
           </div>
@@ -1882,11 +1886,12 @@ function TableTab({ tab, active = true }: Props) {
         {/* Filter toggle button */}
         {view === 'data' && (
           <button
+            type="button"
             onClick={() => setShowFilterBar(v => !v)}
-            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${showFilterBar || appliedWhere ? 'text-brand-400 bg-brand-950 border border-brand-800' : 'text-muted hover:text-slate-300'}`}
+            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${showFilterBar || appliedWhere ? 'text-brand-400 bg-brand-950 border border-brand-800' : 'text-muted hover:text-slate-300'}`}
             title="Toggle WHERE filter"
           >
-            <Filter size={11} />
+            <Filter size={14} />
             {appliedWhere ? 'Filtered' : 'Filter'}
           </button>
         )}
@@ -1894,20 +1899,21 @@ function TableTab({ tab, active = true }: Props) {
         {view === 'data' && result && result.columns.length > 0 && (
           <div className="relative" ref={colPickerRef}>
             <button
+              type="button"
               onClick={() => setShowColPicker(v => !v)}
-              className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors ${
+              className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
                 hiddenColumns.size > 0
                   ? 'text-brand-400 bg-brand-950 border border-brand-800'
                   : 'text-muted hover:text-slate-300'
               }`}
               title="Select visible columns"
             >
-              <Eye size={11} />
+              <Eye size={14} />
               Columns{hiddenColumns.size > 0 ? ` (${result.columns.length - hiddenColumns.size}/${result.columns.length})` : ''}
             </button>
             <AnimatePresence>
             {showColPicker && (
-              <m.div initial={{ opacity: 0, y: -motionDistance.surface, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1, transition: surfaceTransition }} exit={{ opacity: 0, y: -motionDistance.subtle, scale: 0.94, transition: exitTransition }} className="absolute right-0 top-full z-popover mt-1 flex w-52 flex-col rounded border border-surface-700 bg-surface-900 shadow-xl">
+              <m.div initial={{ opacity: 0, y: -motionDistance.surface, scale: 0.92 }} animate={{ opacity: 1, y: 0, scale: 1, transition: surfaceTransition }} exit={{ opacity: 0, y: -motionDistance.subtle, scale: 0.94, transition: exitTransition }} className="absolute right-0 top-full z-popover mt-1 flex w-52 flex-col rounded-lg border border-surface-700 bg-surface-900 shadow-lg">
                 <div className="px-2 pt-2 pb-1">
                   <input
                     type="text"
@@ -1915,7 +1921,7 @@ function TableTab({ tab, active = true }: Props) {
                     onChange={e => setColSearch(e.target.value)}
                     placeholder="Filter columns…"
                     autoFocus
-                    className="w-full bg-surface-800 border border-surface-700 rounded px-2 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-1 focus:ring-brand-400"
+                    className="lagun-field w-full bg-surface-800 border border-surface-700 rounded-md px-2 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400"
                   />
                 </div>
                 <label className="flex items-center gap-2 px-3 py-1 hover:bg-surface-800 cursor-pointer border-b border-surface-700">
@@ -1923,7 +1929,7 @@ function TableTab({ tab, active = true }: Props) {
                     type="checkbox"
                     checked={hiddenColumns.size === 0}
                     onChange={e => setHiddenColumns(e.target.checked ? new Set() : new Set(result.columns))}
-                    className="accent-brand-500"
+                    className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                   />
                   <span className="text-xs text-slate-200 font-semibold">All</span>
                 </label>
@@ -1943,7 +1949,7 @@ function TableTab({ tab, active = true }: Props) {
                               return next
                             })
                           }}
-                          className="accent-brand-500"
+                          className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                         />
                         <span className="text-xs text-slate-300 font-mono truncate" title={col}>{col}</span>
                       </label>
@@ -1954,9 +1960,9 @@ function TableTab({ tab, active = true }: Props) {
                     type="checkbox"
                     checked={sortColsAlpha}
                     onChange={e => setSortColsAlpha(e.target.checked)}
-                    className="accent-brand-500"
+                    className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                   />
-                  <span className="text-xs text-slate-400">Sort alphabetically</span>
+                  <span className="text-xs text-muted">Sort alphabetically</span>
                 </label>
               </m.div>
             )}
@@ -1965,16 +1971,17 @@ function TableTab({ tab, active = true }: Props) {
         )}
         {view === 'data' && result && !result.error && result.columns.length > 0 && (
           <button
+            type="button"
             onClick={() => gridRef.current?.clearSort()}
             disabled={!dataSortActive}
-            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded transition-colors disabled:cursor-default ${
+            className={`flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-default ${
               dataSortActive
                 ? 'text-brand-400 bg-brand-950 border border-brand-800 hover:text-brand-300'
                 : 'text-muted'
             }`}
             title="Clear data sorting"
           >
-            <ArrowUpDown size={11} /> Clear Sort
+            <ArrowUpDown size={14} /> Clear Sort
           </button>
         )}
         {/* Limit selector — only shown in data view */}
@@ -1986,7 +1993,7 @@ function TableTab({ tab, active = true }: Props) {
             whileHover={{ scale: 1.025 }}
             whileTap={{ scale: 0.96 }}
             transition={surfaceTransition}
-            className="flex items-center gap-1 text-xs text-muted rounded"
+            className="flex items-center gap-1 text-xs text-muted rounded-md"
           >
             <span>Limit</span>
             <LimitSelect value={limit} options={LIMIT_OPTIONS} onChange={handleLimitChange} />
@@ -1996,30 +2003,34 @@ function TableTab({ tab, active = true }: Props) {
         {view === 'data' && (pendingChanges.size > 0 || insertDrafts.size > 0) && (
           <>
             <button
+              type="button"
               onClick={() => setShowChangeReview(true)}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-700 hover:bg-amber-600 text-white rounded transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-amber-700 hover:bg-amber-600 text-white rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               Apply ({pendingChanges.size + insertDrafts.size})
             </button>
             <button
+              type="button"
               onClick={handleDiscardChanges}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md text-muted hover:text-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               Discard
             </button>
           </>
         )}
         {/* View toggle */}
-        <div className="relative flex rounded overflow-hidden border border-surface-700 bg-surface-800">
+        <div className="relative flex rounded-md overflow-hidden border border-surface-700 bg-surface-800">
           <button
-            className={`relative z-10 px-2.5 py-0.5 text-xs transition-colors ${view === 'schema' ? 'text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            type="button"
+            className={`relative z-10 px-2.5 py-0.5 text-xs transition-colors focus:outline-none focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-brand-400 ${view === 'schema' ? 'text-white' : 'text-muted hover:text-slate-200'}`}
             onClick={() => setView('schema')}
           >
             {view === 'schema' && <m.span layoutId={`table-view-${tab.id}`} className="absolute inset-0 -z-10 bg-brand-600" transition={surfaceTransition} />}
             Schema
           </button>
           <button
-            className={`relative z-10 px-2.5 py-0.5 text-xs transition-colors ${view === 'data' ? 'text-white' : 'text-slate-400 hover:text-slate-200'}`}
+            type="button"
+            className={`relative z-10 px-2.5 py-0.5 text-xs transition-colors focus:outline-none focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-brand-400 ${view === 'data' ? 'text-white' : 'text-muted hover:text-slate-200'}`}
             onClick={() => setView('data')}
           >
             {view === 'data' && <m.span layoutId={`table-view-${tab.id}`} className="absolute inset-0 -z-10 bg-brand-600" transition={surfaceTransition} />}
@@ -2028,15 +2039,17 @@ function TableTab({ tab, active = true }: Props) {
         </div>
         {view === 'data' && (
           <button
+            type="button"
             onClick={() => setShowImport(true)}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors"
+            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md text-muted hover:text-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             title="Import data"
           >
-            <Upload size={11} /> Import
+            <Upload size={14} /> Import
           </button>
         )}
         {view === 'data' && result && !result.error && (
           <button
+            type="button"
             onClick={() => {
               if (selectedRows.length > 0) {
                 setDataExportContext({
@@ -2049,10 +2062,10 @@ function TableTab({ tab, active = true }: Props) {
                 rowsOverride: buildTableDataExportData(result, gridRef.current, columns),
               })
             }}
-            className="flex items-center gap-1 px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors"
+            className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md text-muted hover:text-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             title="Export data"
           >
-            <Download size={11} /> Export
+            <Download size={14} /> Export
           </button>
         )}
         {view === 'data' && (
@@ -2062,9 +2075,9 @@ function TableTab({ tab, active = true }: Props) {
             onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); loadData() }}
             aria-label={refreshing ? 'Refreshing data' : 'Refresh data'}
             disabled={initialLoading || refreshing}
-            className={`lagun-hit-target rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-wait ${refreshing ? 'text-slate-400' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`lagun-hit-target rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-wait ${refreshing ? 'text-muted' : 'text-muted hover:text-slate-200'}`}
           >
-            <RefreshIcon refreshing={refreshing} size={12} />
+            <RefreshIcon refreshing={refreshing} size={14} />
           </button>
           </Tooltip>
         )}
@@ -2077,7 +2090,7 @@ function TableTab({ tab, active = true }: Props) {
         <div className="flex items-center flex-wrap gap-2 px-3 py-1.5">
           <span className="inline-flex h-[34px] self-start items-center text-xs leading-none text-muted font-mono shrink-0">WHERE</span>
           <FilterHistoryDropdown history={filterHistory} activeFilter={appliedWhere} onSelect={handleSelectFilterHistory} />
-          <div className="flex-1 min-w-[220px] rounded overflow-visible border border-surface-700 focus-within:ring-1 focus-within:ring-brand-400">
+          <div className="flex-1 min-w-[220px] rounded-md overflow-visible border border-surface-700 focus-within:ring-2 focus-within:ring-brand-400 focus-within:border-brand-400">
             <ReactCodeMirror
               value={whereFilter}
               onChange={val => {
@@ -2109,22 +2122,24 @@ function TableTab({ tab, active = true }: Props) {
               aria-label="Toggle WHERE filter word wrap"
               title={filterWordWrap ? 'Disable WHERE filter word wrap' : 'Enable WHERE filter word wrap'}
             >
-              <WrapText size={12} />
+              <WrapText size={14} />
             </Button>
             <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-muted bg-surface-800 border border-surface-700 rounded">
               {isMac ? '⌘↵' : 'Ctrl+↵'}
             </kbd>
             <button
+              type="button"
               onClick={handleApplyFilter}
-              className="px-2.5 py-0.5 text-xs bg-brand-600 hover:bg-brand-700 text-white rounded transition-colors"
+              className="px-2.5 py-0.5 text-xs font-medium bg-brand-600 hover:bg-brand-700 text-white rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               Apply
             </button>
           </div>
           {appliedWhere && (
             <button
+              type="button"
               onClick={handleClearFilter}
-              className="px-2 py-0.5 text-xs text-muted hover:text-slate-300 transition-colors shrink-0"
+              className="px-2 py-0.5 text-xs rounded-md text-muted hover:text-slate-300 transition-colors shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               Clear
             </button>
@@ -2230,7 +2245,7 @@ function TableTab({ tab, active = true }: Props) {
 
       {statusMsg && (
         <div className="border-t border-surface-800 bg-surface-900 px-3 py-1.5 motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]">
-          <p className="text-xs font-mono text-slate-400 break-all">{statusMsg}</p>
+          <p className="text-xs font-mono text-muted break-all">{statusMsg}</p>
         </div>
       )}
 
@@ -2293,7 +2308,7 @@ function TableTab({ tab, active = true }: Props) {
       >
         <div className="space-y-4 text-sm text-slate-300">
           <p>Changes run one row at a time. Lagun stops at first failed row; already applied rows remain changed.</p>
-          <dl className="grid grid-cols-2 gap-2 rounded-md border border-surface-700 bg-surface-800 p-3 text-xs">
+          <dl className="grid grid-cols-2 gap-2 rounded-lg border border-surface-700 bg-surface-800 p-3 text-xs">
             <div><dt className="text-muted">Rows to update</dt><dd className="mt-1 font-mono text-slate-100">{pendingChanges.size}</dd></div>
             <div><dt className="text-muted">Rows to insert</dt><dd className="mt-1 font-mono text-slate-100">{insertDrafts.size}</dd></div>
           </dl>
@@ -2307,7 +2322,7 @@ function TableTab({ tab, active = true }: Props) {
               </div>
             </div>
           )}
-          <p className="rounded border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">Review complete before applying. This action cannot be automatically undone.</p>
+          <p className="rounded-lg border border-amber-800/70 bg-amber-950/40 px-3 py-2 text-xs text-amber-200">Review complete before applying. This action cannot be automatically undone.</p>
         </div>
       </Modal>
     </div>

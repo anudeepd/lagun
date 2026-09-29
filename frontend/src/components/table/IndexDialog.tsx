@@ -66,7 +66,7 @@ export default function IndexDialog({ open, onClose, sessionId, database, table,
       }
     >
       <div className="flex flex-col gap-3">
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="rounded-md border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
         <Input label="Index Name" value={name} onChange={e => setName(e.target.value)} placeholder="idx_column" />
 
         <div>
@@ -76,7 +76,7 @@ export default function IndexDialog({ open, onClose, sessionId, database, table,
               <button
                 key={col}
                 onClick={() => toggleCol(col)}
-                className={`px-2 py-0.5 text-xs rounded border transition-colors ${
+                className={`px-2 py-0.5 text-xs rounded border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
                   selectedCols.includes(col)
                     ? 'bg-brand-600 border-brand-500 text-white'
                     : 'bg-surface-800 border-surface-700 text-slate-300 hover:border-brand-500'
@@ -95,7 +95,7 @@ export default function IndexDialog({ open, onClose, sessionId, database, table,
         </Select>
 
         <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-          <input type="checkbox" checked={unique} onChange={e => setUnique(e.target.checked)} />
+          <input type="checkbox" className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" checked={unique} onChange={e => setUnique(e.target.checked)} />
           Unique
         </label>
       </div>

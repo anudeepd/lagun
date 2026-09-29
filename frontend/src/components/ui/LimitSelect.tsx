@@ -114,7 +114,7 @@ export default function LimitSelect({ value, options, onChange, ariaLabel = 'Row
         whileHover={{ scale: 1.025 }}
         whileTap={{ scale: 0.96 }}
         transition={surfaceTransition}
-        className="flex min-w-[66px] items-center justify-between gap-2 rounded border border-surface-700 bg-surface-800 px-1.5 py-0.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-brand-400"
+        className="lagun-field flex min-w-[66px] items-center justify-between gap-2 rounded-md border border-surface-700 bg-surface-800 px-2 py-0.5 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400"
       >
         <span>{value?.toLocaleString()}</span>
         <m.span animate={{ rotate: open ? 180 : 0 }} transition={surfaceTransition}>
@@ -134,7 +134,7 @@ export default function LimitSelect({ value, options, onChange, ariaLabel = 'Row
               exit={{ opacity: 0, scale: 0.97, y: -4 }}
               transition={open ? surfaceTransition : exitTransition}
               style={{ position: 'fixed', top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, maxHeight: 'min(320px, calc(100vh - 16px))' }}
-              className="z-popover origin-top overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-xl"
+              className="z-popover origin-top overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-lg"
             >
               {options.map((option, index) => (
                 <button
@@ -145,7 +145,7 @@ export default function LimitSelect({ value, options, onChange, ariaLabel = 'Row
                   aria-selected={option === value}
                   onKeyDown={event => handleOptionKeyDown(event, index)}
                   onClick={() => select(option)}
-                  className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs transition-colors ${option === value ? 'bg-brand-700 text-white' : 'text-slate-300 hover:bg-surface-700 hover:text-white'}`}
+                  className={`flex w-full items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs transition-colors ${option === value ? 'bg-brand-600 text-white' : 'text-slate-300 hover:bg-surface-700 hover:text-white'}`}
                 >
                   {option.toLocaleString()}
                   <Check size={12} className={option === value ? 'opacity-100' : 'opacity-0'} />

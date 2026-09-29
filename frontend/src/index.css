@@ -251,6 +251,12 @@
     min-height: 2.25rem;
     min-width: 2.25rem;
   }
+  /* Compact toolbar variant: sits at the same height as `Button size="sm"`
+     neighbours instead of towering over them, and still grows for touch. */
+  .lagun-icon-button-sm {
+    min-height: 1.75rem;
+    min-width: 1.75rem;
+  }
   /* WCAG 2.2 SC 2.5.8: dense icon controls (sidebar star/refresh, row actions,
      tab close) keep their small visual size but must not have a sub-24px hit
      area. Centre the icon inside a 24px box. */
@@ -280,8 +286,17 @@
       transform: translateY(-1px);
     }
   }
+  /* Text fields share the button colour transition but must not lift on hover
+     or squash on press: a control you type into has to stay put under the
+     pointer. */
+  .lagun-field {
+    transition-duration: var(--motion-duration-micro);
+    transition-property: color, background-color, border-color, opacity, box-shadow;
+    transition-timing-function: var(--motion-ease-move);
+  }
   @media (pointer: coarse) {
-    .lagun-icon-button {
+    .lagun-icon-button,
+    .lagun-icon-button-sm {
       min-height: 2.75rem;
       min-width: 2.75rem;
     }

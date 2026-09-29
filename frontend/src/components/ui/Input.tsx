@@ -17,7 +17,7 @@ const Input = forwardRef<HTMLInputElement, InputProps>(
           ref={ref}
           id={inputId}
           className={clsx(
-            'lagun-interactive bg-surface-800 border border-surface-700 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder-muted',
+            'lagun-field bg-surface-800 border border-surface-700 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder-muted',
             'focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400',
             'disabled:opacity-50 disabled:cursor-not-allowed',
             error && 'border-red-500',

@@ -232,7 +232,7 @@ export default function EditColumnDialog({
       }
     >
       <div className="flex flex-col gap-3">
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {error && <p className="rounded-md border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
 
         <Input
           label="Name"
@@ -294,7 +294,7 @@ export default function EditColumnDialog({
         />
 
         <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-          <input type="checkbox" checked={nullable} onChange={e => setNullable(e.target.checked)} />
+          <input type="checkbox" className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" checked={nullable} onChange={e => setNullable(e.target.checked)} />
           Nullable
         </label>
       </div>

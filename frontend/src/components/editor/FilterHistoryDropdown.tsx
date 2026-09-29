@@ -65,7 +65,7 @@ export default function FilterHistoryDropdown({ history, disabled, activeFilter,
           initial={{ opacity: 0, scale: 0.96, y: -motionDistance.subtle }}
           animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}
           exit={{ opacity: 0, scale: 0.96, y: -motionDistance.subtle, transition: exitTransition }}
-          className="fixed z-popover max-h-72 max-w-[calc(100vw-16px)] overflow-y-auto rounded-md border border-surface-700 bg-surface-900 py-1 shadow-2xl"
+          className="fixed z-popover max-h-72 max-w-[calc(100vw-16px)] overflow-y-auto rounded-lg border border-surface-700 bg-surface-900 py-1 shadow-lg"
           style={{ left: pos.left, top: pos.top, width: pos.width }}
         >
           {history.map((filter, i) => (
@@ -102,13 +102,13 @@ export default function FilterHistoryDropdown({ history, disabled, activeFilter,
         aria-expanded={open || undefined}
         aria-label="Recent filters"
         title={history.length === 0 ? 'No recent filters yet' : 'Recent filters'}
-        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border transition-colors ${
+        className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${
           open
             ? 'border-brand-800 bg-brand-950 text-brand-400'
             : 'border-surface-700 text-muted hover:bg-surface-800 hover:text-slate-300'
         } disabled:pointer-events-none disabled:opacity-40`}
       >
-        <History size={13} />
+        <History size={14} />
       </button>
       {menu}
     </>

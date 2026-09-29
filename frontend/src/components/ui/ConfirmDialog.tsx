@@ -39,15 +39,15 @@ export default function ConfirmDialog({
       initialFocusRef={cancelRef}
       footer={
         <>
+          <Button ref={cancelRef} type="button" variant="ghost" onClick={onClose}>
+            {cancelLabel}
+          </Button>
           <Button
             type="button"
             variant={danger ? 'danger' : 'primary'}
             onClick={onConfirm}
           >
             {confirmLabel}
-          </Button>
-          <Button ref={cancelRef} type="button" variant="ghost" onClick={onClose}>
-            {cancelLabel}
           </Button>
         </>
       }

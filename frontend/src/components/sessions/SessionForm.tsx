@@ -273,7 +273,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
     >
       <div className="flex flex-col gap-3">
         {testResult && (
-          <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded ${testResult.ok ? 'bg-green-900/40 text-green-300' : 'bg-red-900/40 text-red-300'}`}>
+          <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${testResult.ok ? 'border-green-900 bg-green-950/50 text-green-400' : 'border-red-900 bg-red-950/50 text-red-400'}`}>
             {testResult.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
             {testResult.msg}
           </div>
@@ -292,11 +292,13 @@ export default function SessionForm({ open, onClose, session }: Props) {
           <Input label="Password" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder={session ? '(unchanged)' : ''} disabled={isManaged} title={isManaged ? managedLock : undefined} />
         </div>
         <Input label="Default Database (optional)" value={form.default_db} onChange={e => set('default_db', e.target.value)} placeholder="my_db" disabled={isManaged} title={isManaged ? managedLock : undefined} />
-        <Input ref={queryLimitRef} label="Row Limit" type="number" value={form.query_limit} onChange={e => set('query_limit', e.target.value)} disabled={isManaged} title={isManaged ? managedLock : undefined} />
-        <label className={`flex items-center gap-2 text-sm text-slate-300 ${isManaged ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
-          <input type="checkbox" checked={form.ssl_enabled as boolean} onChange={e => set('ssl_enabled', e.target.checked)} className="rounded" disabled={isManaged} title={isManaged ? managedLock : undefined} />
-          Enable SSL
-        </label>
+        <div className="grid grid-cols-3 items-end gap-2">
+          <Input ref={queryLimitRef} label="Row Limit" type="number" value={form.query_limit} onChange={e => set('query_limit', e.target.value)} disabled={isManaged} title={isManaged ? managedLock : undefined} />
+          <label className={`col-span-2 flex items-center gap-2 py-1.5 text-sm text-slate-300 ${isManaged ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
+            <input type="checkbox" checked={form.ssl_enabled as boolean} onChange={e => set('ssl_enabled', e.target.checked)} className="h-3.5 w-3.5 rounded accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" disabled={isManaged} title={isManaged ? managedLock : undefined} />
+            Enable SSL
+          </label>
+        </div>
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
@@ -308,21 +310,22 @@ export default function SessionForm({ open, onClose, session }: Props) {
                 <button
                   type="button"
                   onClick={toggleAll}
-                  className="text-xs text-brand-400 hover:text-brand-300"
+                  className="rounded text-xs text-brand-400 hover:text-brand-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                 >
                   {selectedDbs.length === availableDbs.length ? 'Deselect all' : 'Select all'}
                 </button>
               )}
-              <button
+              <Button
                 type="button"
+                variant="secondary"
+                size="sm"
                 onClick={handleFetchDbs}
                 disabled={fetchingDbs}
                 title="Fetch databases from server"
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-surface-700 hover:bg-surface-600 text-slate-300 disabled:opacity-50"
               >
-                <RefreshIcon refreshing={fetchingDbs} size={11} />
+                <RefreshIcon refreshing={fetchingDbs} size={12} />
                 Fetch
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -344,16 +347,16 @@ export default function SessionForm({ open, onClose, session }: Props) {
 
           {availableDbs.length > 0 && (
             <>
-              <div className="max-h-40 overflow-y-auto rounded border border-surface-700 bg-surface-950 divide-y divide-surface-800">
+              <div className="max-h-40 overflow-y-auto rounded-md border border-surface-700 bg-surface-800 divide-y divide-surface-700">
                 {availableDbs.map(db => (
-                  <label key={db} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-surface-800">
+                  <label key={db} className="flex cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors hover:bg-surface-700">
                     <input
                       type="checkbox"
                       checked={selectedDbs.includes(db)}
                       onChange={() => toggleDb(db)}
-                      className="rounded"
+                      className="h-3.5 w-3.5 rounded accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                     />
-                    <Database size={11} className="text-yellow-400 flex-shrink-0" />
+                    <Database size={12} className="text-amber-400 flex-shrink-0" />
                     <span className="text-xs text-slate-300">{db}</span>
                   </label>
                 ))}

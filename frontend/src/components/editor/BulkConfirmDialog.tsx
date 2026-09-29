@@ -14,7 +14,7 @@ interface BulkConfirmDialogProps {
 }
 
 function preview(statement: string): string {
-  return statement.length > 160 ? statement.slice(0, 160) + '...' : statement
+  return statement.length > 160 ? statement.slice(0, 160) + '…' : statement
 }
 
 export default function BulkConfirmDialog({ open, validation, database, statements, onConfirm, onClose }: BulkConfirmDialogProps) {
@@ -47,6 +47,7 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
       title="Review bulk write"
       footer={
         <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button
             variant={hasDestructive ? 'danger' : 'primary'}
             onClick={onConfirm}
@@ -54,12 +55,11 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
           >
             {label}
           </Button>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
         </>
       }
     >
       <div className="space-y-3 text-sm text-slate-300">
-        <div className="bg-surface-800 rounded p-3 space-y-1">
+        <div className="bg-surface-800 rounded-lg p-3 space-y-1">
           <Label as="div">Operation mix</Label>
           <div className="flex gap-4">
             {inserts > 0 && <span><span className="text-green-400 font-mono">{inserts.toLocaleString()}</span> INSERT</span>}
@@ -75,7 +75,7 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
         </div>
 
         {statements.length > 0 && (
-          <div className="bg-surface-800 rounded p-3 space-y-2">
+          <div className="bg-surface-800 rounded-lg p-3 space-y-2">
             <Label as="div">Statement preview</Label>
             <div className="space-y-1">
               {firstStatements.map((statement, i) => (
@@ -84,7 +84,7 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
                 </pre>
               ))}
               {lastStatements.length > 0 && (
-                <div className="text-xs text-muted">...</div>
+                <div className="text-xs text-muted">…</div>
               )}
               {lastStatements.map((statement, i) => {
                 const index = statements.length - lastStatements.length + i + 1
@@ -99,14 +99,14 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
         )}
 
         {hasDestructive && (
-          <div className="bg-amber-950/40 border border-amber-800/50 rounded p-3 text-xs text-amber-300 space-y-2">
+          <div className="bg-amber-950/40 border border-amber-800/50 rounded-lg p-3 text-xs text-amber-300 space-y-2">
             <div className="font-medium">This will modify or delete data.</div>
             <label className="flex items-start gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={acknowledged}
                 onChange={e => setAcknowledged(e.target.checked)}
-                className="mt-0.5 accent-amber-500"
+                className="mt-0.5 accent-amber-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
               />
               <span>I understand this runs in one transaction and rolls back on first failure.</span>
             </label>
@@ -114,7 +114,7 @@ export default function BulkConfirmDialog({ open, validation, database, statemen
         )}
 
         {!hasDestructive && (
-          <div className="bg-surface-800 rounded p-3 text-xs text-slate-400">
+          <div className="bg-surface-800 rounded-lg p-3 text-xs text-slate-400">
             INSERT-only script. Runs in one transaction and rolls back on first failure.
           </div>
         )}

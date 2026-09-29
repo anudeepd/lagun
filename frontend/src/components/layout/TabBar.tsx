@@ -210,7 +210,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
                 onClick={() => setActiveTab(tab.id)}
                 onKeyDown={event => handleTabKeyDown(event, index)}
                 title={getTabTitle(tab)}
-                className="flex items-center gap-1.5"
+                className="flex items-center gap-1.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
               >
                 {tab.type === 'query'
                   ? <Terminal size={12} className="flex-shrink-0" />
@@ -239,7 +239,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
                 aria-label={getCloseTitle(tab)}
                 className="lagun-hit-target ml-0.5 rounded opacity-0 transition-opacity hover:text-red-400 focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 group-hover:opacity-100"
               >
-                <X size={10} />
+                <X size={12} />
               </button>
               </Tooltip>
             </m.div>
@@ -251,9 +251,10 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
       <div className="flex h-[40px] items-center">
         {activeSessionId && (
           <button
+            type="button"
             onClick={() => openQueryTab(activeSessionId)}
             title="New query tab"
-            className="flex h-full items-center gap-1 px-3 text-xs text-muted hover:text-slate-200 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
+            className="flex h-full items-center gap-1 border-l border-surface-800 px-3 text-xs text-muted transition-colors whitespace-nowrap hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
           >
             <Plus size={12} />
             <span className="hidden sm:inline">New Query</span>
@@ -261,9 +262,10 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
         )}
         {tabs.length > 0 && (
           <button
+            type="button"
             onClick={requestCloseAll}
             title="Close all tabs"
-            className="flex h-full items-center gap-1 px-3 text-xs text-muted hover:text-red-400 hover:bg-surface-800 transition-colors whitespace-nowrap border-l border-surface-800"
+            className="flex h-full items-center gap-1 border-l border-surface-800 px-3 text-xs text-muted transition-colors whitespace-nowrap hover:bg-surface-800 hover:text-red-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
           >
             <PanelLeftClose size={12} />
             <span className="hidden sm:inline">Close All</span>
@@ -275,7 +277,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
             onClick={() => onOpenAdmin?.()}
             title="Admin console"
             aria-label="Admin console"
-            className="flex h-full items-center gap-1 px-3 text-xs text-muted hover:bg-surface-800 hover:text-brand-300 transition-colors whitespace-nowrap border-l border-surface-800"
+            className="flex h-full items-center gap-1 border-l border-surface-800 px-3 text-xs text-muted transition-colors whitespace-nowrap hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
           >
             <Shield size={12} />
             <span className="hidden sm:inline">Admin</span>
@@ -293,12 +295,12 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
           className="fixed z-popover min-w-36"
           style={{ left: menuPosition.left, top: menuPosition.top }}
         >
-          <div ref={contextMenuRef} role="menu" aria-label="Tab actions" className="rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-xl">
+          <div ref={contextMenuRef} role="menu" aria-label="Tab actions" className="rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-lg">
           {currentTab.type === 'query' && (
             <>
               <button
                 role="menuitem"
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-slate-300 hover:bg-surface-700 transition-colors"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-slate-200 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
                 onClick={() => openRenameDialog(currentTab)}
               >
                 <Pencil size={12} />
@@ -309,7 +311,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
           )}
           <button
             role="menuitem"
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-400 hover:bg-surface-700 transition-colors"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-red-400 transition-colors hover:bg-surface-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400"
             onClick={() => requestCloseTab(currentTab.id)}
           >
             <X size={12} />
@@ -346,7 +348,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
             onChange={event => setRenameValue(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') saveRename() }}
             autoFocus
-            className="rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm font-normal normal-case text-slate-100 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400"
+            className="rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm font-normal normal-case text-slate-100 focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400"
           />
         </Label>
       </Modal>
