@@ -5,6 +5,54 @@ All notable changes to Lagun are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.99] - 2026-10-01
+
+### Fixed
+
+- **Sidebar filter box grew taller as soon as text was typed.** The clear (×) button carries
+  the 24px touch-target minimum, which is taller than the 16px input line, so its appearance
+  stretched the box from 26px to 34px. It now cancels its vertical margin and the box keeps
+  its height.
+- **Stray text highlights on app chrome.** Buttons, table headers and the sidebar, tab bar,
+  table toolbar, result status bar and admin header/navigation are now `user-select: none`, so
+  a press-drag that starts in a gap, or a double-click on a label such as `db.table` or
+  `Limit`, no longer paints the neighbouring controls. Text fields and content (dialogs,
+  errors, query log SQL, admin tables, the SQL editor) stay selectable.
+- **Uneven active-cell ring in the data grid at fractional display scaling (125% / 150%).**
+  AG Grid draws the ring as a 1px border; Firefox snaps each border edge to whole device
+  pixels separately, so it came out 1px on some sides and 2px on others, differently per cell.
+  The ring is now a 2px inset shadow (snapped as one shape), and stays within half a device
+  pixel of uniform in Firefox and Chrome. The find-match ring is drawn inside the cell too:
+  as an outline the row clipped its top and bottom edges.
+- **The hidden Schema/Data view stayed in the keyboard tab order.** Both view panels stay
+  mounted so switching views cross-fades, and the inactive one is `aria-hidden` with
+  `pointer-events: none` — but its `inert` flag was set from a ref callback, which motion
+  only invokes once at mount, so the panel switched away from kept `inert = false` and its
+  buttons (Truncate, Export Schema, Manage PK, Refresh Stats) stayed tabbable while invisible.
+  `inert` is now synced from an effect keyed on the active view, with a regression test that
+  fails on the old code.
+- **Form labels were selectable.** `label` joins the `user-select: none` control set, so
+  double-clicking "Connection Name", "Host", "Format" or "Batch Size" no longer paints the
+  caption. Labels that wrap a text field keep the field selectable.
+- **Scrollbars looked different in Firefox, and were unchanged in Waterfox.** The 6px dark
+  scrollbar was asked for only with `::-webkit-scrollbar`, which Firefox does not implement,
+  so it drew its own wider one. The same look is now also requested with `scrollbar-width:
+  thin` and `scrollbar-color` — but not from a CSS engine test. `@supports not
+  selector(::-webkit-scrollbar)` looked correct and silently failed on Waterfox 6.7.4
+  (rv:153.0), which answers `selector(::-webkit-scrollbar)` with **true** while rendering
+  nothing from those rules: the guard skipped it, `scrollbar-width` stayed `auto` and every
+  scroll region kept the default 14px bar. Handing the standard properties to Chromium
+  instead is equally wrong, because Blink prefers them over the custom rules and widens its
+  bar from 6px to 17px (measured). So `utils/scrollbarFallback.ts` asks the engine to prove
+  it before the first paint: it styles a throwaway scroll container with
+  `::-webkit-scrollbar { width: 4px }` and applies the standard properties only when the
+  gutter does not become 4px; that marks the document `html[data-scrollbars='standard']`, and
+  the fallback itself lives in `index.css` next to the custom rules. Measured after the
+  change: Chromium stays at its 6px custom bar (`scrollbar-width: auto`, probe discarded),
+  Waterfox and Firefox get `scrollbar-width: thin` with `#334155` on `#0f172a`. The probe
+  removes its own element and stylesheet. Neither engine can reproduce the `:hover` thumb
+  colour.
+
 ## [0.1.98] - 2026-09-29
 
 ### Fixed

@@ -171,7 +171,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
   }
 
   return (
-    <div className="flex h-[46px] items-center bg-surface-900 border-b border-surface-800">
+    <div className="flex h-[46px] select-none items-center bg-surface-900 border-b border-surface-800">
       <div className="flex-1 h-full overflow-hidden">
         <div ref={tabListRef} role="tablist" aria-label="Open tabs" className="flex h-full items-center flex-nowrap overflow-x-auto overflow-y-hidden space-x-1">
           <AnimatePresence initial={false} mode="sync">
@@ -193,7 +193,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
               title={getTabTitle(tab)}
               className={clsx(
-                'group flex h-[40px] select-none items-center gap-1.5 px-3 py-2 text-xs border-r border-surface-800 whitespace-nowrap transition-colors flex-shrink-0 cursor-move',
+                'group flex h-[40px] items-center gap-1.5 px-3 py-2 text-xs border-r border-surface-800 whitespace-nowrap transition-colors flex-shrink-0 cursor-move',
                 activeTabId === tab.id
                   ? 'bg-surface-950 text-slate-100 border-t-2 border-t-brand-500'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-surface-800',

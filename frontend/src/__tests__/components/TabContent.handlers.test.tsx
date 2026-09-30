@@ -193,3 +193,30 @@ describe('TabContent data tab — row mutation wiring', () => {
     )
   })
 })
+
+describe('TabContent view panels — the hidden view leaves the tab order', () => {
+  beforeEach(() => {
+    resetDataRequests()
+    resetMockTableRows()
+    useSchemaStore.setState({ databases: {}, tables: {}, columns: {}, dbErrors: {} })
+  })
+
+  it('marks the schema panel inert once the data view is selected', async () => {
+    render(
+      <TabContent
+        tab={{ ...dataTab, id: 'tab-view-switch', dataState: { view: 'schema' } }}
+        active
+      />,
+    )
+
+    const schemaPanel = document.querySelector('.lagun-view-panel') as HTMLElement
+    expect(schemaPanel).not.toBeNull()
+    expect(schemaPanel.inert).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Data' }))
+
+    // The panel stays mounted for the cross-fade, so it must be taken out of the
+    // tab order explicitly or its buttons stay focusable while invisible.
+    await waitFor(() => expect(schemaPanel.inert).toBe(true))
+  })
+})

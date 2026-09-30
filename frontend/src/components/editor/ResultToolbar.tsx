@@ -21,7 +21,7 @@ export default function ResultToolbar({ result, running }: Props) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1, transition: surfaceTransition }}
           exit={{ opacity: 0, transition: exitTransition }}
-          className="flex min-h-7 items-center gap-4 bg-surface-900 px-3 py-1.5 text-xs"
+          className="flex min-h-7 select-none items-center gap-4 bg-surface-900 px-3 py-1.5 text-xs"
         >
           {running ? (
             <span className="text-muted">Executing…</span>

@@ -30,7 +30,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-full bg-surface-900 flex flex-col overflow-hidden">
+    <aside className="w-full bg-surface-900 flex flex-col overflow-hidden select-none">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-surface-800">
         <Logo size="sm" showText={true} />

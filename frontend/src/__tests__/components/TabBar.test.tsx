@@ -23,7 +23,6 @@ describe('TabBar', () => {
     render(<TabBar />)
 
     const tab = screen.getByRole('tab', { name: /query/i })
-    expect(tab.parentElement).toHaveClass('select-none')
     expect(fireEvent.mouseDown(tab, { button: 2 })).toBe(false)
     fireEvent.contextMenu(tab)
     expect(screen.getByRole('menu', { name: 'Tab actions' }).querySelector('.border-t')).toBeInTheDocument()

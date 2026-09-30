@@ -309,7 +309,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       transition={surfaceTransition}
       className="flex h-dvh min-h-0 flex-col overflow-hidden bg-surface-950 text-slate-200"
     >
-      <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-surface-800 bg-surface-900 px-4 sm:px-5">
+      <header className="flex min-h-14 shrink-0 select-none items-center gap-3 border-b border-surface-800 bg-surface-900 px-4 sm:px-5">
         {onClose && (
           <button type="button" onClick={onClose} className="lagun-interactive lagun-icon-button rounded-md p-1.5 text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" aria-label="Back to workspace">
             <ArrowLeft className="h-4 w-4" />
@@ -330,7 +330,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <nav className="hidden w-56 shrink-0 border-r border-surface-800 bg-surface-900 p-3 sm:block" aria-label="Admin views">
+        <nav className="hidden w-56 shrink-0 select-none border-r border-surface-800 bg-surface-900 p-3 sm:block" aria-label="Admin views">
           <p className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-widest text-muted">Control plane</p>
           {views.map(([key, Icon, label]) => (
             <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => selectView(key)} className={`lagun-interactive mb-1 flex min-h-10 w-full items-center gap-2 rounded-md px-2.5 py-2 text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${view === key ? 'bg-brand-500/10 text-brand-300' : 'text-muted hover:bg-surface-800 hover:text-slate-300'}`}>

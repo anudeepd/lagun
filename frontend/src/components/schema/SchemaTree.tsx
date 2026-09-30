@@ -327,7 +327,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             <button
               onClick={() => setQuery('')}
               aria-label="Clear search"
-              className="lagun-hit-target rounded text-muted hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+              className="lagun-hit-target -my-1 rounded text-muted hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
             >
               <X size={12} aria-hidden="true" />
             </button>

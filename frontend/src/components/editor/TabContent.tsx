@@ -1108,6 +1108,16 @@ function TableTab({ tab, active = true }: Props) {
   const colPickerRef = useRef<HTMLDivElement>(null)
   const schemaPanelRef = useRef<HTMLDivElement | null>(null)
   const dataPanelRef = useRef<HTMLDivElement | null>(null)
+  // Both view panels stay mounted so switching views cross-fades instead of
+  // remounting the grid, so the hidden one has to be taken out of the tab order
+  // here. The ref callbacks cannot do it: motion keeps its own ref identity, so
+  // React attaches ours once at mount and the panel we switch away from kept
+  // `inert = false` — its buttons stayed tabbable under `aria-hidden="true"`
+  // (reproduced in Firefox, Chromium and jsdom).
+  useEffect(() => {
+    if (schemaPanelRef.current) schemaPanelRef.current.inert = view !== 'schema'
+    if (dataPanelRef.current) dataPanelRef.current.inert = view !== 'data'
+  }, [view, schemaVisited, dataVisited])
   const addEntry = useQueryLogStore(s => s.addEntry)
   const setTableDataState = useTabStore(s => s.setTableDataState)
   const setTabDirty = useTabStore(s => s.setTabDirty)
@@ -1796,7 +1806,7 @@ function TableTab({ tab, active = true }: Props) {
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Toolbar */}
-      <div className="flex items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
+      <div className="flex select-none items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
         <span className="text-xs text-muted min-w-0 truncate max-w-full" title={`${tab.database}.${tab.table}`}>{tab.database}.{tab.table}</span>
         <div className="flex-1 min-w-4" />
         {/* Global search input — shown in data view */}
@@ -2167,10 +2177,7 @@ function TableTab({ tab, active = true }: Props) {
             aria-hidden={view !== 'schema' || undefined}
             onAnimationStart={() => markPanelAnimating(schemaPanelRef.current, true)}
             onAnimationComplete={() => markPanelAnimating(schemaPanelRef.current, false)}
-            ref={node => {
-              schemaPanelRef.current = node
-              if (node) (node as HTMLDivElement & { inert: boolean }).inert = view !== 'schema'
-            }}
+            ref={node => { schemaPanelRef.current = node }}
           >
             <Suspense fallback={<LoadingState label={`Preparing schema for ${tab.table}…`} />}>
               <TableSchemaView
@@ -2193,10 +2200,7 @@ function TableTab({ tab, active = true }: Props) {
             aria-hidden={view !== 'data' || undefined}
             onAnimationStart={() => markPanelAnimating(dataPanelRef.current, true)}
             onAnimationComplete={() => markPanelAnimating(dataPanelRef.current, false)}
-            ref={node => {
-              dataPanelRef.current = node
-              if (node) (node as HTMLDivElement & { inert: boolean }).inert = view !== 'data'
-            }}
+            ref={node => { dataPanelRef.current = node }}
           >
           {
           initialLoading ? (
