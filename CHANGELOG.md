@@ -5,6 +5,39 @@ All notable changes to Lagun are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.100] - 2026-10-01
+
+### Fixed
+
+- **Double-clicking the table name in a table tab selected nothing.** The 0.1.99 chrome pass put
+  `user-select: none` on the whole table toolbar, which took the `db.table` caption with it — the
+  one piece of text on that row that is content rather than chrome. The caption is `select-text`
+  again, while the rest of the toolbar stays unselectable, so a double-click beside it still
+  paints nothing.
+- **The WHERE filter bar read as a perforated box while focused.** CodeMirror's base theme rings a
+  focused editor with `1px dotted #212121`; 0.1.98 gave the filter's container a brand-coloured
+  border on focus, and the dark dots landed exactly on that 1px edge inside the new 2px ring. The
+  filter editor now draws no outline of its own (`Prec.highest` theme), so the container's ring is
+  the focus indicator, as it is for the rest of the app.
+- **The active-cell ring stayed lit after the grid lost focus.** The ring is a `!important` inset
+  shadow, and unlike AG Grid's own border, which is keyed on `:focus-within`, it had no focus
+  condition: a cell clicked once kept ringing after the user clicked outside the grid. It now
+  carries the same conditions, and a second selector keeps it while the cell context menu is open,
+  whose items act on the right-clicked cell after DOM focus has moved to the menu.
+- **The grid's wrapper frame doubled the panel's separators and clipped its corners.** Quartz draws
+  a bordered, 8px-rounded frame around the grid (`wrapperBorder`, `wrapperBorderRadius`), which
+  added a second line against the toolbar and status bar separators and cut the header's top
+  corners and the last row's bottom corners into visible hooks. Both are off now.
+- **A tab that was clicked lit its focus ring the moment Shift was pressed.** Chromium focuses the
+  pressed button and then treats any key press as keyboard interaction, so holding Shift — the
+  standard gesture for scrolling the grid horizontally — rang a tab the user had only clicked. The
+  ring is suppressed while focus is pointer-originated (Shift, Ctrl, Alt and Meta do not clear it;
+  every other key does), and keyboard focus still rings the tab.
+- **Admin console tables aligned every cell to the top and set their numbers in the proportional
+  font.** Cells no longer force `align-top` (they follow the row's own alignment), the tables use
+  the data font with `tabular-nums` so digit columns line up, and their headers carry `font-medium`
+  instead of the browser's bold.
+
 ## [0.1.99] - 2026-10-01
 
 ### Fixed

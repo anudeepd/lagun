@@ -457,30 +457,30 @@ function UsersPanel({
       </form>
 
       <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
-        <table className="w-full table-fixed text-left text-xs">
+        <table className="w-full table-fixed text-left text-xs font-data tabular-nums">
           <caption className="sr-only">LDAP access policy and live workspace activity</caption>
           <colgroup><col className="w-[32%]" /><col className="w-[18%]" /><col className="w-[16%]" /><col className="w-[14%]" /><col className="w-[20%]" /></colgroup>
           <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted">
             <tr>
-              <th scope="col" className="px-3 py-2">User</th>
-              <th scope="col" className="px-3 py-2">Policy</th>
-              <th scope="col" className="px-3 py-2">Active clients</th>
-              <th scope="col" className="px-3 py-2">Open tabs</th>
-              <th scope="col" className="px-3 py-2 text-right">Action</th>
+              <th scope="col" className="px-3 py-2 font-medium">User</th>
+              <th scope="col" className="px-3 py-2 font-medium">Policy</th>
+              <th scope="col" className="px-3 py-2 font-medium">Active clients</th>
+              <th scope="col" className="px-3 py-2 font-medium">Open tabs</th>
+              <th scope="col" className="px-3 py-2 font-medium text-right">Action</th>
             </tr>
           </thead>
           <tbody>
             {users.map(user => (
               <tr key={user.username} className="border-b border-surface-800/70 last:border-0">
-                <td className="align-top break-words px-3 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
-                <td className="align-top px-3 py-3">
+                <td className="break-words px-3 py-3 font-medium text-slate-200 [overflow-wrap:anywhere]">{user.username}</td>
+                <td className="px-3 py-3">
                   <span className={`rounded-full px-2 py-0.5 text-[10px] ${user.policy_state === 'allowed' ? 'bg-green-950/40 text-green-300' : 'bg-surface-800 text-muted'}`}>
                     {user.policy_state === 'allowed' ? 'Allowed' : 'Observed only'}
                   </span>
                 </td>
-                <td className="align-top px-3 py-3 font-mono tabular-nums text-slate-400">{user.active_clients}</td>
-                <td className="align-top px-3 py-3 font-mono tabular-nums text-slate-400">{user.active_tabs}</td>
-                <td className="align-top px-3 py-3 text-right">
+                <td className="px-3 py-3 font-mono tabular-nums text-slate-400">{user.active_clients}</td>
+                <td className="px-3 py-3 font-mono tabular-nums text-slate-400">{user.active_tabs}</td>
+                <td className="px-3 py-3 text-right">
                   {user.policy_state === 'allowed' && (
                     <button type="button" disabled={Boolean(busyUsername)} onClick={() => onRequestRemove(user.username)} className={`${DANGER_OUTLINE_CLASS} min-h-8 px-2.5 py-1 text-xs`}>
                       {busyUsername === user.username ? 'Applying…' : 'Remove'}
@@ -535,10 +535,10 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
           <div><h3 className="text-sm font-semibold">Connection posture</h3><p className="mt-1 text-xs text-muted">Managed profiles are read-only here; edit connections.yaml and restart Lagun.</p></div>
           <Button type="button" size="sm" onClick={onViewConnections} className="min-h-9 shrink-0">View all</Button>
         </div>
-        <table className="w-full table-fixed text-left text-xs">
+        <table className="w-full table-fixed text-left text-xs font-data tabular-nums">
           <caption className="sr-only">Connection posture preview</caption>
           <colgroup><col className="w-[36%]" /><col className="w-[14%]" /><col className="w-[28%]" /><col className="w-[22%]" /></colgroup>
-        <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Type</th><th scope="col" className="px-3 py-2">Access</th><th scope="col" className="px-3 py-2">Scope</th></tr></thead>
+        <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-3 py-2 font-medium">Connection</th><th scope="col" className="px-3 py-2 font-medium">Type</th><th scope="col" className="px-3 py-2 font-medium">Access</th><th scope="col" className="px-3 py-2 font-medium">Scope</th></tr></thead>
           <tbody>
             {connections.slice(0, 5).map(connection => <ConnectionRow key={connection.id} connection={connection} />)}
             {connections.length === 0 && <tr><td colSpan={4} className="px-3 py-10 text-center text-xs text-muted">No saved connections.</td></tr>}
@@ -552,11 +552,11 @@ function OverviewPanel({ overview, connections, onViewConnections, onViewLive }:
 function ConnectionRow({ connection }: { connection: AdminConnection }) {
   return (
     <tr className="border-b border-surface-800/70 last:border-0">
-      <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
-      <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
+      <td className="break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port}</div></td>
+      <td className="break-words px-3 py-3 [overflow-wrap:anywhere]">{connection.managed ? <span className="text-brand-300">Managed</span> : <span className="text-slate-400">Private</span>}</td>
 
-      <td className="align-top break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
-      <td className="align-top break-words px-3 py-3 text-muted [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
+      <td className="break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</td>
+      <td className="break-words px-3 py-3 text-muted [overflow-wrap:anywhere]">{connection.selected_databases.length ? `${connection.selected_databases.length} database${connection.selected_databases.length === 1 ? '' : 's'}` : 'All databases'}</td>
     </tr>
   )
 }
@@ -748,10 +748,10 @@ function ConnectionsPanel({ connections, presence, onLoadMore, hasMore, loadingM
     <section aria-labelledby="connections-title">
       <div className="mb-5"><p className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-brand-400">Inventory</p><h2 id="connections-title" className="text-xl font-semibold tracking-tight text-slate-100">Connection inventory</h2><p className="mt-1 text-sm leading-relaxed text-muted">See saved session metadata and which users currently have tabs open. Matching hostnames are separated by connection name, database identity, and owner. The inventory loads <strong className="font-medium text-slate-300">100 connections</strong> at a time; use <strong className="font-medium text-slate-300">Load more connections</strong> to fetch the next page.</p></div>
       <div id="connection-inventory-table" className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
-        <table className="w-full table-fixed text-left text-xs">
+        <table className="w-full table-fixed text-left text-xs font-data tabular-nums">
           <caption className="sr-only">Saved connection inventory and active users</caption>
           <colgroup><col className="w-[25%]" /><col className="w-[17%]" /><col className="w-[12%]" /><col className="w-[15%]" /><col className="w-[16%]" /><col className="w-[15%]" /></colgroup>
-          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-3 py-2">Connection</th><th scope="col" className="px-3 py-2">Owner / access</th><th scope="col" className="px-3 py-2">Database identity</th><th scope="col" className="px-3 py-2">Scope</th><th scope="col" className="px-3 py-2">Connected users / tabs</th><th scope="col" className="px-3 py-2">Updated</th></tr></thead>
+          <thead className="sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted"><tr><th scope="col" className="px-3 py-2 font-medium">Connection</th><th scope="col" className="px-3 py-2 font-medium">Owner / access</th><th scope="col" className="px-3 py-2 font-medium">Database identity</th><th scope="col" className="px-3 py-2 font-medium">Scope</th><th scope="col" className="px-3 py-2 font-medium">Connected users / tabs</th><th scope="col" className="px-3 py-2 font-medium">Updated</th></tr></thead>
           <tbody>
             {connections.map(connection => {
               const activeUsers = new Map<string, string[]>()
@@ -761,11 +761,11 @@ function ConnectionsPanel({ connections, presence, onLoadMore, hasMore, loadingM
               })
               return (
                 <m.tr key={connection.id} initial={{ opacity: 0 }} animate={{ opacity: 1, transition: surfaceTransition }} className="border-b border-surface-800/70 last:border-0">
-                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-2 py-0.5 text-[10px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
-                  <td className="align-top break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-muted [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
-                  <td className="align-top break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
-                  <td className="align-top break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
-                  <td className="align-top px-3 py-3">
+                  <td className="break-words px-3 py-3 [overflow-wrap:anywhere]"><div className="break-words font-medium text-slate-200 [overflow-wrap:anywhere]">{connection.name}{connection.is_default && <span className="ml-2 inline-block rounded-full border border-brand-800/70 px-2 py-0.5 text-[10px] text-brand-300">default</span>}</div><div className="mt-1 break-words font-mono text-[10px] text-muted [overflow-wrap:anywhere]">{connection.host}:{connection.port} {connection.ssl_enabled ? '· TLS' : ''}</div></td>
+                  <td className="break-words px-3 py-3 [overflow-wrap:anywhere]"><div className={connection.managed ? 'break-words text-brand-300 [overflow-wrap:anywhere]' : 'break-words text-slate-400 [overflow-wrap:anywhere]'}>{connection.managed ? 'Managed profile' : 'Private profile'}</div><div className="mt-1 break-words text-[11px] text-muted [overflow-wrap:anywhere]">{connection.managed ? `${connection.shared_user_count} allowed user${connection.shared_user_count === 1 ? '' : 's'}` : connection.owner_username || 'local user'}</div></td>
+                  <td className="break-words px-3 py-3 font-mono text-[11px] text-slate-400 [overflow-wrap:anywhere]">{connection.username}</td>
+                  <td className="break-words px-3 py-3 text-slate-400 [overflow-wrap:anywhere]">{connection.selected_databases.length ? connection.selected_databases.join(', ') : 'All non-system schemas'}</td>
+                  <td className="px-3 py-3">
                     {activeUsers.size ? (
                       <div className="grid min-w-0 gap-2">
                         {[...activeUsers.entries()].map(([username, labels]) => {
@@ -799,7 +799,7 @@ function ConnectionsPanel({ connections, presence, onLoadMore, hasMore, loadingM
                       </div>
                     ) : <span className="text-muted">No active users</span>}
                   </td>
-                  <td className="align-top break-words px-3 py-3 text-muted [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
+                  <td className="break-words px-3 py-3 text-muted [overflow-wrap:anywhere]">{formatDate(connection.updated_at)}</td>
                 </m.tr>
               )
             })}
@@ -865,10 +865,10 @@ function ActivityPanel({ events, filters, onApply, onLoadOlder, hasOlder, loadin
         <div className="flex gap-2"><Button type="submit" variant="primary" className="min-h-10">Search</Button><Button type="button" onClick={clear} className="min-h-10">Clear</Button></div>
       </form>
       <div className="relative max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-surface-800 bg-surface-900">
-        <table className="block w-full table-fixed text-left text-xs lg:table">
+        <table className="block w-full table-fixed text-left text-xs font-data tabular-nums lg:table">
           <caption className="sr-only">Lagun API audit events with raw request targets and bodies</caption>
           <colgroup className="hidden lg:table-column-group"><col className="w-44" /><col className="w-36" /><col /><col className="w-20" /><col className="w-24" /></colgroup>
-          <thead className="hidden sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted lg:table-header-group"><tr><th scope="col" className="px-3 py-2">When</th><th scope="col" className="px-3 py-2">Actor</th><th scope="col" className="px-3 py-2">Request</th><th scope="col" className="px-3 py-2">Status</th><th scope="col" className="px-3 py-2 text-right">Duration</th></tr></thead>
+          <thead className="hidden sticky top-0 z-10 border-b border-surface-800 bg-surface-900 text-[10px] uppercase tracking-wider text-muted lg:table-header-group"><tr><th scope="col" className="px-3 py-2 font-medium">When</th><th scope="col" className="px-3 py-2 font-medium">Actor</th><th scope="col" className="px-3 py-2 font-medium">Request</th><th scope="col" className="px-3 py-2 font-medium">Status</th><th scope="col" className="px-3 py-2 font-medium text-right">Duration</th></tr></thead>
           <tbody className="block lg:table-row-group">
             {events.map(event => <ActivityEventRow key={`${event.occurred_at}-${event.path}-${event.duration_ms}`} event={event} />)}
             {events.length === 0 && <tr className="block lg:table-row"><td colSpan={5} className="block px-3 py-10 text-center text-xs text-muted lg:table-cell">No matching audit events.</td></tr>}
@@ -889,9 +889,9 @@ function ActivityPanel({ events, filters, onApply, onLoadOlder, hasOlder, loadin
 function ActivityEventRow({ event }: { event: AdminActivityEvent }) {
   return (
     <tr className="block border-b border-surface-800/70 px-3 py-3 last:border-0 lg:table-row lg:px-0 lg:py-0">
-      <td className="flex justify-between gap-3 py-1 text-muted lg:table-cell lg:px-3 lg:py-3 lg:align-top lg:whitespace-nowrap"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">When</span><span>{formatDate(event.occurred_at)}</span></td>
-      <td className="flex min-w-0 justify-between gap-3 py-1 font-medium text-slate-200 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] font-normal uppercase tracking-wider text-muted lg:hidden">Actor</span><span className="break-words [overflow-wrap:anywhere]">{event.username}</span></td>
-      <td className="block min-w-0 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top">
+      <td className="flex justify-between gap-3 py-1 text-muted lg:table-cell lg:px-3 lg:py-3 lg:whitespace-nowrap"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">When</span><span>{formatDate(event.occurred_at)}</span></td>
+      <td className="flex min-w-0 justify-between gap-3 py-1 font-medium text-slate-200 lg:table-cell lg:px-3 lg:py-3"><span className="text-[10px] font-normal uppercase tracking-wider text-muted lg:hidden">Actor</span><span className="break-words [overflow-wrap:anywhere]">{event.username}</span></td>
+      <td className="block min-w-0 py-1 lg:table-cell lg:px-3 lg:py-3">
         <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted lg:hidden">Request</span>
         <div className="break-words font-mono text-[11px] leading-relaxed text-slate-300 [overflow-wrap:anywhere]">{event.method} {event.path}</div>
         {event.details && (
@@ -901,8 +901,8 @@ function ActivityEventRow({ event }: { event: AdminActivityEvent }) {
           </details>
         )}
       </td>
-      <td className="flex justify-between gap-3 py-1 lg:table-cell lg:px-3 lg:py-3 lg:align-top"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">Status</span><span className={`rounded-full px-2 py-0.5 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-green-950/40 text-green-300'}`}>{event.status_code}</span></td>
-      <td className="flex justify-between gap-3 py-1 font-mono text-[10px] text-muted lg:table-cell lg:px-3 lg:py-3 lg:text-right lg:align-top"><span className="font-sans uppercase tracking-wider text-muted lg:hidden">Duration</span><span>{event.duration_ms} ms</span></td>
+      <td className="flex justify-between gap-3 py-1 lg:table-cell lg:px-3 lg:py-3"><span className="text-[10px] uppercase tracking-wider text-muted lg:hidden">Status</span><span className={`rounded-full px-2 py-0.5 text-[10px] ${event.status_code >= 400 ? 'bg-red-950/50 text-red-300' : 'bg-green-950/40 text-green-300'}`}>{event.status_code}</span></td>
+      <td className="flex justify-between gap-3 py-1 font-mono text-[10px] text-muted lg:table-cell lg:px-3 lg:py-3 lg:text-right"><span className="font-data uppercase tracking-wider text-muted lg:hidden">Duration</span><span>{event.duration_ms} ms</span></td>
     </tr>
   )
 }

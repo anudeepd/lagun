@@ -406,8 +406,17 @@
      some sides and 2px on others, differently per cell; Chrome blends it into a
      soft line instead. An inset shadow is snapped as one shape, which keeps the
      thickness within half a device pixel in both engines. The border stays (but
-     transparent) so the cell keeps its box size. */
-  .lagun-result-grid .ag-cell.ag-cell-focus:not(.ag-cell-inline-editing) {
+     transparent) so the cell keeps its box size.
+
+     The `!important` shadow has to carry the same conditions as AG's border
+     rule: the ring belongs to a cell the grid is focused on. Without them a
+     cell clicked once kept ringing after the user clicked away, because
+     `.ag-cell-focus` stays on the cell (AG only hides its own border by keying
+     it on `:focus-within`). The second selector keeps the ring while the cell
+     context menu is open — its items act on the right-clicked cell, which has
+     handed DOM focus to the menu. */
+  .lagun-result-grid .ag-cell.ag-cell-focus:not(.ag-cell-inline-editing):focus-within,
+  .lagun-result-grid[data-cell-menu-open='true'] .ag-cell.ag-cell-focus:not(.ag-cell-inline-editing) {
     border-color: transparent !important;
     box-shadow: inset 0 0 0 2px var(--lagun-focus-ring) !important;
   }

@@ -42,6 +42,13 @@ const darkTheme = themeQuartz.withParams({
   cellTextColor: '#cbd5e1',
   headerFontSize: 12,
   headerFontWeight: 600,
+  // Quartz's defaults draw a bordered, 8px-rounded frame around the grid
+  // (`wrapperBorder`, `wrapperBorderRadius`). The grid always fills a panel
+  // whose toolbar and status bar already draw their own 1px separators, so the
+  // frame only added a doubling line against them and clipped the header's top
+  // corners and the last row's bottom corners into visible hooks.
+  wrapperBorder: false,
+  wrapperBorderRadius: 0,
 })
 
 const DATE_TYPES = new Set(['datetime', 'timestamp', 'date', 'time'])
@@ -918,7 +925,16 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }
 
   return (
-    <div ref={rootRef} tabIndex={-1} className="h-full lagun-result-grid" onContextMenu={handleGridContextMenu}>
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      className="h-full lagun-result-grid"
+      // Marks the grid while the cell context menu is open: its items act on
+      // the cell that was right-clicked, which no longer holds DOM focus (the
+      // menu does), and the active-cell ring keys off this to stay visible.
+      data-cell-menu-open={menu ? 'true' : undefined}
+      onContextMenu={handleGridContextMenu}
+    >
       <AgGridReact
         theme={darkTheme}
         columnDefs={columnDefs}

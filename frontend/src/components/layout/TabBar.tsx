@@ -22,6 +22,12 @@ interface ContextMenuState {
   y: number
 }
 
+// Keys that only modify another interaction — Shift for horizontal scrolling,
+// Ctrl for zoom. Chromium reveals a focused element's :focus-visible ring as
+// soon as any key is pressed, so these must not count as "the user is on the
+// keyboard". Every other key does.
+const MODIFIER_KEY_NAMES: Record<string, true> = { Shift: true, Control: true, Alt: true, Meta: true }
+
 export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {}) {
   const tabs = useTabStore(s => s.tabs)
   const activeTabId = useTabStore(s => s.activeTabId)
@@ -43,6 +49,14 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const tabListRef = useRef<HTMLDivElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
+  // Tab whose focus came from a mouse press, and the tab id a pending press is
+  // for. Chromium focuses the pressed button and then treats the next key press
+  // as keyboard interaction, so a mouse-clicked tab lit its :focus-visible ring
+  // the moment the user held Shift — the standard gesture for scrolling the
+  // grid horizontally. The ring is suppressed while focus is pointer-originated
+  // (see the tab button's handlers); keyboard focus still rings the tab.
+  const [pointerFocusedTabId, setPointerFocusedTabId] = useState<string | null>(null)
+  const pointerPressRef = useRef<string | null>(null)
   const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
   useLayoutEffect(() => {
     if (!contextMenu || !contextMenuRef.current) return
@@ -208,9 +222,26 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
                 aria-controls={`tab-panel-${tab.id}`}
                 tabIndex={activeTabId === tab.id ? 0 : -1}
                 onClick={() => setActiveTab(tab.id)}
-                onKeyDown={event => handleTabKeyDown(event, index)}
+                onKeyDown={event => {
+                  if (!MODIFIER_KEY_NAMES[event.key]) setPointerFocusedTabId(null)
+                  handleTabKeyDown(event, index)
+                }}
+                onMouseDown={event => {
+                  if (event.button === 0) pointerPressRef.current = tab.id
+                }}
+                onFocus={() => {
+                  setPointerFocusedTabId(pointerPressRef.current === tab.id ? tab.id : null)
+                  pointerPressRef.current = null
+                }}
+                onBlur={() => {
+                  if (pointerPressRef.current === tab.id) pointerPressRef.current = null
+                  setPointerFocusedTabId(null)
+                }}
                 title={getTabTitle(tab)}
-                className="flex items-center gap-1.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+                className={clsx(
+                  'flex items-center gap-1.5 rounded focus:outline-none',
+                  pointerFocusedTabId !== tab.id && 'focus-visible:ring-2 focus-visible:ring-brand-400',
+                )}
               >
                 {tab.type === 'query'
                   ? <Terminal size={12} className="flex-shrink-0" />

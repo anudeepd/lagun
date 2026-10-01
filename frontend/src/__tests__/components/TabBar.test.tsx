@@ -29,6 +29,33 @@ describe('TabBar', () => {
     expect(screen.queryByRole('dialog', { name: 'Rename Tab' })).not.toBeInTheDocument()
   })
 
+  it('does not show the focus ring on a tab that holds mouse focus, but does for keyboard focus', () => {
+    useTabStore.setState({
+      tabs: [{ id: 'tab-1', type: 'query', label: 'Query', sessionId: 'session-1' }],
+      activeTabId: 'tab-1',
+    })
+
+    render(<TabBar />)
+    const tab = screen.getByRole('tab', { name: /query/i })
+
+    // Chromium focuses the pressed button; Shift is then held to scroll the
+    // grid horizontally and made the tab's ring appear.
+    fireEvent.mouseDown(tab, { button: 0 })
+    act(() => tab.focus())
+    expect(tab.className).not.toContain('focus-visible:ring-2')
+    fireEvent.keyDown(tab, { key: 'Shift' })
+    expect(tab.className).not.toContain('focus-visible:ring-2')
+
+    // Any real keyboard use (here: tab-list navigation) restores the ring.
+    fireEvent.keyDown(tab, { key: 'ArrowRight' })
+    expect(tab.className).toContain('focus-visible:ring-2')
+
+    // Focusing by keyboard later shows the ring from the start.
+    act(() => tab.blur())
+    act(() => tab.focus())
+    expect(tab.className).toContain('focus-visible:ring-2')
+  })
+
   it('scrolls a clipped active tab, including its close button, fully into view', () => {
     const frame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
       callback(0)

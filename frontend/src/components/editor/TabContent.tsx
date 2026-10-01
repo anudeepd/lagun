@@ -1765,6 +1765,14 @@ function TableTab({ tab, active = true }: Props) {
   }, [functions])
 
   const filterWrapExtension = useMemo(() => EditorView.lineWrapping, [])
+  // CodeMirror's base theme rings a focused editor with `1px dotted #212121`
+  // (`@codemirror/view` baseTheme). The filter's container already draws the
+  // focus state — 2px brand ring plus a brand border on :focus-within — and the
+  // dark dots sit exactly on that blue border, which reads as a perforated edge.
+  // Prec.highest so the rule cannot lose to the base theme on extension order.
+  const filterFocusOutlineExtension = useMemo(() => Prec.highest(EditorView.theme({
+    '&.cm-focused': { outline: 'none' },
+  })), [])
   const filterVerticalCenterExtension = useMemo(() => EditorView.theme({
     '&': { minHeight: '32px' },
     '.cm-scroller': { lineHeight: '20px' },
@@ -1788,14 +1796,15 @@ function TableTab({ tab, active = true }: Props) {
   [])
   const filterExtensions = useMemo(
     () => filterWordWrap
-      ? [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterWrapExtension, filterVerticalCenterExtension, filterKeymapExtension, filterEscapeExtension, filterTooltipExtensions]
-      : [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterVerticalCenterExtension, filterKeymapExtension, filterEscapeExtension, filterTooltipExtensions],
+      ? [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterWrapExtension, filterFocusOutlineExtension, filterVerticalCenterExtension, filterKeymapExtension, filterEscapeExtension, filterTooltipExtensions]
+      : [filterSqlExtension, filterColumnCompletionExtension, filterFunctionCompletionExtension, filterFocusOutlineExtension, filterVerticalCenterExtension, filterKeymapExtension, filterEscapeExtension, filterTooltipExtensions],
     [
       filterWordWrap,
       filterSqlExtension,
       filterColumnCompletionExtension,
       filterFunctionCompletionExtension,
       filterWrapExtension,
+      filterFocusOutlineExtension,
       filterVerticalCenterExtension,
       filterKeymapExtension,
       filterEscapeExtension,
@@ -1807,7 +1816,10 @@ function TableTab({ tab, active = true }: Props) {
     <div className="flex flex-col h-full min-h-0">
       {/* Toolbar */}
       <div className="flex select-none items-center flex-wrap gap-2 px-3 py-1.5 bg-surface-900 border-b border-surface-800">
-        <span className="text-xs text-muted min-w-0 truncate max-w-full" title={`${tab.database}.${tab.table}`}>{tab.database}.{tab.table}</span>
+        {/* The toolbar is chrome and stays unselectable, but this caption is the
+            table's identity: double-clicking it must still select the name so it
+            can be copied. */}
+        <span className="text-xs text-muted min-w-0 truncate max-w-full select-text" title={`${tab.database}.${tab.table}`}>{tab.database}.{tab.table}</span>
         <div className="flex-1 min-w-4" />
         {/* Global search input — shown in data view */}
         {view === 'data' && (
