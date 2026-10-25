@@ -541,7 +541,7 @@ wheels = [
 
 [[package]]
 name = "lagun"
-version = "0.1.101"
+version = "0.1.102"
 source = { editable = "." }
 dependencies = [
     { name = "aiomysql" },
