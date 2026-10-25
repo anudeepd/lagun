@@ -8,6 +8,7 @@ import { test, expect } from '../fixtures'
 
 async function editCellAndApply(
   page,
+  sessionId: string,
   rowIndex: number,
   newValue: string
 ) {
@@ -29,9 +30,21 @@ async function editCellAndApply(
 
   const reviewDialog = page.getByRole('dialog', { name: 'Review Staged Changes' })
   await expect(reviewDialog).toBeVisible({ timeout: 5000 })
+  const rowUpdate = page.waitForResponse(response =>
+    response.request().method() === 'POST' &&
+    response.url().includes(`/api/v1/sessions/${sessionId}/row-update`)
+  )
   await reviewDialog.getByRole('button', { name: 'Apply Changes' }).click({ force: true })
+  expect((await rowUpdate).ok()).toBe(true)
+  await expect(reviewDialog).toBeHidden()
+  await expect(applyButton).toBeHidden()
 
-  await expect(page.locator('.ag-cell', { hasText: newValue })).toBeVisible({ timeout: 10_000 })
+  const saved = await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
+    data: { sql: 'SELECT price FROM e2e_test.products WHERE id = 1' },
+  })
+  expect(saved.ok()).toBe(true)
+  expect((await saved.json()).rows).toEqual([[newValue]])
+  await expect(cell).toHaveText(newValue)
 }
 
 test('ten sequential edit-Apply cycles followed by an 11th that also works', async ({ page, sessionId }) => {
@@ -45,8 +58,8 @@ test('ten sequential edit-Apply cycles followed by an 11th that also works', asy
   await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
 
   for (let i = 0; i < 10; i++) {
-    await editCellAndApply(page, 0, (10.0 + i * 0.01).toFixed(2))
+    await editCellAndApply(page, sessionId, 0, (10.0 + i * 0.01).toFixed(2))
   }
 
-  await editCellAndApply(page, 0, '99.99')
+  await editCellAndApply(page, sessionId, 0, '99.99')
 })
