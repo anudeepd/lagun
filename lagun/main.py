@@ -410,7 +410,9 @@ async def add_app_security_headers(request: Request, call_next):
     if not request.url.path.startswith("/_auth/"):
         response.headers.setdefault("Content-Security-Policy", APP_CSP)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        # LDAPGate rejects logout POSTs without a Referer; same-origin keeps
+        # same-app forms working while still suppressing cross-origin refs.
+        response.headers.setdefault("Referrer-Policy", "same-origin")
         response.headers.setdefault("X-Frame-Options", "DENY")
     if request.url.path.startswith("/assets/"):
         response.headers.setdefault("Cache-Control", HASHED_ASSET_CACHE_CONTROL)

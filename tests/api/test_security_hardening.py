@@ -137,7 +137,7 @@ async def test_security_headers_are_present_and_complete(client):
     ):
         assert directive in csp, directive
     assert r.headers["x-content-type-options"] == "nosniff"
-    assert r.headers["referrer-policy"] == "no-referrer"
+    assert r.headers["referrer-policy"] == "same-origin"
     assert r.headers["x-frame-options"] == "DENY"
 
 

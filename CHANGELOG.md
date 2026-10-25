@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **LDAP logout returned 403.** Lagun's `no-referrer` policy omitted the `Referer`
+  header required by LDAPGate's same-origin logout POST. The app now uses
+  `same-origin`, which still suppresses cross-origin referrers.
+
 - **Notifications stay out of the top chrome.** Toasts now stack at the top-right
   with an 80px top inset, and settle without a leftover vertical animation offset. Schema
   actions report through the toast only, rather than repeating the message in an
