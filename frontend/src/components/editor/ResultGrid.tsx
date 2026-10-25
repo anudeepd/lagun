@@ -3,7 +3,7 @@ import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImper
 import { AgGridReact } from 'ag-grid-react'
 import { themeQuartz } from 'ag-grid-community'
 import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine, Plus } from 'lucide-react'
-import type { CellClassParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
+import type { CellClassParams, ICellRendererParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import { AnimatePresence } from 'motion/react'
@@ -29,6 +29,7 @@ import { clipboardWrite } from '../../utils/clipboard'
 import { buildResultGridRowId } from '../../utils/rowIdentity'
 
 const darkTheme = themeQuartz.withParams({
+  browserColorScheme: 'dark',
   backgroundColor: '#0f172a',
   foregroundColor: '#cbd5e1',
   headerBackgroundColor: '#1e293b',
@@ -82,7 +83,8 @@ export function focusTextareaAtEnd(textarea: HTMLTextAreaElement | null): void {
 
 export function placeInlineEditorCaretAtEnd(root: ParentNode | null): void {
   const input = root?.querySelector<HTMLInputElement>('.ag-cell-inline-editing input')
-  if (!input) return
+  // Native date, time and number editors do not support text selection.
+  if (!input || input.selectionStart === null) return
   const end = input.value.length
   input.setSelectionRange(end, end)
 }
@@ -365,6 +367,24 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         filter: true,
         hide: hiddenColumns?.has(col) ?? false,
         valueFormatter: ({ value }: { value: unknown }) => formatResultGridCellValue(value),
+        cellRenderer: (params: ICellRendererParams) => {
+          const text = formatResultGridCellValue(params.value)
+          const query = findQueryLowerRef.current
+          if (!query) return text
+          const lower = text.toLowerCase()
+          let start = 0
+          let match = lower.indexOf(query)
+          if (match === -1) return text
+          const parts = []
+          while (match !== -1) {
+            parts.push(text.slice(start, match))
+            parts.push(<mark key={match} className="lagun-find-text">{text.slice(match, match + query.length)}</mark>)
+            start = match + query.length
+            match = lower.indexOf(query, start)
+          }
+          parts.push(text.slice(start))
+          return <span>{parts}</span>
+        },
         // Reserve fixed room for filter/sort/multi-sort indicators so labels do not disappear behind controls.
         minWidth: Math.ceil(Math.max(120, col.length * 7.5 + 104, Math.min(sampledCellWidth, 36) * 7.2 + 32)),
         cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
@@ -373,16 +393,15 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
             fontSize: '12px',
             ...(params.value === null ? { color: 'var(--lagun-muted-text)', fontStyle: 'italic' } : {}),
           }
-          const rowId = params.data?.__ag_rowId as string | undefined
-          if (params.data?.__lagun_insertDraft) {
-            return { ...base, backgroundColor: '#064e3b', color: '#bbf7d0' }
-          }
-          if (rowId && pendingChangesRef.current?.get(rowId)?.changes[col] !== undefined) {
-            return { ...base, backgroundColor: '#7c3a00', color: '#fed7aa' }
-          }
           return base
         },
         cellClassRules: {
+          'cell-pending': (params: CellClassParams<Record<string, unknown>>) => {
+            const rowId = params.data?.__ag_rowId as string | undefined
+            return Boolean(rowId && pendingChangesRef.current?.get(rowId)?.changes[col] !== undefined)
+          },
+          'cell-insert-draft': (params: CellClassParams<Record<string, unknown>>) =>
+            Boolean(params.data?.__lagun_insertDraft),
           'find-match': (params: CellClassParams<Record<string, unknown>>) =>
             findQueryLowerRef.current !== '' && String(params.value).toLowerCase().includes(findQueryLowerRef.current),
           'find-match-current': (params: CellClassParams<Record<string, unknown>>) => {
@@ -546,7 +565,6 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     if (!node) return
     api.ensureNodeVisible(node, 'middle')
     api.ensureColumnVisible(match.colId)
-    api.flashCells({ rowNodes: [node], columns: [match.colId], flashDuration: 600 })
   }, [findMatches])
 
   const handleNext = useCallback(() => {
@@ -928,13 +946,28 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     <div
       ref={rootRef}
       tabIndex={-1}
-      className="h-full lagun-result-grid"
+      className="h-full min-h-0 flex flex-col lagun-result-grid"
       // Marks the grid while the cell context menu is open: its items act on
       // the cell that was right-clicked, which no longer holds DOM focus (the
       // menu does), and the active-cell ring keys off this to stay visible.
       data-cell-menu-open={menu ? 'true' : undefined}
       onContextMenu={handleGridContextMenu}
     >
+      <AnimatePresence initial={false}>
+        {findOpen && (
+          <GridSearchBar
+            open={findOpen}
+            query={findQuery}
+            matchCount={findMatches.length}
+            currentMatch={findMatches.length === 0 ? 0 : currentMatchIndex + 1}
+            onQueryChange={setFindQuery}
+            onNext={handleNext}
+            onPrev={handlePrev}
+            onClose={handleClose}
+          />
+        )}
+      </AnimatePresence>
+      <div className="flex-1 min-h-0">
       <AgGridReact
         theme={darkTheme}
         columnDefs={columnDefs}
@@ -963,6 +996,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         alwaysMultiSort
         sortingOrder={['asc', 'desc', null]}
       />
+      </div>
       <AnimatePresence>
       {menu && (
         <GridContextMenu
@@ -981,20 +1015,6 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         />
       )}
       </AnimatePresence>
-      <AnimatePresence initial={false}>
-        {findOpen && (
-          <GridSearchBar
-            open={findOpen}
-            query={findQuery}
-            matchCount={findMatches.length}
-            currentMatch={findMatches.length === 0 ? 0 : currentMatchIndex + 1}
-            onQueryChange={setFindQuery}
-            onNext={handleNext}
-            onPrev={handlePrev}
-            onClose={handleClose}
-          />
-        )}
-      </AnimatePresence>
       {/*
         Kept mounted while closed: Modal owns the AnimatePresence that plays the
         exit animation, so gating the component itself (rather than its `open`
@@ -1005,6 +1025,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         onClose={() => setCellEditor(null)}
         title="Edit cell"
         width="max-w-3xl"
+        motionPreset="subtle"
         footer={(
           <>
             <Button variant="ghost" onClick={() => setCellEditor(null)}>Cancel</Button>
@@ -1015,7 +1036,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         {cellEditor && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="lagun-data-text font-data text-slate-300">{cellEditor.columnName}</span>
+              <PencilLine size={14} className="text-muted" aria-hidden="true" />
+              <span className="lagun-data-text font-data text-slate-200">{cellEditor.columnName}</span>
               {cellEditor.wasNull && (
                 <span className="px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700 text-muted">
                   NULL
@@ -1025,11 +1047,12 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
             <textarea
               ref={focusTextareaAtEnd}
               aria-label={`Edit ${cellEditor.columnName}`}
-              className="min-h-[320px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 lagun-field focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400"
+              className="min-h-[240px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 lagun-field focus:outline-none focus:ring-1 focus:ring-brand-400 focus:border-brand-400"
               value={cellEditor.value}
               onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
               spellCheck={false}
             />
+            <p className="text-xs text-muted">Changes are staged until you apply them to the database.</p>
           </div>
         )}
       </Modal>

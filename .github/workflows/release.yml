@@ -1,0 +1,329 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Create a GitHub Release and publish to PyPI after checks pass
+        type: boolean
+        required: true
+        default: false
+      bump:
+        description: Version increment to apply when publishing
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        required: true
+        default: patch
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lagun-release
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    name: Backend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install project and test dependencies
+        run: uv sync --extra dev --extra ldap
+      - name: Check lockfile
+        run: uv lock --check
+      - name: Check release version manifests
+        run: python3 scripts/release_version.py current
+      - name: Lint
+        run: uv run ruff check lagun/
+      - name: Backend tests
+        run: uv run pytest tests/ -q
+
+  frontend:
+    name: Frontend tests, build, and committed bundle freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm test
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Generate license notices
+        run: python3 scripts/generate-third-party-licenses.py
+      - name: Verify committed frontend bundle and license notices are current
+        run: |
+          git diff --exit-code -- lagun/static frontend/public/THIRD_PARTY_LICENSES.txt
+
+  e2e:
+    name: Browser end-to-end tests
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: e2e-root-password
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --user=root --password=e2e-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      E2E_MYSQL_HOST: 127.0.0.1
+      E2E_MYSQL_PORT: "3306"
+      E2E_MYSQL_USER: root
+      E2E_MYSQL_PASS: e2e-root-password
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install Lagun for the Playwright web server
+        run: uv sync --extra dev --extra ldap
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+      - name: Install Playwright dependencies
+        working-directory: e2e
+        run: npm ci
+      - name: Install Chromium and Firefox
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium firefox
+      - name: Run Playwright end-to-end suite
+        working-directory: e2e
+        run: npm test
+
+  release-version:
+    name: Calculate and validate release version
+    needs: [backend, frontend, e2e]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Validate publishing branch and choose version
+        id: version
+        env:
+          PUBLISH: ${{ inputs.publish }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [[ "$PUBLISH" == "true" && ( "$GITHUB_REF_TYPE" != "branch" || "$GITHUB_REF_NAME" != "main" ) ]]; then
+            echo "::error::Publishing must be dispatched from the main branch."
+            exit 1
+          fi
+          if [[ "$PUBLISH" == "true" ]]; then
+            version="$(python3 scripts/release_version.py next --bump "$BUMP")"
+          else
+            version="$(python3 scripts/release_version.py current)"
+          fi
+          tag="v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if [[ "$PUBLISH" == "true" ]]; then
+            set +e
+            git ls-remote --exit-code --refs origin "refs/tags/$tag" >/dev/null
+            status=$?
+            set -e
+            if [[ "$status" -eq 0 ]]; then
+              echo "::error::Release tag $tag already exists."
+              exit 1
+            elif [[ "$status" -ne 2 ]]; then
+              exit "$status"
+            fi
+          fi
+          echo "Selected Lagun $version ($tag)."
+
+  build-dist:
+    name: Build, validate, and smoke-test distributions
+    needs: [backend, frontend, e2e, release-version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Apply selected release version
+        if: ${{ inputs.publish }}
+        env:
+          RELEASE_VERSION: ${{ needs.release-version.outputs.version }}
+        run: |
+          python3 scripts/release_version.py set "$RELEASE_VERSION"
+          uv lock
+      - name: Verify release manifests and lockfile
+        run: |
+          uv lock --check
+          python3 scripts/release_version.py current
+      - name: Build wheel and source distribution
+        run: uv build
+      - name: Validate distribution names and embedded versions
+        env:
+          RELEASE_VERSION: ${{ needs.release-version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import tarfile
+          import tomllib
+          import zipfile
+          from email import message_from_bytes
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          wheels = list(Path("dist").glob("*.whl"))
+          sdists = list(Path("dist").glob("*.tar.gz"))
+          assert len(wheels) == 1, f"expected one wheel, found {wheels}"
+          assert len(sdists) == 1, f"expected one sdist, found {sdists}"
+          assert wheels[0].name.startswith(f"lagun-{version}-"), wheels[0].name
+          assert sdists[0].name == f"lagun-{version}.tar.gz", sdists[0].name
+          with zipfile.ZipFile(wheels[0]) as archive:
+              metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              metadata = message_from_bytes(archive.read(metadata_name))
+          assert metadata["Name"] == "lagun" and metadata["Version"] == version
+          with tarfile.open(sdists[0], "r:gz") as archive:
+              pyproject = next(name for name in archive.getnames() if name.endswith("/pyproject.toml"))
+              stream = archive.extractfile(pyproject)
+              assert stream is not None
+              project = tomllib.loads(stream.read().decode())["project"]
+          assert project["name"] == "lagun" and project["version"] == version
+          print(f"Validated {wheels[0].name} and {sdists[0].name}")
+          PY
+      - name: Install wheel into a clean environment and smoke-test it
+        run: |
+          uv venv --python 3.12 /tmp/lagun-smoke
+          uv pip install --python /tmp/lagun-smoke/bin/python dist/*.whl
+          /tmp/lagun-smoke/bin/lagun --help
+          /tmp/lagun-smoke/bin/python - <<'PY'
+          from importlib.resources import files
+
+          static = files("lagun").joinpath("static")
+          assert static.joinpath("index.html").is_file()
+          assert static.joinpath("THIRD_PARTY_LICENSES.txt").is_file()
+          assert static.joinpath("assets").is_dir()
+          print("Installed wheel static assets passed:", static)
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lagun-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  prepare-release:
+    name: Commit synchronized release versions to main
+    if: ${{ inputs.publish }}
+    needs: [build-dist, release-version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Synchronize version files, lock, and commit to main
+        id: commit
+        env:
+          RELEASE_VERSION: ${{ needs.release-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" != "branch" || "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "::error::Refusing to commit release versions outside main."
+            exit 1
+          fi
+          python3 scripts/release_version.py set "$RELEASE_VERSION"
+          uv lock
+          python3 scripts/release_version.py current
+          uv lock --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock frontend/package.json frontend/package-lock.json
+          git commit -m "chore(release): lagun $RELEASE_VERSION"
+          git push origin HEAD:refs/heads/main
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  github-release:
+    name: Create GitHub Release
+    if: ${{ inputs.publish }}
+    needs: [build-dist, prepare-release, release-version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: lagun-dist
+          path: dist
+      - name: Create release and attach tested distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.release-version.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.prepare-release.outputs.commit }}
+        run: >-
+          gh release create "$RELEASE_TAG" dist/*
+          --repo "$GITHUB_REPOSITORY"
+          --target "$RELEASE_COMMIT"
+          --title "Lagun $RELEASE_TAG"
+          --generate-notes
+
+  pypi-publish:
+    name: Publish to PyPI with trusted publishing
+    if: ${{ inputs.publish }}
+    needs: [build-dist, prepare-release, release-version]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/lagun/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: lagun-dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

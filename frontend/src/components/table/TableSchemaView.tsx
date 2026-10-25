@@ -56,11 +56,6 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
   const [confirmTruncate, setConfirmTruncate] = useState(false)
   const [confirmDropCol, setConfirmDropCol] = useState<string | null>(null)
   const [confirmDropIdx, setConfirmDropIdx] = useState<string | null>(null)
-  const [statusMsg, setStatusMsg] = useState<string | null>(null)
-  // The flash message clears itself; the timer must be cancelled on unmount, or
-  // it writes state into a component that no longer exists (and outlives a test
-  // environment, which vitest reports as an unhandled error).
-  const flashTimer = useRef<number | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [schemaSql, setSchemaSql] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -89,18 +84,8 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
   }
 
   const flash = useCallback((msg: string) => {
-    setStatusMsg(msg)
     showToast(msg, msg.startsWith('Error') ? 'error' : 'success')
-    if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
-    flashTimer.current = window.setTimeout(() => setStatusMsg(null), 3000)
   }, [])
-
-  useEffect(
-    () => () => {
-      if (flashTimer.current !== null) window.clearTimeout(flashTimer.current)
-    },
-    [],
-  )
 
   // `getCreateSql` used to reject out of an async click handler, which left the
   // Export Schema modal silently unopened.
@@ -366,12 +351,6 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
           </table>
         </div>
       </section>
-
-      {statusMsg && (
-        <div className="px-3 py-1.5 bg-surface-800 rounded-md text-xs font-mono text-slate-400">
-          {statusMsg}
-        </div>
-      )}
 
       <EditColumnDialog
         open={showAddCol}

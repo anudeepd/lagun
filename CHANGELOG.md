@@ -5,6 +5,40 @@ All notable changes to Lagun are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Release automation.** Manual GitHub Actions releases now validate project assets, build and smoke-test distributions, and publish to PyPI using Trusted Publishing.
+
+- **Quieter grid editing.** Inline editors use a neutral surface and a single blue focus
+  outline. Staged updates and new rows use subtle tints and underline indicators rather than
+  solid orange or green fills. Apply and Discard live in a dedicated staged-change footer,
+  keeping the table toolbar stable while editing.
+- **More precise row searching.** Find in results sits above the grid without covering column
+  headers, highlights only matching text, and outlines the current result without flashing it.
+  Navigation controls are disabled when there are no matches. Table-wide search uses a stable
+  input and a compact progress indicator instead of dimming the grid during refresh.
+- **Restrained editing and search motion.** The find strip and staged-change footer reveal
+  over 180 ms and dismiss over 100 ms; cell-state colors settle over 140 ms. The cell editor
+  and change-review dialogs use a small, non-bouncy entrance. Reduced-motion preferences
+  remove sliding and scaling while preserving feedback, focus, and keyboard navigation.
+
+### Fixed
+
+- **Notifications stay out of the top chrome.** Toasts now stack at the top-right
+  with an 80px top inset, and settle without a leftover vertical animation offset. Schema
+  actions report through the toast only, rather than repeating the message in an
+  inline status strip; table-data status feedback is unchanged.
+- **Native date and number editors no longer throw a text-selection error.** Caret positioning
+  runs only on inputs that support text selection. Native date controls also respect the dark
+  theme and share the cell's single focus outline instead of adding an inner border and halo.
+- **Modifier keys no longer reveal residual focus rings across the app.** Shared input-modality
+  tracking replaces the tab-only workaround: Shift, Ctrl, Alt and Meta do not make pointer-focused
+  sidebar rows, tabs, toolbar controls or dropdowns light up. Tab, Shift+Tab and arrow navigation
+  retain visible keyboard focus. Text-entry feedback and the grid's active-cell/context-menu
+  indicators remain intact; custom dropdowns no longer retain pointer-only focus borders.
+
 ## [0.1.100] - 2026-10-01
 
 ### Fixed

@@ -183,6 +183,14 @@
     --lagun-success: #4ade80;
     --lagun-focus-ring: #60a5fa;
     --lagun-radius: 0.375rem;
+    --lagun-grid-edit-surface: #162235;
+    --lagun-grid-pending-surface: rgb(96 165 250 / 7%);
+    --lagun-grid-draft-surface: rgb(74 222 128 / 6%);
+    --lagun-find-surface: rgb(232 203 139 / 16%);
+    --lagun-find-text: #ebd49e;
+    --lagun-find-current-surface: #e8cb8b;
+    --lagun-find-current-text: #172033;
+    --lagun-find-edge: #b69b61;
     --lagun-data-font: "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif;
     --motion-duration-micro: 180ms;
     --motion-duration-surface: 280ms;
@@ -225,6 +233,19 @@
     font-family: ui-sans-serif, system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+  /* Modifier-only gestures must not reveal focus left behind by a pointer.
+     Keep text-entry feedback and the grid's explicit active-cell shadow. */
+  html[data-focus-modality='pointer'] :focus-visible:not(:is(
+    input:not([type='checkbox']):not([type='radio']):not([type='button']):not([type='submit']):not([type='reset']),
+    textarea,
+    [contenteditable]:not([contenteditable='false']),
+    [role='textbox']
+  )) {
+    outline: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: 0.01ms !important;
@@ -432,43 +453,83 @@
     box-shadow: none !important;
   }
 
-  /* Match rings are drawn inside the cell: an outline sits outside the box and
-     the row clips it, which left the top and bottom edges half as thick as the
-     sides. */
-  .lagun-result-grid .ag-cell.find-match {
-    background: rgba(250, 204, 21, 0.25);
-    box-shadow: inset 0 0 0 1px rgb(250, 204, 21);
+  .lagun-result-grid .ag-cell {
+    transition: background-color 140ms ease-out, border-bottom-color 140ms ease-out;
+  }
+
+  .lagun-table-search,
+  .lagun-grid-find-input {
+    transition: border-color 140ms ease-out;
+  }
+
+  .lagun-result-grid .ag-cell.cell-pending {
+    background-color: var(--lagun-grid-pending-surface) !important;
+    border-bottom-color: var(--lagun-focus-ring);
+  }
+
+  .lagun-result-grid .ag-cell.cell-insert-draft {
+    background-color: var(--lagun-grid-draft-surface) !important;
+    border-bottom-color: var(--lagun-success);
+  }
+
+  /* Highlight the text, not every matching cell. The current result keeps an
+     inset outline so navigation is visible even for a one-character match. */
+  .lagun-result-grid .lagun-find-text {
+    padding: 1px 0;
     border-radius: 2px;
+    background-color: var(--lagun-find-surface);
+    color: var(--lagun-find-text);
+    transition: background-color 140ms ease-out, color 140ms ease-out;
   }
 
   .lagun-result-grid .ag-cell.find-match-current {
-    background: rgba(250, 204, 21, 0.45);
-    box-shadow: inset 0 0 0 2px rgb(250, 204, 21);
+    box-shadow: inset 0 0 0 1px var(--lagun-find-edge);
+  }
+
+  .lagun-result-grid .find-match-current .lagun-find-text {
+    background-color: var(--lagun-find-current-surface);
+    color: var(--lagun-find-current-text);
   }
 
   .lagun-result-grid .ag-cell-inline-editing {
-    background-color: #7c3a00 !important;
-    border: 0 !important;
+    background-color: var(--lagun-grid-edit-surface) !important;
+    border-color: transparent !important;
     border-radius: 0;
-    box-shadow: none !important;
-    color: #fed7aa !important;
+    box-shadow: inset 0 0 0 2px var(--lagun-focus-ring) !important;
+    color: var(--lagun-text) !important;
   }
 
+  /* All editor input types share the cell's focus ring. In particular, native
+     date inputs must not retain Quartz's extra border and light-mode control. */
   .lagun-result-grid .ag-cell-inline-editing .ag-input-wrapper,
-  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input,
-  .lagun-result-grid .ag-cell-inline-editing .ag-number-field-input {
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    color: #fed7aa !important;
+  .lagun-result-grid .ag-cell-inline-editing .ag-input-field-input {
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: var(--lagun-text) !important;
+    caret-color: var(--lagun-focus-ring);
   }
 
-  .lagun-result-grid .ag-cell-inline-editing .ag-text-field-input,
-  .lagun-result-grid .ag-cell-inline-editing .ag-number-field-input {
-    padding: 0;
-    /* Keep the cell's focus ring; Waterfox otherwise adds a second inner ring. */
+  .lagun-result-grid .ag-cell-inline-editing .ag-input-field-input {
+    padding: 0 !important;
+    min-width: 0;
     outline: none;
+    font: inherit;
+  }
+
+  .lagun-result-grid .ag-cell-inline-editing input::-webkit-datetime-edit {
+    padding: 0;
+  }
+
+  .lagun-result-grid input::selection,
+  .lagun-table-search input::selection {
+    background: var(--lagun-focus-ring);
+    color: var(--lagun-grid-edit-surface);
+  }
+
+  .lagun-find-button {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted;
   }
 
   .cm-tooltip,

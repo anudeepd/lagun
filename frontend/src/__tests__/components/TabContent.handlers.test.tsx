@@ -109,7 +109,7 @@ describe('TabContent data tab — row mutation wiring', () => {
 
     commitCellEdit(rowByName('Alice'), 'name', 'Alice', 'Alicia')
 
-    // The edit is staged, not sent: the toolbar offers the review flow.
+    // The edit is staged, not sent: the footer offers the review flow.
     fireEvent.click(await screen.findByRole('button', { name: 'Apply (1)' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Apply Changes' }))
 

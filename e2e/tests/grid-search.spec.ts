@@ -10,7 +10,7 @@
  *   4. Shift+Enter navigates back
  *   5. Navigation wraps around at the ends
  *   6. Esc closes the bar and clears highlighting
- *   7. "No matches" state (amber counter)
+ *   7. "No matches" state
  *   8. Cmd/Ctrl+F is NOT intercepted when the grid is not focused
  *   9. Matches across multiple columns are highlighted
  *
@@ -180,7 +180,6 @@ test('shows a "No matches" state for queries with no hits', async ({ page, sessi
 
   await searchBox.fill('zzzzz')
   await expect(matchCounter).toHaveText('No matches')
-  await expect(matchCounter).toHaveClass(/text-amber-400/)
   await expect(page.locator('.ag-cell.find-match')).toHaveCount(0)
 })
 

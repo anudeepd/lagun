@@ -114,7 +114,7 @@ export default function LimitSelect({ value, options, onChange, ariaLabel = 'Row
         whileHover={{ scale: 1.025 }}
         whileTap={{ scale: 0.96 }}
         transition={surfaceTransition}
-        className="lagun-field flex min-w-[66px] items-center justify-between gap-2 rounded-md border border-surface-700 bg-surface-800 px-2 py-0.5 text-xs text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400"
+        className="lagun-field flex min-w-[66px] items-center justify-between gap-2 rounded-md border border-surface-700 bg-surface-800 px-2 py-0.5 text-xs text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       >
         <span>{value?.toLocaleString()}</span>
         <m.span animate={{ rotate: open ? 180 : 0 }} transition={surfaceTransition}>

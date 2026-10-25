@@ -21,7 +21,7 @@ async function editCellAndApply(
   await editor.fill(newValue)
   await editor.press('Enter')
 
-  // The toolbar button opens the change-review dialog; the write only happens
+  // The staged-change footer opens the review dialog; the write only happens
   // when the dialog is confirmed.
   const applyButton = page.getByRole('button', { name: /^Apply \(/ })
   await expect(applyButton).toBeVisible({ timeout: 5000 })

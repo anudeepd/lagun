@@ -18,8 +18,8 @@ function ToastItem({ toast, dismiss, pause, resume }: ToastItemProps) {
   return (
     <m.div
       layout="position"
-      initial={{ opacity: 0, x: motionDistance.spatial * 2, y: -motionDistance.surface, scale: 0.9 }}
-      animate={{ opacity: 1, x: 0, scale: 1, transition: surfaceTransition }}
+      initial={{ opacity: 0, x: motionDistance.spatial * 2, y: motionDistance.surface, scale: 0.9 }}
+      animate={{ opacity: 1, x: 0, y: 0, scale: 1, transition: surfaceTransition }}
       exit={{ opacity: 0, x: motionDistance.spatial, scale: 0.94, transition: exitTransition }}
       role={isPresent ? (toast.kind === 'error' ? 'alert' : 'status') : undefined}
       aria-hidden={!isPresent || undefined}
@@ -55,7 +55,7 @@ export default function ToastViewport() {
   const { toasts, dismiss, pause, resume } = useToastQueue()
 
   return (
-    <div className="pointer-events-none fixed right-4 top-4 z-toast flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2">
+    <div className="pointer-events-none fixed right-4 top-20 z-toast flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2">
       <AnimatePresence initial={false} mode="sync">
         {toasts.map(toast => (
           <ToastItem key={toast.id} toast={toast} dismiss={dismiss} pause={pause} resume={resume} />

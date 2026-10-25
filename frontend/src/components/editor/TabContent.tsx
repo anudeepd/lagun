@@ -13,10 +13,11 @@ import { buildResultGridRowId } from '../../utils/rowIdentity'
 import { formatRowCount } from '../../utils/formatRows'
 import ResultToolbar from './ResultToolbar'
 import FilterHistoryDropdown from './FilterHistoryDropdown'
-import { Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown, Plus, Trash2 } from 'lucide-react'
+import { Download, Upload, Search, Filter, X, Eye, WrapText, ArrowUpDown, Plus, Trash2, Check, PencilLine, Undo2 } from 'lucide-react'
 import Button from '../ui/Button'
 import LimitSelect from '../ui/LimitSelect'
 import RefreshIcon from '../ui/RefreshIcon'
+import Progress from '../ui/Progress'
 import Tooltip from '../ui/Tooltip'
 import { LoadingState } from '../ui/Spinner'
 import Modal from '../ui/Modal'
@@ -30,9 +31,9 @@ import type { CompletionContext, CompletionResult } from '@codemirror/autocomple
 import { LIMIT_OPTIONS, SQL_KW, MYSQL_BUILTIN_OPTIONS } from '../../constants/sql'
 import { isMac } from '../../utils/platform'
 import { loadFilterHistory, recordFilterHistory } from '../../utils/filterHistory'
-import { AnimatePresence } from 'motion/react'
+import { AnimatePresence, useReducedMotion } from 'motion/react'
 import * as m from 'motion/react-m'
-import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+import { exitTransition, motionDistance, motionDuration, motionEase, surfaceTransition } from '../../motion/tokens'
 import { useHandoff } from '../../motion/useHandoff'
 import useEverOpened from '../../hooks/useEverOpened'
 import TransitionVeil from '../ui/TransitionVeil'
@@ -1047,6 +1048,8 @@ function QueryTab({ tab }: Props) {
 }
 
 function TableTab({ tab, active = true }: Props) {
+  const reduceMotion = useReducedMotion()
+  const stagedBarRef = useRef<HTMLDivElement>(null)
   const initialDataState = normalizeDataTabState(tab.dataState)
   const [view, setView] = useState<'schema' | 'data'>(initialDataState.view)
   const [schemaRefreshTrigger, setSchemaRefreshTrigger] = useState(0)
@@ -1073,7 +1076,6 @@ function TableTab({ tab, active = true }: Props) {
   const [showChangeReview, setShowChangeReview] = useState(false)
   const [deleteRowsTarget, setDeleteRowsTarget] = useState<Record<string, unknown>[] | null>(null)
   const [globalSearch, setGlobalSearch] = useState(initialDataState.globalSearch)
-  const [searchFocused, setSearchFocused] = useState(false)
   const [whereFilter, setWhereFilter] = useState(initialDataState.whereFilter)
   const [appliedWhere, setAppliedWhere] = useState(initialDataState.appliedWhere)
   const [showFilterBar, setShowFilterBar] = useState(initialDataState.showFilterBar)
@@ -1823,16 +1825,8 @@ function TableTab({ tab, active = true }: Props) {
         <div className="flex-1 min-w-4" />
         {/* Global search input — shown in data view */}
         {view === 'data' && (
-          <m.div
-            animate={searchFocused
-              ? { y: -1, scale: 1.018, boxShadow: '0 7px 18px rgba(2, 6, 23, 0.28)' }
-              : { y: 0, scale: 1, boxShadow: '0 0 0 rgba(2, 6, 23, 0)' }}
-            transition={surfaceTransition}
-            className="relative flex items-center min-w-40 rounded-md origin-center"
-          >
-            <span className="absolute left-2 z-10 pointer-events-none">
-                <Search size={12} className={`${searchFocused ? 'text-brand-400 scale-112' : 'text-muted'} transition-colors duration-200`} />
-            </span>
+          <div className="lagun-table-search relative flex h-7 w-52 max-w-full items-center rounded-md border border-surface-700 bg-surface-950 focus-within:border-brand-400">
+            <Search size={14} className="pointer-events-none absolute left-2 text-muted" aria-hidden="true" />
             <input
               type="text"
               value={globalSearch}
@@ -1852,28 +1846,21 @@ function TableTab({ tab, active = true }: Props) {
                 if (globalSearch) handleClearSearch()
                 e.currentTarget.blur()
               }}
-              onFocus={() => setSearchFocused(true)}
-              onBlur={() => setSearchFocused(false)}
               placeholder="Search all columns…"
               aria-label="Search all columns"
-              className="lagun-field bg-surface-800 border border-surface-700 rounded-md pl-6 pr-6 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400 w-44 max-w-full"
+              className="h-full w-full min-w-0 rounded-md bg-transparent pl-7 pr-7 text-xs text-slate-200 placeholder:text-muted focus:outline-none"
             />
-            <AnimatePresence>
             {globalSearch && (
-              <m.button
-                initial={{ opacity: 0, scale: 0.65, rotate: -35 }}
-                animate={{ opacity: 1, scale: 1, rotate: 0, transition: surfaceTransition }}
-                exit={{ opacity: 0, scale: 0.65, rotate: 25, transition: exitTransition }}
+              <button
                 type="button"
                 onClick={handleClearSearch}
-                className="absolute right-1.5 rounded text-muted hover:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+                className="absolute right-1 flex h-5 w-5 items-center justify-center rounded text-muted hover:bg-surface-800 hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
                 aria-label="Clear column search"
               >
                 <X size={12} />
-              </m.button>
+              </button>
             )}
-            </AnimatePresence>
-          </m.div>
+          </div>
         )}
         {/* Row affordances: insert and delete were right-click-only, which the
             README describes as "directly in the grid". */}
@@ -2020,25 +2007,6 @@ function TableTab({ tab, active = true }: Props) {
             <span>Limit</span>
             <LimitSelect value={limit} options={LIMIT_OPTIONS} onChange={handleLimitChange} />
           </m.div>
-        )}
-        {/* Pending changes: Apply / Discard */}
-        {view === 'data' && (pendingChanges.size > 0 || insertDrafts.size > 0) && (
-          <>
-            <button
-              type="button"
-              onClick={() => setShowChangeReview(true)}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-amber-700 hover:bg-amber-600 text-white rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-            >
-              Apply ({pendingChanges.size + insertDrafts.size})
-            </button>
-            <button
-              type="button"
-              onClick={handleDiscardChanges}
-              className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md text-muted hover:text-slate-300 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
-            >
-              Discard
-            </button>
-          </>
         )}
         {/* View toggle */}
         <div className="relative flex rounded-md overflow-hidden border border-surface-700 bg-surface-800">
@@ -2219,7 +2187,7 @@ function TableTab({ tab, active = true }: Props) {
             <LoadingState label={initialLoading ? `Loading rows from ${tab.table}…` : 'Searching…'} />
           ) : result ? (
           <Suspense fallback={<LoadingState label="Preparing data grid…" />}>
-            <div className={`relative h-full lagun-grid-surface${refreshing ? ' lagun-grid-searching' : ''}`}>
+            <div className={`relative h-full lagun-grid-surface${refreshing ? ' lagun-grid-searching' : ''}`} aria-busy={refreshing}>
             <ResultGrid
                 ref={gridRef}
                 result={result}
@@ -2241,8 +2209,11 @@ function TableTab({ tab, active = true }: Props) {
             />
             <AnimatePresence>
             {refreshing && (
-              <div className="absolute inset-0 z-10 flex items-start justify-center bg-surface-950/35 pt-3" aria-live="polite" aria-label="Refreshing data">
-                <LoadingState label="Searching…" />
+              <div className="absolute inset-0 z-10 cursor-progress" aria-live="polite" aria-label="Refreshing data">
+                <Progress label="Searching rows" className="!h-0.5 !rounded-none" />
+                <div className="absolute right-0 top-0.5 rounded-bl-md border-b border-l border-surface-700 bg-surface-900 px-3 py-1.5 text-xs text-muted">
+                  Searching…
+                </div>
               </div>
             )}
             </AnimatePresence>
@@ -2258,6 +2229,43 @@ function TableTab({ tab, active = true }: Props) {
         )}
         <TransitionVeil active={viewHandoff} label="Switching view" />
       </m.div>
+
+      <AnimatePresence initial={false}>
+      {view === 'data' && (pendingChanges.size > 0 || insertDrafts.size > 0) && (
+        <m.div
+          key="staged-changes"
+          ref={stagedBarRef}
+          initial={{ gridTemplateRows: reduceMotion ? '1fr' : '0fr', opacity: 0 }}
+          animate="open"
+          exit="closed"
+          variants={{
+            open: { gridTemplateRows: '1fr', opacity: 1 },
+            closed: { gridTemplateRows: reduceMotion ? '1fr' : '0fr', opacity: 0, transition: { duration: motionDuration.instant, ease: motionEase.exit } },
+          }}
+          transition={{ duration: motionDuration.micro, ease: motionEase.move }}
+          onAnimationStart={state => { if (stagedBarRef.current) stagedBarRef.current.inert = state === 'closed' }}
+          className="grid shrink-0"
+        >
+          <div className="min-h-0 overflow-hidden">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-surface-700 bg-surface-900 px-3 py-2">
+          <div className="flex flex-1 items-center gap-2 text-xs" role="status">
+            <PencilLine size={14} className="shrink-0 text-brand-400" aria-hidden="true" />
+            <span className="font-medium text-slate-200">{formatRowCount(pendingChanges.size + insertDrafts.size)} staged</span>
+            <span className="hidden text-muted sm:inline">Not saved to database</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleDiscardChanges}>
+              <Undo2 size={13} aria-hidden="true" /> Discard
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => setShowChangeReview(true)}>
+              <Check size={13} aria-hidden="true" /> Apply ({pendingChanges.size + insertDrafts.size})
+            </Button>
+          </div>
+        </div>
+          </div>
+        </m.div>
+      )}
+      </AnimatePresence>
 
       {statusMsg && (
         <div className="border-t border-surface-800 bg-surface-900 px-3 py-1.5 motion-safe:animate-[lagun-fade-in_var(--motion-duration-surface)_ease-out]">
@@ -2315,6 +2323,7 @@ function TableTab({ tab, active = true }: Props) {
         open={showChangeReview}
         onClose={() => setShowChangeReview(false)}
         title="Review Staged Changes"
+        motionPreset="subtle"
         footer={(
           <>
             <Button variant="ghost" onClick={() => setShowChangeReview(false)}>Cancel</Button>

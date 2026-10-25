@@ -187,7 +187,7 @@ export default function Select({ label, error, className, containerClassName, co
         className={clsx(
           'lagun-field flex w-full items-center justify-between rounded-md border border-surface-700 bg-surface-800 text-left text-slate-100',
           compact ? 'gap-2 px-2 py-0.5 text-xs' : 'gap-3 px-3 py-1.5 text-sm',
-          'focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-50',
+          'focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-not-allowed disabled:opacity-50',
           error && 'border-red-500', className,
         )}
       >

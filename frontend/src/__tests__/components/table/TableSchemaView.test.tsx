@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import TableSchemaView from '../../../components/table/TableSchemaView'
+import ToastViewport from '../../../components/ui/ToastViewport'
 import { api } from '../../../api/client'
 
 vi.mock('../../../api/client', () => ({
@@ -34,6 +35,10 @@ vi.mock('../../../store/schemaStore', () => ({
     invalidateTable: mockInvalidateTable,
   }),
 }))
+
+beforeEach(() => {
+  render(<ToastViewport />)
+})
 
 const baseProps = {
   sessionId: 'session-1',
@@ -126,6 +131,9 @@ describe('TableSchemaView columns table', () => {
 
     expect(api.analyzeTable).toHaveBeenCalledWith('session-1', 'app_db', 'users', true)
     await waitFor(() => expect(screen.getByText('4,242')).toBeInTheDocument())
+    const notification = screen.getByRole('status')
+    expect(notification).toHaveTextContent(/Refreshed statistics/)
+    expect(screen.getAllByText(notification.textContent!)).toHaveLength(1)
   })
 
   it('renders the # column header and 1-based row indices', async () => {
@@ -225,7 +233,7 @@ describe('TableSchemaView failure handling', () => {
 
     render(<TableSchemaView {...baseProps} />)
 
-    expect(await screen.findByText(/Error loading schema: Unknown table users/)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unknown table users')
   })
 
   it('stays silent when a superseded request is aborted', async () => {
@@ -234,7 +242,7 @@ describe('TableSchemaView failure handling', () => {
     render(<TableSchemaView {...baseProps} />)
 
     await waitFor(() => expect(api.getColumns).toHaveBeenCalled())
-    await waitFor(() => expect(screen.queryByText(/Error loading schema/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
   it('stays silent when switching sessions aborts the in-flight load', async () => {
@@ -255,7 +263,7 @@ describe('TableSchemaView failure handling', () => {
     // Cleanup aborted the first load; its rejection must be swallowed instead of
     // flashing "Error loading schema".
     await waitFor(() => expect(api.getColumns).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.queryByText(/Error loading schema/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
   })
 
   it('surfaces a failed CREATE statement request instead of a dead Export button', async () => {
@@ -267,7 +275,9 @@ describe('TableSchemaView failure handling', () => {
 
     await user.click(screen.getByRole('button', { name: /Export Schema/i }))
 
-    expect(await screen.findByText(/Error loading CREATE statement: permission denied/)).toBeInTheDocument()
+    const notification = await screen.findByRole('alert')
+    expect(notification).toHaveTextContent('permission denied')
+    expect(screen.getAllByText(notification.textContent!)).toHaveLength(1)
     expect(screen.queryByRole('dialog', { name: /CREATE statement/i })).not.toBeInTheDocument()
   })
 

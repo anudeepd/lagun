@@ -31,9 +31,9 @@ describe('GridSearchBar', () => {
   })
 
   it('exposes searchbox role and a polite live region for the count', () => {
-    renderBar({ matchCount: 3, currentMatch: 1 })
+    renderBar({ query: 'a', matchCount: 3, currentMatch: 1 })
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
-    expect(screen.getByText('1 of 3')).toHaveAttribute('aria-live', 'polite')
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
   })
 
   it('calls onQueryChange as the user types', async () => {
@@ -63,17 +63,6 @@ describe('GridSearchBar', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it('shows the current-of-total match count', () => {
-    renderBar({ matchCount: 5, currentMatch: 2 })
-    expect(screen.getByText('2 of 5')).toBeInTheDocument()
-  })
-
-  it('shows "No matches" in the warning color when there are zero matches', () => {
-    renderBar({ matchCount: 0, currentMatch: 0 })
-    const el = screen.getByText('No matches')
-    expect(el).toBeInTheDocument()
-    expect(el).toHaveClass('text-amber-400')
-  })
 
   it('X button calls onClose', async () => {
     const onClose = vi.fn()
@@ -85,7 +74,7 @@ describe('GridSearchBar', () => {
   it('prev/next buttons call onPrev/onNext', async () => {
     const onPrev = vi.fn()
     const onNext = vi.fn()
-    renderBar({ onPrev, onNext })
+    renderBar({ query: 'a', matchCount: 2, currentMatch: 1, onPrev, onNext })
     await userEvent.click(screen.getByRole('button', { name: 'Previous match' }))
     expect(onPrev).toHaveBeenCalledOnce()
     await userEvent.click(screen.getByRole('button', { name: 'Next match' }))
