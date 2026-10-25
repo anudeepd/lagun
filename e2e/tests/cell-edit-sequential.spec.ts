@@ -26,17 +26,19 @@ async function editCellAndApply(
   // when the dialog is confirmed.
   const applyButton = page.getByRole('button', { name: /^Apply \(/ })
   await expect(applyButton).toBeVisible({ timeout: 5000 })
-  await applyButton.click({ force: true })
+  await applyButton.click()
 
   const reviewDialog = page.getByRole('dialog', { name: 'Review Staged Changes' })
+  const reviewTitle = page.locator('#lagun-overlays').getByText('Review Staged Changes', { exact: true })
   await expect(reviewDialog).toBeVisible({ timeout: 5000 })
   const rowUpdate = page.waitForResponse(response =>
     response.request().method() === 'POST' &&
     response.url().includes(`/api/v1/sessions/${sessionId}/row-update`)
   )
-  await reviewDialog.getByRole('button', { name: 'Apply Changes' }).click({ force: true })
+  await reviewDialog.getByRole('button', { name: 'Apply Changes' }).click()
   expect((await rowUpdate).ok()).toBe(true)
   await expect(reviewDialog).toBeHidden()
+  await expect(reviewTitle).toHaveCount(0)
   await expect(applyButton).toBeHidden()
 
   const saved = await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
