@@ -90,7 +90,7 @@ async def test_audit_write_failure_warns_once_per_interval(
     blocker.write_text("")
     monkeypatch.setattr(session_store, "_DB_PATH", blocker / "lagun.db")
     monkeypatch.setattr(session_store, "_AUDIT_WRITE_WARNING_INTERVAL_SECONDS", 60.0)
-    monkeypatch.setattr(session_store, "_last_audit_write_warning", 0.0)
+    monkeypatch.setattr(session_store, "_last_audit_write_warning", None)
     monkeypatch.setattr(session_store, "_suppressed_audit_write_warnings", 0)
 
     with caplog.at_level(logging.WARNING, logger="lagun.db.session_store"):

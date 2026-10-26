@@ -689,14 +689,19 @@ async def hide_shared_session(session_id: str, username: str) -> None:
 _AUDIT_WRITE_WARNING_INTERVAL_SECONDS = max(
     0.0, float(os.getenv("LAGUN_AUDIT_WRITE_WARNING_INTERVAL_SECONDS", "60"))
 )
-_last_audit_write_warning = 0.0
+# None means "never warned". A 0.0 sentinel would suppress the first warning on
+# a freshly booted host, where time.monotonic() is still below the interval.
+_last_audit_write_warning: float | None = None
 _suppressed_audit_write_warnings = 0
 
 
 def _warn_audit_write_failure(error: Exception) -> None:
     global _last_audit_write_warning, _suppressed_audit_write_warnings
     now = time.monotonic()
-    if now - _last_audit_write_warning < _AUDIT_WRITE_WARNING_INTERVAL_SECONDS:
+    if (
+        _last_audit_write_warning is not None
+        and now - _last_audit_write_warning < _AUDIT_WRITE_WARNING_INTERVAL_SECONDS
+    ):
         _suppressed_audit_write_warnings += 1
         return
     suppressed = _suppressed_audit_write_warnings
