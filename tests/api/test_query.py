@@ -71,7 +71,8 @@ async def test_request_specific_query_cancellation(client, session_id, test_db):
     result = await asyncio.wait_for(running, timeout=2)
     assert result.status_code == 200
     assert result.json()["execution_id"] == "cancel-query-1"
-    assert result.json()["error"] == "Query cancelled"
+    assert result.json()["rows"] == []
+    assert result.json()["error"] is not None
 
 
 async def test_select_auto_limit(client, session_id, test_db):
@@ -202,6 +203,270 @@ async def test_script_query_delete_only(client, session_id, test_db):
         },
     )
     assert r2.json()["rows"][0][0] == 0
+
+
+async def test_sequential_script_keeps_session_settings_for_all_statements(
+    client, session_id, test_db
+):
+    for sql in (
+        "CREATE TABLE seq_parent (id INT PRIMARY KEY) ENGINE=InnoDB",
+        "CREATE TABLE seq_child (id INT PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_seq_child_parent FOREIGN KEY (parent_id) "
+        "REFERENCES seq_parent(id)) ENGINE=InnoDB",
+    ):
+        created = await client.post(
+            f"/api/v1/sessions/{session_id}/query",
+            json={"sql": sql, "database": test_db},
+        )
+        assert created.json()["error"] is None
+
+    result = await client.post(
+        f"/api/v1/sessions/{session_id}/query/script/sequential",
+        json={
+            "execution_id": "sequence-fk-checks-1",
+            "database": test_db,
+            "sql": (
+                "SET FOREIGN_KEY_CHECKS=0;"
+                "SET SESSION unique_checks=0;"
+                "SET @bulk_session_value=42;"
+                "SELECT @bulk_session_value AS value;"
+                "INSERT INTO seq_child (id, parent_id) VALUES (1, 999);"
+                "SET SESSION unique_checks=1;"
+                "SET FOREIGN_KEY_CHECKS=1;"
+            ),
+        },
+    )
+    assert result.status_code == 200
+    data = result.json()
+    assert data["ok"] is True
+    assert data["statements_executed"] == 7
+    assert any(
+        item["result"]["rows"] == [[42]] for item in data["result_sets"]
+    )
+
+    session_value = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT @bulk_session_value AS value", "database": test_db},
+    )
+    assert session_value.json()["rows"] == [[None]]
+
+    child_rows = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT * FROM seq_child", "database": test_db},
+    )
+    assert child_rows.json()["rows"] == [[1, 999]]
+
+    rejected = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "sql": "INSERT INTO seq_child (id, parent_id) VALUES (2, 999)",
+            "database": test_db,
+        },
+    )
+    assert rejected.json()["error"] is not None
+
+
+async def test_sequential_script_creates_and_calls_delimited_procedure(
+    client, session_id, test_db
+):
+    result = await client.post(
+        f"/api/v1/sessions/{session_id}/query/script/sequential",
+        json={
+            "execution_id": "sequence-procedure-1",
+            "database": test_db,
+            "sql": (
+                "DELIMITER $$\n"
+                "CREATE PROCEDURE seq_result_proc()\n"
+                "BEGIN\n"
+                "  SELECT 'from procedure' AS message;\n"
+                "  SELECT 2 AS sequence_number;\n"
+                "END$$\n"
+                "DELIMITER ;\n"
+                "CALL seq_result_proc();"
+            ),
+        },
+    )
+    assert result.status_code == 200
+    data = result.json()
+    assert data["ok"] is True
+    assert data["statement_count"] == 2
+    call_results = [
+        result_set
+        for result_set in data["result_sets"]
+        if result_set["statement_index"] == 1
+    ]
+    assert [result_set["result_set_index"] for result_set in call_results] == [0, 1]
+    assert [result_set["result"]["rows"] for result_set in call_results] == [
+        [["from procedure"]],
+        [[2]],
+    ]
+
+
+async def test_sequential_script_reports_partial_effects_on_failure(
+    client, session_id, test_db
+):
+    created = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "sql": "CREATE TABLE seq_partial (id INT PRIMARY KEY) ENGINE=InnoDB",
+            "database": test_db,
+        },
+    )
+    assert created.status_code == 200, created.text
+    assert created.json()["error"] is None, created.text
+
+    result = await client.post(
+        f"/api/v1/sessions/{session_id}/query/script/sequential",
+        json={
+            "execution_id": "sequence-partial-1",
+            "database": test_db,
+            "sql": (
+                "INSERT INTO seq_partial (id) VALUES (1);"
+                "INSERT INTO seq_partial (no_such_column) VALUES (2);"
+                "INSERT INTO seq_partial (id) VALUES (3);"
+            ),
+        },
+    )
+    assert result.status_code == 200, result.text
+    data = result.json()
+    assert data["ok"] is False
+    assert data["statements_executed"] == 1
+    assert data["failed_statement_index"] == 1
+    assert any(item["result"]["error"] for item in data["result_sets"])
+
+    rows = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT id FROM seq_partial", "database": test_db},
+    )
+    assert rows.json()["rows"] == [[1]]
+
+
+async def test_sequential_call_limits_and_drains_every_result_set(
+    client, session_id, test_db, monkeypatch
+):
+    from lagun.api import query as query_api
+
+    monkeypatch.setattr(query_api, "_QUERY_MAX_RESULT_ROWS", 3)
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/query/script/sequential",
+        json={
+            "execution_id": "bounded-procedure",
+            "database": test_db,
+            "limit": 2,
+            "sql": (
+                "DELIMITER $$\n"
+                "CREATE PROCEDURE bounded_proc(OUT answer INT) BEGIN "
+                "SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3; "
+                "SELECT 4 AS n UNION ALL SELECT 5; SET answer=42; END$$\n"
+                "DELIMITER ;\n"
+                "CALL bounded_proc(@answer); SELECT @answer;"
+            ),
+        },
+    )
+    data = response.json()
+    assert data["ok"] is True, data
+    row_results = [item["result"] for item in data["result_sets"] if item["result"]["columns"]]
+    assert [result["rows"] for result in row_results] == [[[1], [2]], [[4]], []]
+    assert all(result["truncated"] for result in row_results)
+    assert data["statements_executed"] == 3
+
+
+async def test_sequential_call_out_parameters_survive_until_following_select(
+    client, session_id, test_db
+):
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/query/script/sequential",
+        json={
+            "execution_id": "procedure-out",
+            "database": test_db,
+            "sql": (
+                "CREATE PROCEDURE answer_proc(OUT answer INT) SET answer=42;"
+                "CALL answer_proc(@answer); SELECT @answer;"
+            ),
+        },
+    )
+    data = response.json()
+    assert data["ok"] is True, data
+    assert data["result_sets"][-1]["result"]["rows"] == [[42]]
+
+
+async def test_sequential_timeout_stops_before_following_write(
+    client, session_id, test_db, monkeypatch
+):
+    from lagun.api import query as query_api
+
+    monkeypatch.setattr(query_api, "_BULK_MAX_RUNTIME_SECONDS", 0.1)
+    response = await asyncio.wait_for(client.post(
+        f"/api/v1/sessions/{session_id}/query/script/sequential",
+        json={
+            "execution_id": "sleep-timeout",
+            "database": test_db,
+            "sql": "SELECT SLEEP(10); INSERT INTO users(name) VALUES ('should not run');",
+        },
+    ), 2)
+    data = response.json()
+    assert data["ok"] is False
+    assert data["statements_executed"] == 0
+    assert "execution limit" in data["error"]
+    rows = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"database": test_db, "sql": "SELECT name FROM users ORDER BY id"},
+    )
+    assert rows.json()["rows"] == [["Alice"], ["Bob"]]
+
+
+async def test_running_sequential_cancellation_skips_following_writes(
+    client, session_id, test_db, mysql_server
+):
+    import aiomysql
+    from lagun.api import query as query_api
+
+    running = asyncio.create_task(client.post(
+        f"/api/v1/sessions/{session_id}/query/script/sequential",
+        json={
+            "execution_id": "running-sequence-cancel",
+            "database": test_db,
+            "sql": "SELECT SLEEP(10); INSERT INTO users(name) VALUES ('should not run');",
+        },
+    ))
+    conn = await aiomysql.connect(
+        host=mysql_server.host,
+        port=mysql_server.port,
+        user=mysql_server.admin_user,
+        password=mysql_server.admin_password,
+        autocommit=True,
+    )
+    try:
+        async with asyncio.timeout(5):
+            while True:
+                async with conn.cursor() as cur:
+                    await cur.execute("SHOW FULL PROCESSLIST")
+                    thread_id = query_api._active_script_queries.get(
+                        session_id, {}
+                    ).get("running-sequence-cancel")
+                    if any(
+                        row[0] == thread_id
+                        and row[7] and row[7].startswith("SELECT SLEEP(10)")
+                        for row in await cur.fetchall()
+                    ):
+                        break
+                await asyncio.sleep(0.01)
+        cancelled = await client.delete(
+            f"/api/v1/sessions/{session_id}/query/script/running-sequence-cancel"
+        )
+        assert cancelled.json()["ok"] is True, cancelled.text
+        response = await asyncio.wait_for(running, 2)
+        assert response.json()["ok"] is False
+        assert "cancelled" in response.json()["error"].lower()
+        assert response.json()["statements_executed"] == 0
+        async with conn.cursor() as cur:
+            await cur.execute(f"SELECT name FROM `{test_db}`.users ORDER BY id")
+            assert await cur.fetchall() == (("Alice",), ("Bob",))
+    finally:
+        conn.close()
+        if not running.done():
+            running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
 
 
 async def test_script_query_validate_rejects_update_without_where(

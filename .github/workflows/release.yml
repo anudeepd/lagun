@@ -31,6 +31,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Install local MariaDB for Docker-free backend tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y mariadb-server
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"

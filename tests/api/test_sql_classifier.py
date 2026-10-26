@@ -17,15 +17,14 @@ FIXTURE_PATH = (
 )
 
 
-@pytest.fixture(scope="module")
-def classifier_fixtures():
+def _load_cases(section: str) -> list[dict]:
     with open(FIXTURE_PATH) as f:
-        return json.load(f)
+        return json.load(f)[section]
 
 
 @pytest.mark.parametrize(
     "case",
-    [pytest.param(c, id=c["label"]) for c in json.load(open(FIXTURE_PATH))["allowed"]],
+    [pytest.param(c, id=c["label"]) for c in _load_cases("allowed")],
     scope="module",
 )
 def test_allowed_statements_pass_validation(case):
@@ -36,7 +35,7 @@ def test_allowed_statements_pass_validation(case):
 
 @pytest.mark.parametrize(
     "case",
-    [pytest.param(c, id=c["label"]) for c in json.load(open(FIXTURE_PATH))["rejected"]],
+    [pytest.param(c, id=c["label"]) for c in _load_cases("rejected")],
     scope="module",
 )
 def test_rejected_statements_fail_validation(case):

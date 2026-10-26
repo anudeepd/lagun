@@ -40,6 +40,7 @@ class QueryResult(BaseModel):
     error: Optional[str] = None
     affected_rows: Optional[int] = None
     insert_id: Optional[int] = None
+    truncated: bool = False
     execution_id: Optional[str] = None
     timings: Optional[QueryTimings] = None
 
@@ -71,6 +72,36 @@ class ScriptQueryResult(BaseModel):
     failed_statement_preview: Optional[str] = None
     rolled_back: bool = False
     error: Optional[ScriptQueryError] = None
+
+
+class SequentialScriptRequest(BaseModel):
+    execution_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+    sql: str
+    database: Optional[str] = None
+    limit: Optional[int] = Field(None, ge=1, le=100000)
+    tab_id: Optional[str] = Field(None, min_length=1, max_length=128)
+
+
+class SequentialScriptResultSet(BaseModel):
+    statement_index: int
+    result_set_index: int
+    sql: str
+    result: QueryResult
+
+
+class SequentialScriptResult(BaseModel):
+    ok: bool
+    execution_id: str
+    statement_count: int
+    statements_executed: int
+    exec_time_ms: float
+    failed_statement_index: Optional[int] = None
+    error: Optional[str] = None
+    result_sets: list[SequentialScriptResultSet] = Field(default_factory=list)
 
 
 class ScriptQueryValidationResult(BaseModel):

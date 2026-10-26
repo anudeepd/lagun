@@ -1,23 +1,5 @@
 """Integration tests for the schema browser API."""
 
-import aiomysql
-
-
-async def _run_ddl(mysql_container, *statements: str) -> None:
-    conn = await aiomysql.connect(
-        host=mysql_container.get_container_host_ip(),
-        port=int(mysql_container.get_exposed_port(3306)),
-        user="root",
-        password="test",
-        autocommit=True,
-    )
-    try:
-        async with conn.cursor() as cur:
-            for statement in statements:
-                await cur.execute(statement)
-    finally:
-        conn.close()
-
 
 async def test_list_databases(client, session_id, test_db):
     r = await client.get(f"/api/v1/sessions/{session_id}/databases")
@@ -49,16 +31,12 @@ async def test_list_tables(client, session_id, test_db):
 
 
 async def test_list_tables_batch_covers_every_schema(
-    client, session_id, test_db, mysql_container
+    client, session_id, test_db, mysql_database
 ):
     """One request returns the tables of every requested schema, keyed by schema."""
-    await _run_ddl(
-        mysql_container,
-        "CREATE DATABASE IF NOT EXISTS `lagun_other`",
-        "GRANT ALL PRIVILEGES ON `lagun_other`.* TO 'test'@'%'",
-        "CREATE TABLE IF NOT EXISTS `lagun_other`.widgets (id INT PRIMARY KEY)",
-    )
-    try:
+    async with mysql_database("lagun_other") as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("CREATE TABLE widgets (id INT PRIMARY KEY)")
         r = await client.get(
             f"/api/v1/sessions/{session_id}/tables",
             params=[
@@ -78,8 +56,6 @@ async def test_list_tables_batch_covers_every_schema(
         users = next(t for t in grouped[test_db] if t["name"] == "users")
         assert users["table_type"] == "BASE TABLE"
         assert users["engine"] == "InnoDB"
-    finally:
-        await _run_ddl(mysql_container, "DROP DATABASE IF EXISTS `lagun_other`")
 
 
 async def test_list_tables_batch_deduplicates_repeated_schemas(
@@ -107,17 +83,17 @@ async def test_list_tables_batch_rejects_empty_and_oversized_requests(
 
 
 async def test_list_tables_batch_enforces_database_scope(
-    client, mysql_container, test_db
+    client, mysql_server, test_db
 ):
     """A batch that mentions a database outside the session's scope is refused."""
     r = await client.post(
         "/api/v1/sessions",
         json={
             "name": "scoped",
-            "host": mysql_container.get_container_host_ip(),
-            "port": int(mysql_container.get_exposed_port(3306)),
-            "username": "test",
-            "password": "test",
+            "host": mysql_server.host,
+            "port": mysql_server.port,
+            "username": mysql_server.admin_user,
+            "password": mysql_server.admin_password,
             "default_db": test_db,
             "query_limit": 100,
             "ssl_enabled": False,

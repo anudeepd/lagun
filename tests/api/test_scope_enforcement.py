@@ -1005,6 +1005,37 @@ async def test_bulk_script_validate_rejects_out_of_scope_database(
     assert pool.acquire_calls == 0
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "USE other_db; SELECT * FROM users",
+        "SELECT * FROM other_db.users",
+        "UPDATE other_db.users SET name='x'",
+        "USE lagun_test; SELECT * FROM other_db.users",
+        "DELIMITER $$\nCREATE PROCEDURE p() BEGIN "
+        "SELECT * FROM other_db.users; END$$\nDELIMITER ;\n",
+    ],
+)
+async def test_sequential_script_rejects_out_of_scope_use_before_acquire(
+    client, scoped_session, monkeypatch, sql
+):
+    pool = _RaisingPool()
+    monkeypatch.setattr(
+        "lagun.api.query._get_pool_or_404", _fake_get_pool_or_404(pool, scoped_session)
+    )
+    result = await client.post(
+        f"/api/v1/sessions/{scoped_session.id}/query/script/sequential",
+        json={
+            "execution_id": "seq-scope-use",
+            "database": "lagun_test",
+            "sql": sql,
+        },
+    )
+    assert result.status_code == 403
+    assert "other_db" in result.json()["detail"]
+    assert pool.acquire_calls == 0
+
+
 # ---------------------------------------------------------------------------
 # Every schema endpoint must use the shared scope rule, including for a managed
 # connection whose own list is empty (the ceiling is the scope).

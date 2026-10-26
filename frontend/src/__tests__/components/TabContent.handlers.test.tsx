@@ -20,7 +20,10 @@ import {
 // DOM (toolbar buttons, confirm dialog, status line) and the request bodies the
 // component serializes.
 vi.mock('ag-grid-react')
-vi.mock('ag-grid-community', () => ({ themeQuartz: { withParams: () => ({}) } }))
+vi.mock('ag-grid-community', async (importOriginal) => ({
+  ...await importOriginal<typeof import('ag-grid-community')>(),
+  themeQuartz: { withParams: () => ({}) },
+}))
 
 interface GridRow extends Record<string, unknown> {
   __ag_rowId: string

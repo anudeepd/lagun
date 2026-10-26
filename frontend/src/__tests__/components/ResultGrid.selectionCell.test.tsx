@@ -15,7 +15,10 @@ interface AgGridTestHooks {
 const { __calls, __latestProps } = agGridReact as unknown as AgGridTestHooks
 
 vi.mock('ag-grid-react')
-vi.mock('ag-grid-community', () => ({ themeQuartz: { withParams: () => ({}) } }))
+vi.mock('ag-grid-community', async (importOriginal) => ({
+  ...await importOriginal<typeof import('ag-grid-community')>(),
+  themeQuartz: { withParams: () => ({}) },
+}))
 
 const baseResult: QueryResult = {
   columns: ['name', 'age'],

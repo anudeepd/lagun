@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib.metadata
+import logging
 import os
 import threading
 
@@ -31,6 +32,17 @@ def restore_lagun_env():
             os.environ.pop(name, None)
         else:
             os.environ[name] = value
+
+
+@pytest.fixture(autouse=True)
+def close_lagun_log_handlers():
+    """`serve --log-file` installs a handler; close it instead of leaking the file."""
+    root = logging.getLogger()
+    previous = set(root.handlers)
+    yield
+    for handler in set(root.handlers) - previous:
+        root.removeHandler(handler)
+        handler.close()
 
 
 def _capture_uvicorn(monkeypatch) -> list[tuple[tuple, dict]]:

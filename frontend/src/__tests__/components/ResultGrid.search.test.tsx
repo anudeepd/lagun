@@ -27,7 +27,10 @@ const { __calls, __latestProps } = agGridReact as unknown as AgGridTestHooks
 // calls) and __latestProps (the props most recently passed to AgGridReact, so
 // tests can reach the columnDefs cellClassRules).
 vi.mock('ag-grid-react')
-vi.mock('ag-grid-community', () => ({ themeQuartz: { withParams: () => ({}) } }))
+vi.mock('ag-grid-community', async (importOriginal) => ({
+  ...await importOriginal<typeof import('ag-grid-community')>(),
+  themeQuartz: { withParams: () => ({}) },
+}))
 
 const baseResult: QueryResult = {
   columns: ['name', 'age'],

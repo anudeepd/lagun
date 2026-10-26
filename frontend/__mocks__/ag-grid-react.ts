@@ -34,8 +34,8 @@ export const fakeApi = {
   startEditingCell: () => {},
   ensureIndexVisible: () => {},
   setFocusedCell: () => {},
-  autoSizeColumn: () => {},
-  setColumnWidth: () => {},
+  autoSizeColumns: () => {},
+  setColumnWidths: () => {},
 }
 
 export const AgGridReact = React.forwardRef(function AgGridReact(props: any, _ref: any) {

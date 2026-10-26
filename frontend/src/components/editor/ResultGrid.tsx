@@ -1,7 +1,13 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useMemo, useCallback, useState, useRef, useEffect, forwardRef, useImperativeHandle, type MouseEvent as ReactMouseEvent } from 'react'
 import { AgGridReact } from 'ag-grid-react'
-import { themeQuartz } from 'ag-grid-community'
+import {
+  CellStyleModule, CheckboxEditorModule, ClientSideRowModelApiModule, ClientSideRowModelModule,
+  ColumnApiModule, ColumnAutoSizeModule, DateEditorModule, DateFilterModule,
+  NumberEditorModule, NumberFilterModule, RenderApiModule, RowApiModule,
+  RowSelectionModule, ScrollApiModule, TextEditorModule, TextFilterModule,
+  TooltipModule, ValidationModule, themeQuartz,
+} from 'ag-grid-community'
 import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine, Plus } from 'lucide-react'
 import type { CellClassParams, ICellRendererParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 import Modal from '../ui/Modal'
@@ -27,6 +33,15 @@ import GridContextMenu, { type ContextMenuItem } from './GridContextMenu'
 import type { QueryResult, ColumnInfo, ExportOverrideData } from '../../types'
 import { clipboardWrite } from '../../utils/clipboard'
 import { buildResultGridRowId } from '../../utils/rowIdentity'
+
+// Keep the lazy grid bundle limited to the features used by this component.
+const gridModules = [
+  CellStyleModule, CheckboxEditorModule, ClientSideRowModelApiModule, ClientSideRowModelModule,
+  ColumnApiModule, ColumnAutoSizeModule, DateEditorModule, DateFilterModule,
+  NumberEditorModule, NumberFilterModule, RenderApiModule, RowApiModule,
+  RowSelectionModule, ScrollApiModule, TextEditorModule, TextFilterModule, TooltipModule,
+  ...(import.meta.env.DEV ? [ValidationModule] : []),
+]
 
 const darkTheme = themeQuartz.withParams({
   browserColorScheme: 'dark',
@@ -743,8 +758,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       params.api.applyColumnState({ state: [{ colId, flex: 1 }] })
       autoSizedCols.current.delete(colId)
     } else {
-      params.api.autoSizeColumn(colId)
-      if (params.column.getActualWidth() > 400) params.api.setColumnWidth(colId, 400)
+      params.api.autoSizeColumns([colId])
+      if (params.column.getActualWidth() > 400) params.api.setColumnWidths([{ key: colId, newWidth: 400 }])
       autoSizedCols.current.add(colId)
     }
   }, [])
@@ -969,6 +984,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       </AnimatePresence>
       <div className="flex-1 min-h-0">
       <AgGridReact
+        modules={gridModules}
         theme={darkTheme}
         columnDefs={columnDefs}
         rowData={rowData}

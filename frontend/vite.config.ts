@@ -1,9 +1,43 @@
-import { defineConfig } from 'vite'
+import { createLogger, defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const DEFAULT_CHUNK_BUDGET_KB = 500
+const GRID_CHUNK_BUDGET_KB = 800
+let chunkBudgetsPassed = false
+const logger = createLogger()
+const warn = logger.warn.bind(logger)
+logger.warn = (message, options) => {
+  // Vite has one global limit. Replace only its generic size warning after
+  // the stricter per-chunk policy below has successfully checked every chunk.
+  if (chunkBudgetsPassed && message.includes('Some chunks are larger than')) return
+  warn(message, options)
+}
+
+const chunkBudgets: Plugin = {
+  name: 'lagun-chunk-budgets',
+  apply: 'build',
+  buildStart() {
+    chunkBudgetsPassed = false
+  },
+  generateBundle(_options, bundle) {
+    for (const chunk of Object.values(bundle)) {
+      if (chunk.type !== 'chunk') continue
+      const budget = chunk.name === 'vendor-ag-grid'
+        ? GRID_CHUNK_BUDGET_KB
+        : DEFAULT_CHUNK_BUDGET_KB
+      const size = Buffer.byteLength(chunk.code, 'utf8') / 1000
+      if (size > budget) {
+        this.error(`${chunk.fileName} exceeds its ${budget} kB chunk budget (${size.toFixed(2)} kB).`)
+      }
+    }
+    chunkBudgetsPassed = true
+  },
+}
+
 export default defineConfig({
-  plugins: [react()],
+  customLogger: logger,
+  plugins: [react(), chunkBudgets],
   define: {
     'import.meta.env.VITE_LAGUN_BULK_WRITE_THRESHOLD': JSON.stringify(
       process.env.VITE_LAGUN_BULK_WRITE_THRESHOLD ?? process.env.LAGUN_BULK_WRITE_THRESHOLD ?? ''
@@ -32,10 +66,8 @@ export default defineConfig({
     // ~441 KB of base64 payload to the render-blocking stylesheet and making
     // the fonts impossible to cache (or revalidate) independently of it.
     assetsInlineLimit: 4096,
-    // Vite's default. The previous 1200 sat just above the ~1.15 MB AG Grid
-    // chunk, so the warning was structurally unable to fire. AG Grid is the
-    // one chunk intentionally over budget; the warning is the reminder.
-    chunkSizeWarningLimit: 500,
+    // The lazy AG Grid chunk has an explicit exception, enforced above.
+    chunkSizeWarningLimit: DEFAULT_CHUNK_BUDGET_KB,
     rollupOptions: {
       output: {
         // Function form, not the object form: the object form's

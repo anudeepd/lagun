@@ -1,7 +1,6 @@
 """Integration tests for the import API."""
 
 import json
-import pytest
 
 
 CSV_WITH_HEADER = b"name,age\nAlice,30\nBob,25\n"
@@ -171,24 +170,46 @@ async def test_import_strategy_insert_ignore(client, session_id, test_db):
     )
     alice_id = r.json()["rows"][0][0]
 
-    duplicate_csv = f"id,name,age\n{alice_id},Alice,30\n".encode()
-    with pytest.warns(Warning, match=r"Duplicate entry .*users\.PRIMARY"):
-        r2 = await client.post(
-            f"/api/v1/sessions/{session_id}/import",
-            files={"file": ("data.csv", duplicate_csv, "text/csv")},
-            data={"config": _config(strategy="insert_ignore")},
-        )
+    duplicate_csv = (
+        f"id,name,age\n{alice_id},must-not-replace-Alice,99\n"
+        f"{alice_id + 10},Eve,40\n"
+    ).encode()
+    r2 = await client.post(
+        f"/api/v1/sessions/{session_id}/import",
+        files={"file": ("data.csv", duplicate_csv, "text/csv")},
+        data={"config": _config(strategy="insert_ignore", batch_size=1)},
+    )
     assert r2.status_code == 200
-    assert r2.json()["ok"] is True
-    # Row count should remain 2 (duplicate ignored)
+    result = r2.json()
+    assert result["ok"] is True
+    assert result["rows_processed"] == 2
+    assert result["rows_imported"] == 1
+    assert any("1062" in warning for warning in result["warnings"])
     r3 = await client.post(
         f"/api/v1/sessions/{session_id}/query",
         json={
-            "sql": "SELECT COUNT(*) FROM users",
+            "sql": "SELECT name, age FROM users ORDER BY id",
             "database": test_db,
         },
     )
-    assert r3.json()["rows"][0][0] == 2
+    assert r3.json()["rows"] == [["Alice", 30], ["Bob", 25], ["Eve", 40]]
+
+
+async def test_import_returns_non_duplicate_mysql_warnings(client, session_id, test_db):
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/import",
+        files={"file": ("data.csv", b"name,age\nEve,not-a-number\n", "text/csv")},
+        data={"config": _config(strategy="insert_ignore")},
+    )
+    result = response.json()
+    assert result["ok"] is True
+    assert result["rows_imported"] == 1
+    assert any("1366" in warning for warning in result["warnings"])
+    rows = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"database": test_db, "sql": "SELECT age FROM users WHERE name='Eve'"},
+    )
+    assert rows.json()["rows"] == [[0]]
 
 
 async def test_import_tab_delimited(client, session_id, test_db):

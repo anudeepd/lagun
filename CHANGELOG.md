@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Release automation.** Manual GitHub Actions releases now validate project assets, build and smoke-test distributions, and publish to PyPI using Trusted Publishing.
 
+- **Docker-free backend tests.** Integration tests launch an isolated local
+  MariaDB/MySQL server or use an explicitly configured disposable test server.
+  Test schemas refuse name collisions and are cleaned up after setup failures.
+
 - **Quieter grid editing.** Inline editors use a neutral surface and a single blue focus
   outline. Staged updates and new rows use subtle tints and underline indicators rather than
   solid orange or green fills. Apply and Discard live in a dedicated staged-change footer,
@@ -25,6 +29,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remove sliding and scaling while preserving feedback, focus, and keyboard navigation.
 
 ### Fixed
+
+- **MySQL import warnings reach the import result.** Duplicate-key and other
+  diagnostics from CSV imports are returned in `warnings` instead of being
+  written to the server log, so `INSERT IGNORE` and `REPLACE` results explain
+  which rows were skipped.
+- **The lazy result grid stays within its bundle budget.** Selective AG Grid
+  modules reduce its production chunk from about 1.0 MB to 756 kB. The build
+  enforces 500 kB for every other chunk and an explicit 800 kB cap for the
+  lazy grid chunk, so the generic size warning can no longer be ignored.
+- **`lagun serve --log-file` no longer leaks its handler when logging is
+  already configured.** The CLI attaches its handlers explicitly instead of
+  relying on `logging.basicConfig`, which is a no-op when the root logger
+  already has handlers.
+- **Mixed and procedural MySQL scripts now execute on one connection.** Session
+  settings, `CALL`, and `DELIMITER`-separated routine definitions use a
+  sequential path with result-set handling and no false rollback guarantee;
+  eligible write-only batches retain transactional bulk execution.
+  Follow-up review fixes queued cancellation and pool-wait deadlines, keeps
+  every procedure result set streamed and row-bounded, and handles MySQL
+  escapes, hash comments, mixed leading comments, and executable comments in
+  editor dispatch.
 
 - **LDAP logout returned 403.** Lagun's `no-referrer` policy omitted the `Referer`
   header required by LDAPGate's same-origin logout POST. The app now uses

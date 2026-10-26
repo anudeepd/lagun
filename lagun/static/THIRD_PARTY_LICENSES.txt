@@ -800,12 +800,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --------------------------------------------------------------------------------
-ag-charts-types 10.3.9 -- MIT
+ag-charts-types 11.3.2 -- MIT
 https://github.com/ag-grid/ag-charts
 --------------------------------------------------------------------------------
 The MIT License
 
-Copyright (c) 2015-2024 AG GRID LTD
+Copyright (c) 2015-2025 AG GRID LTD
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -826,12 +826,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --------------------------------------------------------------------------------
-ag-grid-community 32.3.9 -- MIT
+ag-grid-community 33.3.2 -- MIT
 https://github.com/ag-grid/ag-grid
 --------------------------------------------------------------------------------
 The MIT License
 
-Copyright (c) 2015-2024 AG GRID LTD
+Copyright (c) 2015-2025 AG GRID LTD
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -852,12 +852,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --------------------------------------------------------------------------------
-ag-grid-react 32.3.9 -- MIT
+ag-grid-react 33.3.2 -- MIT
 https://github.com/ag-grid/ag-grid
 --------------------------------------------------------------------------------
 The MIT License
 
-Copyright (c) 2015-2024 AG GRID LTD
+Copyright (c) 2015-2025 AG GRID LTD
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

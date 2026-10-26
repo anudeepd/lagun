@@ -1,11 +1,18 @@
-# Large Write Scripts
+# Large SQL Scripts
 
-When you click the normal Execute button, Lagun can run large query-tab write
-scripts with one backend request, one database connection, and one transaction.
+The normal Execute button uses two script paths:
 
-Use it for batches of simple `INSERT ... VALUES`, `UPDATE ... WHERE`, and
-`DELETE ... WHERE` statements. Lagun preserves statement order and rolls back
-the whole transaction on the first failure.
+- Large scripts made entirely of supported `INSERT`, `UPDATE`, and `DELETE`
+  statements use one connection and one transaction. Statement order is
+  preserved, and the whole transaction rolls back on the first failure.
+- Other multi-statement MySQL scripts run sequentially on one connection. This
+  supports session settings such as `SET FOREIGN_KEY_CHECKS=0`, `CALL`, and
+  stored-routine definitions using `DELIMITER`. Results from procedure calls
+  are returned as result sets.
+
+The sequential path is not atomic: DDL may commit implicitly, and earlier
+statements may remain committed if a later statement fails. Lagun closes the
+connection afterward so session settings cannot leak into the connection pool.
 
 ## Copy-Paste Hello World
 
@@ -68,10 +75,11 @@ Lagun should report rollback and rows from that failed script should not commit.
 ```http
 POST /api/v1/sessions/{session_id}/query/script/validate
 POST /api/v1/sessions/{session_id}/query/script
+POST /api/v1/sessions/{session_id}/query/script/sequential
 DELETE /api/v1/sessions/{session_id}/query/script/{execution_id}
 ```
 
-Request:
+Transactional request (`/query/script` or `/query/script/validate`):
 
 ```json
 {
@@ -82,14 +90,42 @@ Request:
 }
 ```
 
+Sequential request (`/query/script/sequential`):
+
+```json
+{
+  "execution_id": "client-generated-id",
+  "database": "app",
+  "sql": "SET @answer=0; CALL calculate_answer(@answer); SELECT @answer;",
+  "limit": 1000
+}
+```
+
+Sequential responses include `statement_count`, `statements_executed`, the
+zero-based `failed_statement_index`, and ordered `result_sets` with statement
+and result-set indexes. Each result carries its own `truncated` flag. The
+requested row limit applies to each result set; `LAGUN_QUERY_MAX_RESULT_ROWS`
+also caps the total rows retained across the script. Results are streamed and
+drained before the next statement, so procedure `OUT` parameters remain usable.
+The runtime limit includes connection-pool waiting. Cancelling a queued script
+prevents its statements from starting; cancelling a running script prevents
+subsequent statements but does not undo effects already committed.
+
+
 ## V1 Limits
 
 - Default statement limit: `3000`
-- One active large write script per session
-- No reads, DDL, session commands, or transaction-control statements
-- `UPDATE` and `DELETE` require a detectable `WHERE`
+- One active script per session
+- The transactional path excludes reads, DDL, procedures, session commands, and
+  transaction-control statements
+- The sequential path runs MySQL statements in order without all-or-nothing
+  rollback; `DELIMITER` directives support compound stored routines
+- `CALL` is subject to the connection's schema-scope checks
+- `UPDATE` and `DELETE` on the transactional path require a detectable `WHERE`
 - `INSERT ... SELECT`, CTEs, subqueries, and multi-table writes are not eligible
-- No MySQL multi-statements flag is enabled
+  for the transactional path
+- No MySQL multi-statements flag is enabled; Lagun parses and executes each
+  statement separately
 
 Admin knobs:
 

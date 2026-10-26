@@ -10,6 +10,7 @@ import re
 import time
 from typing import BinaryIO, Literal, Optional, TextIO
 
+import aiomysql
 from fastapi import APIRouter, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
@@ -441,6 +442,23 @@ async def _rollback(cur, conn) -> bool:
         return False
 
 
+class _ImportCursor(aiomysql.Cursor):
+    """Return MySQL diagnostics to the importer instead of Python stderr."""
+
+    def __init__(self, connection, echo=False):
+        super().__init__(connection, echo)
+        self.import_warnings: list[str] = []
+
+    async def _show_warnings(self, conn):
+        if self._result is not None and self._result.has_next:
+            return
+        for level, code, message in await conn.show_warnings() or []:
+            if len(self.import_warnings) < 100:
+                self.import_warnings.append(f"{level} {code}: {message}")
+            elif len(self.import_warnings) == 100:
+                self.import_warnings.append("Additional MySQL warnings omitted.")
+
+
 async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResult:
     staged.seek(0)
     deadline = _import_deadline()
@@ -501,7 +519,8 @@ async def _batch_insert(pool, cfg: ImportConfig, staged: BinaryIO) -> ImportResu
         }[cfg.strategy]
         stmt = f"{prefix} INTO {db_q}.{tbl_q} ({cols_sql}) VALUES ({placeholders})"
         async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
+            async with conn.cursor(_ImportCursor) as cur:
+                warnings = cur.import_warnings
                 # True until a rollback fails; the finally must not run
                 # SET autocommit=1 against a connection with an open transaction.
                 rolled_back = True

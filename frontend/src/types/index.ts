@@ -67,6 +67,7 @@ export interface QueryResult {
   error?: string
   affected_rows?: number
   insert_id?: number
+  truncated?: boolean
   execution_id?: string | null
   timings?: QueryTimings | null
 }
@@ -97,6 +98,24 @@ export interface ScriptQueryResult {
   failed_statement_preview?: string | null
   rolled_back: boolean
   error?: ScriptQueryError | null
+}
+
+export interface SequentialScriptResultSet {
+  statement_index: number
+  result_set_index: number
+  sql: string
+  result: QueryResult
+}
+
+export interface SequentialScriptResult {
+  ok: boolean
+  execution_id: string
+  statement_count: number
+  statements_executed: number
+  exec_time_ms: number
+  failed_statement_index?: number | null
+  error?: string | null
+  result_sets: SequentialScriptResultSet[]
 }
 
 export interface ScriptQueryValidationResult {

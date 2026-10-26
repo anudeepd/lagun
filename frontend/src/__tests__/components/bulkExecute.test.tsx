@@ -8,6 +8,7 @@ import {
   shouldTryFastExecute,
   formatScriptError,
   scriptResultToQueryResult,
+  shouldUseSequentialExecute,
 } from '../../components/editor/TabContent'
 
 describe('splitStatements', () => {
@@ -41,6 +42,18 @@ describe('splitStatements', () => {
 
   it('handles block comments', () => {
     expect(splitStatements('/* comment */ SELECT 1')).toEqual(['/* comment */ SELECT 1'])
+  })
+
+  it('keeps backslash-escaped quotes inside MySQL string literals', () => {
+    const first = String.raw`SELECT 'it\'s; still a string'`
+    expect(splitStatements(`${first}; SELECT 2;`)).toEqual([first, 'SELECT 2'])
+  })
+
+  it('does not split hash comments or mistake subtraction for a comment', () => {
+    expect(splitStatements('# comment; not SQL\nSELECT 10--2; SELECT 3;')).toEqual([
+      '# comment; not SQL\nSELECT 10--2',
+      'SELECT 3',
+    ])
   })
 
   it('returns empty array for empty input', () => {
@@ -88,12 +101,30 @@ describe('shouldTryFastExecute', () => {
     expect(shouldTryFastExecute(stmts)).toBe(false)
   })
 
-  it('returns true for 25+ writes mixed with other statements', () => {
+  it('routes DML and session settings through the same-connection script path', () => {
     const stmts = [
+      'SET FOREIGN_KEY_CHECKS=0',
+      'SET SESSION unique_checks=0',
       ...Array.from({ length: 25 }, (_, i) => `INSERT INTO t (id) VALUES (${i})`),
-      'SELECT 1',
+      'SET SESSION unique_checks=1',
+      'SET FOREIGN_KEY_CHECKS=1',
     ]
-    expect(shouldTryFastExecute(stmts)).toBe(true)
+    expect(shouldTryFastExecute(stmts)).toBe(false)
+    expect(shouldUseSequentialExecute(stmts)).toBe(true)
+  })
+
+  it('routes stored routine definitions and calls through the script path', () => {
+    expect(shouldUseSequentialExecute([
+      'DELIMITER $$\nCREATE PROCEDURE p() BEGIN SELECT 1; END$$\nDELIMITER ;',
+    ])).toBe(true)
+    expect(shouldUseSequentialExecute(['CALL p()'])).toBe(true)
+  })
+  it('recognizes CALL after mixed leading comment styles', () => {
+    expect(shouldUseSequentialExecute(['/* note */\n-- another note\n# last note\nCALL p()'])).toBe(true)
+  })
+
+  it('keeps executable MySQL comments off pooled single-query execution', () => {
+    expect(shouldUseSequentialExecute(['/* note */ /*!40101 SET @x=1 */'])).toBe(true)
   })
 
   it('handles hash comments before statement keyword', () => {

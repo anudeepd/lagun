@@ -142,14 +142,14 @@ async def test_saved_session_connection_error_is_user_facing(client):
     assert "Could not connect to 127.0.0.1:1 as bad_user" in detail
 
 
-async def test_probe_good_connection(client, mysql_container):
+async def test_probe_good_connection(client, mysql_server):
     r = await client.post(
         "/api/v1/sessions/probe",
         json={
-            "host": mysql_container.get_container_host_ip(),
-            "port": int(mysql_container.get_exposed_port(3306)),
-            "username": "test",
-            "password": "test",
+            "host": mysql_server.host,
+            "port": mysql_server.port,
+            "username": mysql_server.admin_user,
+            "password": mysql_server.admin_password,
         },
     )
     assert r.status_code == 200

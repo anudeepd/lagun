@@ -204,7 +204,9 @@ async def test_export_rejects_a_comment_split_file_write(client, session_id):
 # ---------------------------------------------------------------------------
 
 
-async def test_exported_csv_neutralises_formula_cells(client, session_id, test_db):
+async def test_exported_csv_neutralises_formula_cells(
+    client, session_id, test_db, mysql_server
+):
     import aiomysql
 
     from lagun.db.session_store import get_session
@@ -214,7 +216,7 @@ async def test_exported_csv_neutralises_formula_cells(client, session_id, test_d
         host=session.host,
         port=session.port,
         user=session.username,
-        password="test",
+        password=mysql_server.admin_password,
         autocommit=True,
     )
     try:

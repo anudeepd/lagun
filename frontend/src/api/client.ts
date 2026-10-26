@@ -1,5 +1,5 @@
 import { redirectToLdapLogin } from '../utils/authRedirect'
-import type { AdminActivityFilters, AdminActivityResponse, AdminConnectionsResponse, AdminOverview, AdminRetention, AdminUsersResponse, PresenceUpdate, QueryResult, TableInfo } from '../types'
+import type { AdminActivityFilters, AdminActivityResponse, AdminConnectionsResponse, AdminOverview, AdminRetention, AdminUsersResponse, PresenceUpdate, QueryResult, SequentialScriptResult, TableInfo } from '../types'
 
 export const API_BASE = '/api/v1'
 
@@ -289,6 +289,18 @@ export const api = {
       {
         method: 'POST',
         body: JSON.stringify({ ...payload, mode: payload.mode ?? 'transaction' }),
+        signal,
+      },
+      null,
+    ),
+  executeSequentialScriptQuery: (sessionId: string, payload: {
+    execution_id: string; sql: string; database?: string; limit?: number; tab_id?: string
+  }, signal?: AbortSignal) =>
+    request<SequentialScriptResult>(
+      `/sessions/${sessionId}/query/script/sequential`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
         signal,
       },
       null,

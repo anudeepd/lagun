@@ -16,6 +16,7 @@ class _Cursor:
         self.fail_rollback = fail_rollback
         self.statements: list[str] = []
         self.rowcount = 0
+        self.import_warnings: list[str] = []
 
     async def execute(self, sql, args=None):
         self.statements.append(sql)
@@ -39,7 +40,7 @@ class _Conn:
         self._cursor = cursor
         self.closed = False
 
-    def cursor(self):
+    def cursor(self, cursor_class=None):
         return self._cursor
 
     def close(self):

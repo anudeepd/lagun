@@ -16,16 +16,22 @@ def main():
 
 
 def _configure_logging(log_file: Path | None) -> None:
-    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    """Configure logging without leaving a handler unattached when the root is set."""
+    root = logging.getLogger()
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    if not root.handlers:
+        stream = logging.StreamHandler()
+        stream.setFormatter(formatter)
+        root.addHandler(stream)
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
-        datefmt="%H:%M:%S",
-        handlers=handlers,
-    )
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        root.addHandler(file_handler)
+    root.setLevel(logging.INFO)
 
 
 @main.command()

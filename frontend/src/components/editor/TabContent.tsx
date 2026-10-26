@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult, ExportOverrideData } from '../../types'
+import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult, SequentialScriptResult, ExportOverrideData } from '../../types'
 import { api } from '../../api/client'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useQueryLogStore } from '../../store/queryLogStore'
@@ -55,6 +55,13 @@ const configuredFastExecuteThreshold = Number(import.meta.env.VITE_LAGUN_BULK_WR
 const FAST_EXECUTE_THRESHOLD = Number.isFinite(configuredFastExecuteThreshold) && configuredFastExecuteThreshold > 0
   ? Math.floor(configuredFastExecuteThreshold)
   : 25
+const SEQUENTIAL_EXECUTE_TOKENS: Record<string, true> = {
+  SET: true,
+  USE: true,
+  CALL: true,
+  DELIMITER: true,
+}
+const FAST_EXECUTE_TOKENS: Record<string, true> = { INSERT: true, UPDATE: true, DELETE: true }
 
 interface ExecutedQueryResult {
   id: string
@@ -107,15 +114,19 @@ export function splitStatements(sql: string): string[] {
       else current += ch
       continue
     }
-    if (inSingle) {
+    if (inSingle || inDouble || inBacktick) {
+      const quote = inSingle ? "'" : inDouble ? '"' : '`'
       current += ch
-      if (ch === "'" && next === "'") { current += next; i++ }
-      else if (ch === "'") inSingle = false
+      if (ch === '\\' && !inBacktick && next !== undefined) { current += next; i++ }
+      else if (ch === quote && next === quote) { current += next; i++ }
+      else if (ch === quote) inSingle = inDouble = inBacktick = false
       continue
     }
-    if (inDouble) { current += ch; if (ch === '"') inDouble = false; continue }
-    if (inBacktick) { current += ch; if (ch === '`') inBacktick = false; continue }
-    if (ch === '-' && next === '-') { inLineComment = true; current += '--'; i++; continue }
+    if (ch === '#' || (ch === '-' && next === '-' && /\s/.test(sql[i + 2] ?? ''))) {
+      inLineComment = true
+      current += ch
+      continue
+    }
     if (ch === '/' && next === '*') { inBlockComment = true; current += '/*'; i++; continue }
     if (ch === "'") { inSingle = true; current += ch; continue }
     if (ch === '"') { inDouble = true; current += ch; continue }
@@ -134,11 +145,11 @@ export function formatScriptError(error: ScriptQueryResult['error'] | ScriptQuer
 }
 
 function statementFirstToken(statement: string): string {
-  const stripped = statement
-    .replace(/^\s*(?:--[^\n]*\n\s*)+/g, '')
-    .replace(/^\s*(?:#[^\n]*\n\s*)+/g, '')
-    .replace(/^\s*(?:\/\*[\s\S]*?\*\/\s*)+/g, '')
-  return stripped.trim().match(/^[A-Za-z]+/)?.[0].toUpperCase() ?? ''
+  const stripped = statement.replace(
+    /^(?:\s+|--(?=\s)[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|\/\*(?!!)[\s\S]*?\*\/)*/,
+    '',
+  )
+  return stripped.match(/^[A-Za-z]+/)?.[0].toUpperCase() ?? ''
 }
 
 /**
@@ -154,8 +165,20 @@ export function needsBulkConfirmation(validation: ScriptQueryValidationResult): 
 }
 
 export function shouldTryFastExecute(statements: string[]): boolean {
-  const writeCount = statements.filter(stmt => ['INSERT', 'UPDATE', 'DELETE'].includes(statementFirstToken(stmt))).length
-  return writeCount >= FAST_EXECUTE_THRESHOLD
+  if (statements.length < FAST_EXECUTE_THRESHOLD) return false
+  for (const statement of statements) {
+    if (!FAST_EXECUTE_TOKENS[statementFirstToken(statement)]) return false
+  }
+  return true
+}
+
+export function shouldUseSequentialExecute(statements: string[]): boolean {
+  if (statements.length > 1) return true
+  return statements.some(statement => {
+    const token = statementFirstToken(statement)
+    // Executable MySQL comments must reach the delimiter-aware script parser.
+    return !token || Boolean(SEQUENTIAL_EXECUTE_TOKENS[token])
+  })
 }
 
 // Statements that add, remove, or rename a table (or its indexes) leave the
@@ -712,6 +735,82 @@ function QueryTab({ tab }: Props) {
         return
       }
 
+      if (shouldUseSequentialExecute(statements)) {
+        const controller = new AbortController()
+        abortControllerRef.current = controller
+        activeScriptExecutionRef.current = executionId
+        const start = Date.now()
+        let scriptResult: SequentialScriptResult
+        try {
+          scriptResult = await api.executeSequentialScriptQuery(
+            tab.sessionId,
+            {
+              execution_id: executionId,
+              sql: toRun,
+              database: tab.database,
+              limit,
+              tab_id: tab.id,
+            },
+            controller.signal,
+          )
+        } catch (error) {
+          const cancelled = (error as Error).name === 'AbortError'
+          scriptResult = {
+            ok: false,
+            execution_id: executionId,
+            statement_count: statements.length,
+            statements_executed: 0,
+            exec_time_ms: Date.now() - start,
+            error: cancelled
+              ? 'Script cancelled; earlier statement effects may already be committed.'
+              : (error as Error).message || String(error),
+            result_sets: [],
+          }
+        }
+
+        for (const resultSet of scriptResult.result_sets) {
+          const id = `${executionId}-${resultSet.statement_index}-${resultSet.result_set_index}`
+          newResults.push({ id, result: resultSet.result, sql: resultSet.sql })
+          try {
+            addEntry({
+              sql: resultSet.sql,
+              sessionId: tab.sessionId,
+              database: tab.database,
+              rowCount: resultSet.result.row_count ?? undefined,
+              affectedRows: resultSet.result.affected_rows ?? undefined,
+              execTimeMs: resultSet.result.exec_time_ms,
+              error: resultSet.result.error ?? undefined,
+            })
+          } catch { /* ignore localStorage errors */ }
+          if (!resultSet.result.error && resultSet.result_set_index === 0) {
+            succeededStatements.push(resultSet.sql)
+          }
+        }
+        if (
+          scriptResult.error
+          && !scriptResult.result_sets.some(resultSet => resultSet.result.error)
+        ) {
+          const result: QueryResult = {
+            columns: [],
+            rows: [],
+            row_count: 0,
+            exec_time_ms: scriptResult.exec_time_ms,
+            error: scriptResult.error,
+          }
+          newResults.push({ id: `${executionId}-sequence-error`, result, sql: toRun })
+          try {
+            addEntry({
+              sql: toRun,
+              sessionId: tab.sessionId,
+              database: tab.database,
+              execTimeMs: result.exec_time_ms,
+              error: result.error,
+            })
+          } catch { /* ignore localStorage errors */ }
+        }
+        return
+      }
+
       for (const [statementIdx, stmt] of statements.entries()) {
         const controller = new AbortController()
         abortControllerRef.current = controller
@@ -923,7 +1022,7 @@ function QueryTab({ tab }: Props) {
                 {entry.result.error
                   ? `✗ Result ${i + 1}`
                   : entry.result.columns.length > 0
-                    ? `Result ${i + 1} (${formatRowCount(entry.result.row_count)})`
+                    ? `Result ${i + 1} (${formatRowCount(entry.result.row_count)})${entry.result.truncated ? ' — truncated' : ''}`
                     : `Result ${i + 1} (${entry.result.affected_rows ?? 0} affected)`}
               </button>
             ))}

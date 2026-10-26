@@ -8,8 +8,10 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from io import StringIO
 from typing import Any, Iterable
 
+import aiomysql
 from fastapi import APIRouter, HTTPException, Request
 
 from lagun.auth import request_username
@@ -29,7 +31,7 @@ from lagun.api.sql_analysis import (
     top_level_keywords,
     unwrap_executable_comments,
 )
-from lagun.api.sql_script import SqlScriptError, split_sql_script
+from lagun.api.sql_script import SqlScriptError, iter_sql_statements, split_sql_script
 from lagun.models.query import (
     QueryRequest,
     QueryResult,
@@ -38,6 +40,9 @@ from lagun.models.query import (
     ScriptQueryResult,
     ScriptQueryValidationResult,
     ScriptQueryError,
+    SequentialScriptRequest,
+    SequentialScriptResult,
+    SequentialScriptResultSet,
     CellUpdateRequest,
     CellUpdateResult,
     RowUpdateRequest,
@@ -103,6 +108,12 @@ _NONTRANSACTIONAL_ENGINES = {
     "BLACKHOLE",
     "FEDERATED",
 }
+
+_USE_STATEMENT_RE = re.compile(
+    r"^\s*(?:(?:--[^\n]*\n|#[^\n]*\n|/\*[\s\S]*?\*/)\s*)*"
+    r"USE\s+(?:`((?:``|[^`])+)`|([A-Za-z0-9_$]+))",
+    re.IGNORECASE,
+)
 
 
 async def _get_pool_or_404(session_id: str):
@@ -287,6 +298,22 @@ def _statements_from_request(
                 "Fix the quoted string, comment, delimiter, or statement size and retry.",
             )
     return [s.strip() for s in req.statements or [] if s.strip()], None
+
+
+def _sequential_statements_from_sql(
+    sql: str,
+) -> tuple[list[str] | None, str | None]:
+    if len(sql.encode("utf-8")) > _BULK_MAX_BODY_BYTES:
+        return None, "The submitted SQL script exceeds the server byte limit."
+    try:
+        statements = [item.sql for item in iter_sql_statements(StringIO(sql))]
+    except SqlScriptError as error:
+        return None, str(error)
+    if len(statements) > _BULK_MAX_STATEMENTS:
+        return None, f"The SQL script exceeds the {_BULK_MAX_STATEMENTS} statement limit."
+    if not statements:
+        return None, "No SQL statements were found."
+    return statements, None
 
 
 async def _check_transactional_targets(
@@ -1170,6 +1197,259 @@ async def execute_script_query(
             _active_script_details.pop((session_id, req.execution_id), None)
 
 
+class _ScriptCursor(aiomysql.SSCursor):
+    """Keep every CALL result set unbuffered, not just its first result."""
+
+    async def nextset(self):
+        conn = self._get_db()
+        result = self._result
+        if result is None or result is not conn._result or not result.has_next:
+            return None
+        self._clear_result()
+        # aiomysql.Cursor.nextset() calls the buffered connection.next_result().
+        await conn._read_query_result(unbuffered=True)
+        await self._do_get_result()
+        return True
+
+    async def close(self):
+        if self._connection is not None and self._connection.closed:
+            self._connection = None
+            return
+        await super().close()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is not None and self._connection is not None:
+            self._connection.close()
+        await self.close()
+
+
+@router.post(
+    "/sessions/{session_id}/query/script/sequential",
+    response_model=SequentialScriptResult,
+)
+async def execute_sequential_script(
+    session_id: str, req: SequentialScriptRequest, request: Request
+):
+    """Run a MySQL script in order on one connection, without atomicity claims."""
+    t0 = time.monotonic()
+    pool, session = await _get_pool_or_404(session_id)
+    statements, parse_error = _sequential_statements_from_sql(req.sql)
+    if parse_error:
+        return SequentialScriptResult(
+            ok=False,
+            execution_id=req.execution_id,
+            statement_count=0,
+            statements_executed=0,
+            exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
+            error=parse_error,
+        )
+
+    current_database = req.database or session.default_db
+    if req.database:
+        require_db_scope(session, req.database)
+    for statement in statements or []:
+        kind = statement_kind(statement)
+        if kind == "USE":
+            match = _USE_STATEMENT_RE.match(statement)
+            if match is None:
+                if effective_scope(session) is not None:
+                    raise HTTPException(
+                        403, "USE target cannot be verified against this connection's allowed databases."
+                    )
+                continue
+            current_database = (match.group(1) or match.group(2) or "").replace("``", "`")
+            require_db_scope(session, current_database)
+            continue
+        if req.database or not _statement_names_its_own_schema(statement):
+            require_db_scope(session, current_database)
+        _require_statement_scope(session, statement, current_database)
+
+    async with _active_script_queries_lock:
+        if _active_script_queries.get(session_id):
+            return SequentialScriptResult(
+                ok=False,
+                execution_id=req.execution_id,
+                statement_count=len(statements or []),
+                statements_executed=0,
+                exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
+                error="A script is already running for this session.",
+            )
+        _active_script_queries.setdefault(session_id, {})[req.execution_id] = None
+        _active_script_details[(session_id, req.execution_id)] = {
+            "username": request_username(request),
+            "database": req.database,
+            "tab_id": req.tab_id,
+            "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "started_epoch": time.time(),
+            "sql": req.sql,
+            "task": asyncio.current_task(),
+            "cancelled": False,
+        }
+
+    results: list[SequentialScriptResultSet] = []
+    statements_executed = 0
+    failed_idx: int | None = None
+    execution_error: str | None = None
+    thread_id: int | None = None
+    deadline_error = f"Script exceeded the {_BULK_MAX_RUNTIME_SECONDS}-second execution limit"
+
+    limit = min(req.limit or session.query_limit, _QUERY_MAX_RESULT_ROWS)
+    result_rows_remaining = _QUERY_MAX_RESULT_ROWS
+
+    def check_deadline() -> None:
+        if time.monotonic() - t0 >= _BULK_MAX_RUNTIME_SECONDS:
+            raise TimeoutError(deadline_error)
+
+    async def append_result_set(
+        cur,
+        statement_index: int,
+        result_set_index: int,
+        statement: str,
+        statement_started: float,
+    ) -> None:
+        nonlocal result_rows_remaining
+        if result_set_index > 0 and not cur.description and cur.rowcount <= 0:
+            return
+        if cur.description:
+            columns = [description[0] for description in cur.description]
+            rows: list[list[Any]] = []
+            total_rows = 0
+            while True:
+                check_deadline()
+                batch = await cur.fetchmany(1000)
+                if not batch:
+                    break
+                total_rows += len(batch)
+                remaining_rows = min(
+                    max(0, limit - len(rows)), result_rows_remaining
+                )
+                if remaining_rows:
+                    rows.extend(
+                        [_serialize(value) for value in row]
+                        for row in batch[:remaining_rows]
+                    )
+                    result_rows_remaining -= min(len(batch), remaining_rows)
+            result = QueryResult(
+                columns=columns,
+                rows=rows,
+                row_count=len(rows),
+                exec_time_ms=round((time.monotonic() - statement_started) * 1000, 2),
+                truncated=total_rows > len(rows),
+                execution_id=f"{req.execution_id}-{statement_index}-{result_set_index}",
+            )
+        else:
+            affected_rows = max(0, cur.rowcount)
+            result = QueryResult(
+                columns=[],
+                rows=[],
+                row_count=affected_rows,
+                exec_time_ms=round((time.monotonic() - statement_started) * 1000, 2),
+                affected_rows=affected_rows,
+                insert_id=cur.lastrowid,
+                execution_id=f"{req.execution_id}-{statement_index}-{result_set_index}",
+            )
+        results.append(
+            SequentialScriptResultSet(
+                statement_index=statement_index,
+                result_set_index=result_set_index,
+                sql=statement,
+                result=result,
+            )
+        )
+
+    result_set_index = 0
+    try:
+        remaining = max(0, _BULK_MAX_RUNTIME_SECONDS - (time.monotonic() - t0))
+        async with asyncio.timeout(remaining):
+            async with pool.acquire() as conn:
+                try:
+                    async with conn.cursor(_ScriptCursor) as cur:
+                        await cur.execute("SELECT CONNECTION_ID()")
+                        row = await cur.fetchone()
+                        await cur.fetchall()
+                        thread_id = row[0]
+                        async with _active_script_queries_lock:
+                            _active_script_queries[session_id][req.execution_id] = thread_id
+                        if req.database:
+                            await cur.execute(f"USE {quote_ident(req.database)}")
+
+                        for idx, statement in enumerate(statements or []):
+                            failed_idx = idx
+                            result_set_index = 0
+                            statement_started = time.monotonic()
+                            if _active_script_details[
+                                (session_id, req.execution_id)
+                            ].get("cancelled"):
+                                raise _QueryCancelled()
+                            check_deadline()
+                            sql = add_row_limit(statement, limit) or statement
+                            await cur.execute(sql)
+                            while True:
+                                await append_result_set(
+                                    cur, idx, result_set_index, statement, statement_started
+                                )
+                                result_set_index += 1
+                                if not await cur.nextset():
+                                    break
+                            statements_executed += 1
+                        failed_idx = None
+                finally:
+                    _discard_lease_connection(conn)
+    except (DatabaseCapacityError, DatabaseConnectionError):
+        raise
+    except (Exception, asyncio.CancelledError) as error:
+        cancelled = _active_script_details.get(
+            (session_id, req.execution_id), {}
+        ).get("cancelled")
+        if isinstance(error, asyncio.CancelledError) and not cancelled:
+            raise
+        if cancelled or isinstance(error, _QueryCancelled):
+            problem = "Script cancelled"
+        elif isinstance(error, TimeoutError):
+            problem = deadline_error
+        else:
+            problem = str(error)
+        execution_error = (
+            f"{problem}. Earlier statement effects may already be committed."
+        )
+        if failed_idx is None and statements_executed < len(statements or []):
+            failed_idx = statements_executed
+        if failed_idx is not None:
+            results.append(
+                SequentialScriptResultSet(
+                    statement_index=failed_idx,
+                    result_set_index=result_set_index,
+                    sql=statements[failed_idx],
+                    result=QueryResult(
+                        columns=[],
+                        rows=[],
+                        row_count=0,
+                        exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
+                        error=execution_error,
+                    ),
+                )
+            )
+    finally:
+        async with _active_script_queries_lock:
+            active = _active_script_queries.get(session_id)
+            if active:
+                active.pop(req.execution_id, None)
+                if not active:
+                    del _active_script_queries[session_id]
+            _active_script_details.pop((session_id, req.execution_id), None)
+
+    return SequentialScriptResult(
+        ok=execution_error is None,
+        execution_id=req.execution_id,
+        statement_count=len(statements or []),
+        statements_executed=statements_executed,
+        exec_time_ms=round((time.monotonic() - t0) * 1000, 2),
+        failed_statement_index=failed_idx,
+        error=execution_error,
+        result_sets=results,
+    )
+
+
 @router.delete(
     "/sessions/{session_id}/query/script/{execution_id}",
     response_model=QueryKillResult,
@@ -1185,10 +1465,16 @@ async def kill_script_query(session_id: str, execution_id: str, request: Request
         # execution ids cannot be probed.
         if owner is not None and username is not None and owner != username:
             return {"ok": False, "error": "No active large write script"}
+        if details.get("task") is not None:
+            details["cancelled"] = True
         thread_id = _active_script_queries.get(session_id, {}).get(execution_id)
         if thread_id is None and execution_id in _active_script_queries.get(
             session_id, {}
         ):
+            task = details.get("task")
+            if task is not None:
+                task.cancel()
+                return {"ok": True}
             return {"ok": False, "error": "Large write script is starting"}
         if not thread_id:
             return {"ok": False, "error": "No active large write script"}

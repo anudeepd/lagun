@@ -77,19 +77,11 @@ EXPORT_TRANSFORMS = {
 
 
 @pytest_asyncio.fixture
-async def special_db(mysql_container):
-    host = mysql_container.get_container_host_ip()
-    port = int(mysql_container.get_exposed_port(3306))
-    conn = await aiomysql.connect(
-        host=host, port=port, user="root", password="test", autocommit=True
-    )
-    try:
+async def special_db(mysql_database):
+    async with mysql_database("lagun_special") as conn:
         async with conn.cursor() as cur:
-            await cur.execute("CREATE DATABASE IF NOT EXISTS `lagun_special`")
-            await cur.execute("GRANT ALL PRIVILEGES ON `lagun_special`.* TO 'test'@'%'")
-            await cur.execute("USE `lagun_special`")
             await cur.execute("""
-                CREATE TABLE IF NOT EXISTS escapes (
+                CREATE TABLE escapes (
                     id      INT AUTO_INCREMENT PRIMARY KEY,
                     label   VARCHAR(100) NOT NULL,
                     content LONGTEXT
@@ -99,20 +91,7 @@ async def special_db(mysql_container):
                 "INSERT INTO escapes (label, content) VALUES (%s, %s)",
                 [(label, value) for label, value in NASTY_VALUES],
             )
-    finally:
-        conn.close()
-    yield "lagun_special"
-    try:
-        conn = await aiomysql.connect(
-            host=host, port=port, user="root", password="test", autocommit=True
-        )
-        try:
-            async with conn.cursor() as cur:
-                await cur.execute("DROP DATABASE IF EXISTS `lagun_special`")
-        finally:
-            conn.close()
-    except Exception:
-        pass  # container may be gone; don't mask the test failure
+        yield "lagun_special"
 
 
 def parse_csv(text: str, **kwargs) -> list[list[str]]:
@@ -219,12 +198,14 @@ async def test_csv_null_cell_becomes_empty_string(client, session_id, special_db
 
 
 @pytest.mark.asyncio
-async def test_csv_explicit_null_row(client, session_id, special_db, mysql_container):
+async def test_csv_explicit_null_row(client, session_id, special_db, mysql_server):
     """Row with genuine NULL content column exports as empty string."""
-    host = mysql_container.get_container_host_ip()
-    port = int(mysql_container.get_exposed_port(3306))
     conn = await aiomysql.connect(
-        host=host, port=port, user="test", password="test", autocommit=True
+        host=mysql_server.host,
+        port=mysql_server.port,
+        user=mysql_server.admin_user,
+        password=mysql_server.admin_password,
+        autocommit=True,
     )
     try:
         async with conn.cursor() as cur:

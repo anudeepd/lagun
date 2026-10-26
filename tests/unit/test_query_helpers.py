@@ -7,6 +7,7 @@ wrappers for export/import batch loops (mocked, no database required).
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 from lagun.api import query as query_api
 from lagun.api.export import (
@@ -182,3 +183,76 @@ async def test_import_remaining_deadline_preserves_taxonomy_and_counts():
     else:  # pragma: no cover - must time out
         raise AssertionError("stalled import await was not bounded")
     assert isinstance(_import_timeout(5, "statements"), ImportTimeout)
+
+
+async def test_queued_sequential_script_cancellation_prevents_execution(
+    client, monkeypatch
+):
+    acquired = asyncio.Event()
+
+    class WaitingPool:
+        def acquire(self):
+            return self
+
+        async def __aenter__(self):
+            acquired.set()
+            await asyncio.Event().wait()
+            raise AssertionError("A cancelled queued script must not execute")
+
+        async def __aexit__(self, *args):
+            return False
+
+    async def get_pool(_):
+        return WaitingPool(), SimpleNamespace(
+            default_db=None, selected_databases=[], query_limit=100
+        )
+
+    monkeypatch.setattr(query_api, "_get_pool_or_404", get_pool)
+    running = asyncio.create_task(client.post(
+        "/api/v1/sessions/queued/query/script/sequential",
+        json={"execution_id": "queued-cancel", "sql": "SET @x=1; SELECT @x;"},
+    ))
+    await asyncio.wait_for(acquired.wait(), 1)
+    cancelled = await client.delete(
+        "/api/v1/sessions/queued/query/script/queued-cancel"
+    )
+    try:
+        assert cancelled.json()["ok"] is True
+        response = await asyncio.wait_for(running, 1)
+        assert response.json()["ok"] is False
+        assert response.json()["statements_executed"] == 0
+        assert "cancelled" in response.json()["error"].lower()
+        assert "queued" not in query_api._active_script_queries
+    finally:
+        if not running.done():
+            running.cancel()
+            await asyncio.gather(running, return_exceptions=True)
+
+
+async def test_sequential_runtime_limit_includes_pool_wait(client, monkeypatch):
+    class WaitingPool:
+        def acquire(self):
+            return self
+
+        async def __aenter__(self):
+            await asyncio.Event().wait()
+
+        async def __aexit__(self, *args):
+            return False
+
+    async def get_pool(_):
+        return WaitingPool(), SimpleNamespace(
+            default_db=None, selected_databases=[], query_limit=100
+        )
+
+    monkeypatch.setattr(query_api, "_get_pool_or_404", get_pool)
+    monkeypatch.setattr(query_api, "_BULK_MAX_RUNTIME_SECONDS", 0.02)
+    response = await asyncio.wait_for(client.post(
+        "/api/v1/sessions/queued-timeout/query/script/sequential",
+        json={"execution_id": "queued-timeout", "sql": "SET @x=1;"},
+    ), 1)
+    result = response.json()
+    assert result["ok"] is False
+    assert result["statements_executed"] == 0
+    assert "execution limit" in result["error"]
+    assert "queued-timeout" not in query_api._active_script_queries

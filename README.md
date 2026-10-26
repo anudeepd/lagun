@@ -344,6 +344,10 @@ For large write scripts (25+ `INSERT`, `UPDATE`, or `DELETE` statements), Lagun
 can send the entire script to the backend in one request from the normal Execute
 button. The backend executes all statements in order inside one transaction and
 rolls back on first failure.
+Mixed scripts with `SET`, `USE`, or routine definitions/calls instead execute
+sequentially on one connection, without an automatic transaction or rollback
+guarantee. Session settings last for the script; its connection is then closed.
+
 Set `VITE_LAGUN_BULK_WRITE_THRESHOLD` (or its `LAGUN_BULK_WRITE_THRESHOLD`
 fallback) when building the frontend to change the UI threshold; both are
 frontend build-time settings that the server never reads. The server-side limits
@@ -369,9 +373,24 @@ Requires [uv](https://github.com/astral-sh/uv).
 ```bash
 git clone https://github.com/anudeepd/lagun
 cd lagun
-uv sync
+uv sync --extra dev
 uv run lagun serve
 ```
+
+Backend integration tests start a private temporary MariaDB/MySQL server; no
+Docker daemon is needed. Install `mariadb-server` (Debian/Ubuntu) or `mariadb`
+(Homebrew), then run `uv run pytest tests/ -q`. To use a dedicated existing
+test server instead, set `LAGUN_TEST_MYSQL_HOST`, `LAGUN_TEST_MYSQL_PORT`,
+`LAGUN_TEST_MYSQL_ADMIN_USER`, and `LAGUN_TEST_MYSQL_ADMIN_PASSWORD`. The fixture
+uses the admin account for test connections and creates/drops test databases, so
+use only an isolated, disposable server.
+Schema creation refuses existing names rather than reusing and later deleting
+them. Schemas created by the fixture are cleaned up even when test setup fails.
+
+The production frontend build enforces a 500 kB budget for each JavaScript
+chunk, except the lazy AG Grid chunk, which has an explicit 800 kB cap. Both
+limits live in `frontend/vite.config.ts` and fail the build when exceeded.
+
 
 ## License
 

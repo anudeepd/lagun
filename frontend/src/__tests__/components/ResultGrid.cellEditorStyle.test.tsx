@@ -5,7 +5,10 @@ import * as agGridReact from 'ag-grid-react'
 import type { QueryResult } from '../../types'
 
 vi.mock('ag-grid-react')
-vi.mock('ag-grid-community', () => ({ themeQuartz: { withParams: () => ({}) } }))
+vi.mock('ag-grid-community', async (importOriginal) => ({
+  ...await importOriginal<typeof import('ag-grid-community')>(),
+  themeQuartz: { withParams: () => ({}) },
+}))
 
 const { __latestProps } = agGridReact as unknown as {
   __latestProps: { current: { onCellDoubleClicked?: (event: unknown) => void } | null }
