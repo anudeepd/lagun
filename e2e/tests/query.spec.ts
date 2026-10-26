@@ -110,7 +110,7 @@ test('bulk execution rolls back a failed large insert script', async ({ page, se
   expect((await count.json()).rows[0][0]).toBe(0)
 })
 
-test('bulk execution rejects unsupported large mixed scripts without running', async ({ page, sessionId }) => {
+test('mixed large scripts execute sequentially and return the final result', async ({ page, sessionId }) => {
   await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
     data: { sql: 'DROP TABLE IF EXISTS e2e_test.bulk_reject' },
   })
@@ -134,14 +134,21 @@ test('bulk execution rejects unsupported large mixed scripts without running', a
   const editor = page.locator('.cm-content')
   await editor.click()
   await editor.pressSequentially(sql)
-  await page.keyboard.press('Control+Enter')
+  // The editor binds Cmd+Enter on macOS and Ctrl+Enter elsewhere, but clicking
+  // Run exercises the same path on every platform.
+  await page.getByRole('button', { name: 'Run', exact: true }).click()
 
-  // QueryErrorState renders the same message twice (guidance paragraph plus the
-  // raw driver details), so match the guidance paragraph specifically.
-  await expect(page.locator('p', { hasText: /Statement 26 starts with SELECT/ })).toBeVisible({ timeout: 10_000 })
+  // Mixed scripts no longer take the transactional bulk path or its rejection
+  // dialog. Every statement runs on one connection and the final SELECT is a
+  // separate result set.
+  const finalResult = page.getByRole('button', { name: /Result 26 \(1 row\)/ })
+  await expect(finalResult).toBeVisible({ timeout: 20_000 })
+  await finalResult.click()
+  await expect(page.locator('.ag-cell', { hasText: '25' })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText('Unsupported large write script')).toHaveCount(0)
 
   const count = await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
     data: { sql: 'SELECT COUNT(*) FROM e2e_test.bulk_reject' },
   })
-  expect((await count.json()).rows[0][0]).toBe(0)
+  expect((await count.json()).rows[0][0]).toBe(25)
 })
