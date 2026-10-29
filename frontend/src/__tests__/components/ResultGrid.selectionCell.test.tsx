@@ -10,7 +10,7 @@ import type { QueryResult } from '../../types'
 // querySelector() behave like in the browser).
 interface AgGridTestHooks {
   __calls: Record<string, unknown[]>
-  __latestProps: { current: { onCellClicked?: (e: unknown) => void; selectionColumnDef?: { suppressNavigable?: boolean } } | null }
+  __latestProps: { current: { onCellClicked?: (e: unknown) => void; selectionColumnDef?: { suppressNavigable?: boolean; pinned?: 'left' | 'right' | null } } | null }
 }
 const { __calls, __latestProps } = agGridReact as unknown as AgGridTestHooks
 
@@ -118,6 +118,6 @@ describe('ResultGrid selection checkbox cell', () => {
 
   it('keeps the checkbox column out of keyboard navigation', () => {
     renderSelectable()
-    expect(__latestProps.current?.selectionColumnDef).toEqual({ suppressNavigable: true })
+    expect(__latestProps.current?.selectionColumnDef).toEqual({ suppressNavigable: true, pinned: 'left' })
   })
 })

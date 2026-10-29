@@ -421,6 +421,18 @@ describe('auto-increment column filter', () => {
     const out = buildFrontendContent('insert', DB, TBL, { columns: ['id', 'name'], rows: [[1, 'A']] }, PK, opts, 'single', false, false)
     expect(out).toBe("INSERT INTO `tbl` (`id`, `name`) VALUES (1, 'A');\n")
   })
+  it('JSON keeps auto-increment fields and preserves nulls and native values', () => {
+    const data = {
+      columns: ['id', 'name', 'enabled'],
+      rows: [[7, 'O"Reilly', null], [8, '', false]],
+      autoIncrementColumns: ['id'],
+    }
+    const out = buildFrontendContent('json', DB, TBL, data, PK, opts, 'single', false, false)
+    expect(JSON.parse(out)).toEqual([
+      { id: 7, name: 'O"Reilly', enabled: null },
+      { id: 8, name: '', enabled: false },
+    ])
+  })
 })
 
 describe('copy response limit', () => {

@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } fro
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult, SequentialScriptResult, ExportOverrideData } from '../../types'
 import { api } from '../../api/client'
+import { showToast } from '../../utils/toast'
 import { useSchemaStore } from '../../store/schemaStore'
 import { useQueryLogStore } from '../../store/queryLogStore'
 import { useTabStore } from '../../store/tabStore'
@@ -1308,8 +1309,7 @@ function TableTab({ tab, active = true }: Props) {
           }
         : response
       if (shouldKeepPreviousResultOnLoad(res, result)) {
-        setStatusMsg(`Refresh failed; showing previous result. ${res.error}`)
-        setTimeout(() => setStatusMsg(null), 7000)
+        showToast(`Refresh failed; showing previous result. ${res.error}`, 'error')
       } else {
         setResult(res)
         if (!res.error && commitWhereOnSuccess !== undefined) {
@@ -1323,10 +1323,12 @@ function TableTab({ tab, active = true }: Props) {
       try { addEntry({ sql: selectSql, sessionId: tab.sessionId, database: tab.database, rowCount: res.row_count ?? undefined, execTimeMs: res.exec_time_ms ?? (performance.now() - started), error: res.error ?? undefined }) } catch { /* ignore */ }
     } catch (e) {
       if ((e as Error).name === 'AbortError') return
-      setStatusMsg(result
-        ? `Refresh failed; showing previous result. ${(e as Error).message}`
-        : `Could not load data. ${(e as Error).message}`)
-      setTimeout(() => setStatusMsg(null), 7000)
+      showToast(
+        result
+          ? `Refresh failed; showing previous result. ${(e as Error).message}`
+          : `Could not load data. ${(e as Error).message}`,
+        'error',
+      )
     } finally {
       if (loadAbortRef.current === controller) {
         loadAbortRef.current = null
@@ -1570,6 +1572,7 @@ function TableTab({ tab, active = true }: Props) {
     const currentPending = pendingChangesRef.current
     const currentDrafts = insertDraftsRef.current
     if (!tab.database || !tab.table || (currentPending.size === 0 && currentDrafts.size === 0)) return
+    setStatusMsg(null)
 
     const normalizeChangeMap = (values: Record<string, unknown>) => {
       const normalizedValues: Record<string, unknown> = {}
@@ -1642,15 +1645,13 @@ function TableTab({ tab, active = true }: Props) {
       if (!r.ok) {
         mergeConcurrentStaged()
         syncPending(new Map(remainingPending))
-        setStatusMsg(`✗ ${r.error}`)
-        setTimeout(() => setStatusMsg(null), 4000)
+        showToast(r.error, 'error')
         return
       }
       if (r.data.affected_rows === 0) {
         mergeConcurrentStaged()
         syncPending(new Map(remainingPending))
-        setStatusMsg('✗ Update matched 0 rows — the row may have been modified or deleted since it was loaded.')
-        setTimeout(() => setStatusMsg(null), 6000)
+        showToast('Update matched 0 rows — the row may have been modified or deleted since it was loaded.', 'error')
         return
       }
       remainingPending.delete(rowId)
@@ -1679,8 +1680,7 @@ function TableTab({ tab, active = true }: Props) {
       if (!r.ok) {
         mergeConcurrentStaged()
         syncPending(new Map(remainingPending))
-        setStatusMsg(`✗ ${r.error}`)
-        setTimeout(() => setStatusMsg(null), 4000)
+        showToast(r.error, 'error')
         loadData()
         return
       }
@@ -1693,9 +1693,17 @@ function TableTab({ tab, active = true }: Props) {
       })
     }
     setInsertDraftAnchors(new Map())
-    if (normalizedDrafts.size > 0) {
-      setStatusMsg(`✓ Inserted ${normalizedDrafts.size} row${normalizedDrafts.size !== 1 ? 's' : ''}`)
-      setTimeout(() => setStatusMsg(null), 4000)
+    const updatedCount = normalizedPending.size
+    const insertedCount = normalizedDrafts.size
+    if (updatedCount > 0 && insertedCount > 0) {
+      showToast(
+        `Updated ${updatedCount} row${updatedCount === 1 ? '' : 's'} and inserted ${insertedCount} row${insertedCount === 1 ? '' : 's'}.`,
+        'success',
+      )
+    } else if (updatedCount > 0) {
+      showToast(`Updated ${updatedCount} row${updatedCount === 1 ? '' : 's'}.`, 'success')
+    } else if (insertedCount > 0) {
+      showToast(`Inserted ${insertedCount} row${insertedCount === 1 ? '' : 's'}.`, 'success')
     }
 
     // Rows already merged one at a time above match the server writes, and
@@ -1728,8 +1736,7 @@ function TableTab({ tab, active = true }: Props) {
   const handleDeleteRows = async (rows: Record<string, unknown>[]) => {
     if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     const primary_keys = rows.map(row => Object.fromEntries(rowKeyColumns.map(pk => [pk, row[pk]])))
-    // `rowDelete` no longer throws: a transport error and a rejected statement
-    // both come back as `{ ok: false, error }`, so both reach the status line.
+    // Transport errors and rejected statements both return `{ ok: false }` and show as error toasts.
     const r = await api.rowDelete(tab.sessionId, {
       database: tab.database,
       table: tab.table,
@@ -1737,10 +1744,9 @@ function TableTab({ tab, active = true }: Props) {
     })
     if (r.ok) {
       if (r.data.affected_rows === 0) {
-        setStatusMsg('✗ Delete matched 0 rows — the row may have changed since it was loaded.')
+        showToast('Delete matched 0 rows — the row may have changed since it was loaded.', 'error')
         try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: 0, execTimeMs: 0 }) } catch { /* ignore */ }
         loadData()
-        setTimeout(() => setStatusMsg(null), 6000)
         return
       }
 
@@ -1757,15 +1763,14 @@ function TableTab({ tab, active = true }: Props) {
       })
       gridRef.current?.deselectAll()
 
-      setStatusMsg(`✓ Deleted ${r.data.affected_rows} row${r.data.affected_rows !== 1 ? 's' : ''}`)
+      showToast(`Deleted ${r.data.affected_rows} row${r.data.affected_rows !== 1 ? 's' : ''}.`, 'success')
       try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.data.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
       invalidateTablesForDb(tab.sessionId!, tab.database!)
       loadTables(tab.sessionId!, tab.database!)
       loadData()
     } else {
-      setStatusMsg(`✗ ${r.error}`)
+      showToast(r.error, 'error')
     }
-    setTimeout(() => setStatusMsg(null), 4000)
   }
 
   const requestDeleteRows = (rows: Record<string, unknown>[]) => {

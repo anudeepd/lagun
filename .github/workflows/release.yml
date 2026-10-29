@@ -332,3 +332,29 @@ jobs:
           name: lagun-dist
           path: dist
       - uses: pypa/gh-action-pypi-publish@release/v1
+  cleanup-previous-runs:
+    name: Remove older Lagun Release runs
+    needs: [backend, frontend, e2e, release-version, build-dist, prepare-release, github-release, pypi-publish]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Delete older completed runs of this workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          old_run_ids="$(gh api --paginate \
+            --jq '.workflow_runs[] | select(.status == "completed" and .id != (env.RUN_ID | tonumber)) | .id' \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?per_page=100")"
+          if [[ -z "$old_run_ids" ]]; then
+            echo "No older completed Lagun Release runs to delete."
+            exit 0
+          fi
+          while IFS= read -r run_id; do
+            [[ -n "$run_id" ]] || continue
+            echo "Deleting workflow run $run_id and its attached artifacts."
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$run_id"
+          done <<< "$old_run_ids"

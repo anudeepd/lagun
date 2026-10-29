@@ -78,4 +78,27 @@ describe('ExportDialog copy stream guard', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Copied/ })).toBeInTheDocument()
   })
+  it('offers JSON alongside CSV for loaded rows and copies them as row objects', async () => {
+    render(<ExportDialog
+      {...props}
+      rowsOverride={{
+        columns: ['id', 'name'],
+        rows: [[1, 'Alice'], [2, null]],
+        autoIncrementColumns: ['id'],
+      }}
+      rowsOverrideLabel="selected rows"
+    />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Format' }))
+    expect(screen.getByRole('option', { name: 'CSV' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: 'JSON' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Copy' }))
+
+    await waitFor(() => expect(writeMock).toHaveBeenCalledOnce())
+    expect(JSON.parse(writeMock.mock.calls[0][0])).toEqual([
+      { id: 1, name: 'Alice' },
+      { id: 2, name: null },
+    ])
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

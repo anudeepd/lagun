@@ -13,7 +13,7 @@
 - **Schema browser** — explore databases, tables, columns, and indexes; resizable sidebar
 - **Schema management** — create, modify, and drop tables, columns, and indexes
 - **In-line data editing** — edit cells, insert rows, delete rows directly in the grid
-- **Import & export** — CSV and SQL formats with streaming for large datasets; export respects active column filters
+- **Import & export** — SQL and CSV with streaming for large datasets; grid exports also support JSON for displayed or selected rows and respect active column filters
 - **Query history** — full SQL with word wrap, copy or load any entry back into the editor
 - **Large write scripts** — normal Execute can run 25+ writes in one backend transaction with rollback
 - **Bookmarks** — save and organize frequently used tables

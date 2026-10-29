@@ -479,6 +479,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   // of keyboard navigation so it never takes cell focus (and its highlight).
   const selectionColumnDef = useMemo(() => ({
     suppressNavigable: true,
+    pinned: 'left' as const,
   }), [])
 
   const defaultColDef = useMemo(() => ({

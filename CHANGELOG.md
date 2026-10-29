@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **JSON row export.** Result and table exports can download or copy displayed and selected rows as JSON. The grid's selection checkbox stays pinned while horizontally scrolling.
+
 ### Changed
+
+- **Data-grid feedback.** Row mutations and load failures use toasts; staged-row guidance and value validation remain in the grid status line.
 
 - **Release automation.** Manual GitHub Actions releases now validate project assets, build and smoke-test distributions, and publish to PyPI using Trusted Publishing.
 

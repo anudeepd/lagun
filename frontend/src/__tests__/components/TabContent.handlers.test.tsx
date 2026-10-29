@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { http, HttpResponse } from 'msw'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import * as agGridReact from 'ag-grid-react'
 import TabContent from '../../components/editor/TabContent'
+import ToastViewport from '../../components/ui/ToastViewport'
+import { server } from '../server'
 import { useSchemaStore } from '../../store/schemaStore'
 import type { Tab } from '../../types'
 import {
@@ -17,8 +20,8 @@ import {
 // mock captures the props ResultGrid passes to AgGridReact, so a test can fire
 // the exact grid events a real edit commit / row selection produces. Everything
 // downstream is real: ResultGrid's adapters, TabContent's handlers, the real
-// DOM (toolbar buttons, confirm dialog, status line) and the request bodies the
-// component serializes.
+// DOM (toolbar buttons, confirm dialog, status line, and toast viewport) plus the request bodies
+// the component serializes.
 vi.mock('ag-grid-react')
 vi.mock('ag-grid-community', async (importOriginal) => ({
   ...await importOriginal<typeof import('ag-grid-community')>(),
@@ -82,6 +85,7 @@ function rowByName(name: unknown) {
   if (!row) throw new Error(`No grid row named ${String(name)}`)
   return row
 }
+const BASE = 'http://localhost/api/v1'
 
 const dataTab: Tab = {
   id: 'tab-users',
@@ -95,7 +99,12 @@ const dataTab: Tab = {
 }
 
 async function renderLoadedDataTab() {
-  render(<TabContent tab={dataTab} active />)
+  render(
+    <>
+      <TabContent tab={dataTab} active />
+      <ToastViewport />
+    </>
+  )
   await waitFor(() => expect(gridProps().rowData).toHaveLength(2))
   expect(dataRequests.query.length).toBeGreaterThan(0)
 }
@@ -131,6 +140,7 @@ describe('TabContent data tab — row mutation wiring', () => {
     // Server state took the write, and the grid the user sees shows it.
     expect(mockTableRows).toEqual([[1, 'Alicia'], [2, 'Bob']])
     await waitFor(() => expect(rowByName('Alicia').id).toBe(1))
+    expect(await screen.findByRole('status')).toHaveTextContent('Updated 1 row.')
     // Applied rows clear their staged state exactly once: no retained
     // highlight, no Apply count, and no resurrected stale editor value.
     expect(screen.queryByRole('button', { name: /^Apply \(/ })).toBeNull()
@@ -139,6 +149,22 @@ describe('TabContent data tab — row mutation wiring', () => {
     // not run a second optimistic pass over the same row.
     await waitFor(() => expect(dataRequests.query.length).toBeGreaterThan(1))
     expect(gridProps().rowData.map(row => row.name)).toEqual(['Alicia', 'Bob'])
+  })
+
+  it('announces rejected updates and leaves the staged edit available to retry', async () => {
+    server.use(
+      http.post(`${BASE}/sessions/:id/row-update`, () =>
+        HttpResponse.json({ error: 'Write denied' }),
+      ),
+    )
+    await renderLoadedDataTab()
+
+    commitCellEdit(rowByName('Alice'), 'name', 'Alice', 'Alicia')
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply (1)' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply Changes' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Write denied')
+    expect(screen.getByRole('button', { name: 'Apply (1)' })).toBeInTheDocument()
   })
 
   it('sends a selected row as DELETE /rows and drops it from the grid', async () => {
@@ -163,7 +189,7 @@ describe('TabContent data tab — row mutation wiring', () => {
     })
 
     expect(mockTableRows).toEqual([[1, 'Alice']])
-    await screen.findByText('✓ Deleted 1 row')
+    expect(await screen.findByRole('status')).toHaveTextContent('Deleted 1 row.')
     await waitFor(() => expect(gridProps().rowData.map(row => row.name)).toEqual(['Alice']))
   })
 
@@ -190,7 +216,7 @@ describe('TabContent data tab — row mutation wiring', () => {
       },
     })
 
-    await screen.findByText('✓ Inserted 1 row')
+    expect(await screen.findByRole('status')).toHaveTextContent('Inserted 1 row.')
     await waitFor(() =>
       expect(gridProps().rowData.map(row => row.name)).toEqual(['Alice', 'Bob', 'Carol'])
     )

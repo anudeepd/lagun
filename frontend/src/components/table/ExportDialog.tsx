@@ -14,6 +14,8 @@ import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 import type { ExportOverrideData } from '../../types'
 
+type ExportFormat = 'insert' | 'delete' | 'delete+insert' | 'csv' | 'json'
+
 interface Props {
   open: boolean
   onClose: () => void
@@ -95,7 +97,7 @@ export function neutralizeCsvCell(value: unknown): string {
 }
 
 export const buildFrontendContent = (
-  format: 'insert' | 'delete' | 'delete+insert' | 'csv',
+  format: ExportFormat,
   database: string,
   table: string,
   data: ExportOverrideData,
@@ -105,6 +107,16 @@ export const buildFrontendContent = (
   includeSchema = false,
   includeAutoIncrement = true,
 ): string => {
+  if (format === 'json') {
+    return JSON.stringify(
+      data.rows.map(row => Object.fromEntries(
+        data.columns.map((column, index) => [column, row[index] ?? null])
+      )),
+      null,
+      2,
+    )
+  }
+
   // Auto-increment columns are excluded from the INSERT column list / VALUES and
   // the CSV header/rows when the checkbox is unchecked. DELETE WHERE clauses
   // always reference primary keys against the unfiltered row values regardless
@@ -261,7 +273,7 @@ function beginNativeDownload(url: string, config: string, onError: (message: str
 }
 
 export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, rowsOverrideLabel = 'filtered rows', pkColumnsForSql = [] }: Props) {
-  const [format, setFormat] = useState<'insert' | 'delete' | 'delete+insert' | 'csv'>(customSql ? 'csv' : 'insert')
+  const [format, setFormat] = useState<ExportFormat>(customSql ? 'csv' : 'insert')
   const [insertMode, setInsertMode] = useState<'batch' | 'single'>('single')
   const [batchSize, setBatchSize] = useState('500')
   const [includeSchema, setIncludeSchema] = useState(false)
@@ -338,6 +350,10 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   }
 
   const buildBody = () => {
+    if (format === 'json') {
+      throw new Error('JSON export is only available for rows currently loaded in the grid')
+    }
+
     const parsedBatchSize = parseInt(batchSize, 10)
     return JSON.stringify({
       database,
@@ -374,10 +390,12 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       ensureValidCsvOptions()
       if (rowsOverride) {
         const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema, includeAutoIncrement)
-        const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+        const extension = format === 'json' ? 'json' : format === 'csv' ? 'csv' : 'sql'
+        const contentType = format === 'json' ? 'application/json;charset=utf-8' : 'text/plain;charset=utf-8'
+        const blob = new Blob([content], { type: contentType })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
-        a.download = `${database}_${table}_filtered.${format === 'csv' ? 'csv' : 'sql'}`
+        a.download = `${database}_${table}_filtered.${extension}`
         a.href = url
         a.click()
         setTimeout(() => URL.revokeObjectURL(url), 1000)
@@ -491,6 +509,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           {!customSql && <option value="delete">DELETE SQL</option>}
           {!customSql && <option value="delete+insert">DELETE + INSERT SQL</option>}
           <option value="csv">CSV</option>
+          {rowsOverride && <option value="json">JSON</option>}
         </Select>
         {(format === 'insert' || format === 'delete+insert') && (
           <Select
@@ -502,7 +521,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             <option value="single">Single (one INSERT per row)</option>
           </Select>
         )}
-        {format !== 'csv' && (
+        {format !== 'csv' && format !== 'json' && (
           <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
             <input
               type="checkbox"
@@ -513,23 +532,27 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             <span>Include schema name</span>
           </label>
         )}
-        <label className={`flex items-center gap-2 text-sm text-slate-300 cursor-pointer ${aiCheckboxDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
-          <input
-            type="checkbox"
-            checked={includeAutoIncrement}
-            onChange={e => setIncludeAutoIncrement(e.target.checked)}
-            disabled={aiCheckboxDisabled}
-            className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="When unchecked, auto-increment columns are excluded from INSERT values and CSV output. DELETE WHERE clauses always reference primary keys (or all columns if no primary key exists) regardless of this setting. Has no effect for DELETE-only exports. Not available for query results or when auto-increment metadata is unavailable."
+        {format !== 'json' && (
+          <label className={`flex items-center gap-2 text-sm text-slate-300 cursor-pointer ${aiCheckboxDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            <input
+              type="checkbox"
+              checked={includeAutoIncrement}
+              onChange={e => setIncludeAutoIncrement(e.target.checked)}
+              disabled={aiCheckboxDisabled}
+              className="accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="When unchecked, auto-increment columns are excluded from INSERT values and CSV output. DELETE WHERE clauses always reference primary keys (or all columns if no primary key exists) regardless of this setting. Has no effect for DELETE-only exports. Not available for query results or when auto-increment metadata is unavailable."
+            />
+            <span>Include auto-increment columns</span>
+          </label>
+        )}
+        {format !== 'json' && (
+          <Input
+            label="Batch Size"
+            type="number"
+            value={batchSize}
+            onChange={e => setBatchSize(e.target.value)}
           />
-          <span>Include auto-increment columns</span>
-        </label>
-        <Input
-          label="Batch Size"
-          type="number"
-          value={batchSize}
-          onChange={e => setBatchSize(e.target.value)}
-        />
+        )}
         {format === 'csv' && (
           <div>
             <button
@@ -629,6 +652,12 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
               and an empty string are both written as an empty field, so re-importing the file
               cannot restore which one was stored. Use the SQL format when that distinction
               matters.
+            </>
+          )}
+          {format === 'json' && (
+            <>
+              <br />
+              JSON exports all selected columns as an array of row objects.
             </>
           )}
           {!rowsOverride && <><br />Copy is capped at 16 MB. Download handles large exports without buffering them in this page.</>}
