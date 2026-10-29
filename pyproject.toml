@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lagun"
-version = "0.1.103"
+version = "0.2.0"
 description = "A web-based MySQL/MariaDB GUI editor"
 readme = "README.md"
 # The query runner uses `asyncio.timeout` (lagun/api/query.py), which is 3.11+.
