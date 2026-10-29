@@ -9,7 +9,7 @@
  * keep it while the cell context menu is open — its items act on the cell that
  * was right-clicked, which has handed DOM focus to the menu.
  */
-import { test, expect } from '../fixtures'
+import { dataGridRows, test, expect } from '../fixtures'
 
 test('clears the active-cell ring when focus leaves the grid', async ({ page, sessionId }) => {
   void sessionId
@@ -20,9 +20,9 @@ test('clears the active-cell ring when focus leaves the grid', async ({ page, se
   await page.getByText('e2e_test').click()
   await page.getByText('products').click()
   await page.getByRole('button', { name: 'Data', exact: true }).click()
-  await page.locator('.ag-row').first().waitFor({ state: 'visible', timeout: 10_000 })
+  await dataGridRows(page).first().waitFor({ state: 'visible', timeout: 10_000 })
 
-  const cell = page.locator('.ag-row').first().locator('[col-id="title"]')
+  const cell = dataGridRows(page).first().locator('[col-id="title"]')
   await cell.click()
   await expect(cell).toHaveClass(/ag-cell-focus/)
   await expect.poll(() => cell.evaluate(el => getComputedStyle(el).boxShadow)).not.toBe('none')

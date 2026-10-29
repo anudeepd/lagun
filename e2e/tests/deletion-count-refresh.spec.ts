@@ -8,7 +8,7 @@
  * which filters deleted rows out of the local result state and updates
  * row_count, then fires loadData() as a fire-and-forget refresh.
  */
-import { test, expect } from '../fixtures'
+import { dataGridRows, test, expect } from '../fixtures'
 
 const INITIAL_ROWS = 3   // seeded by seedDatabase in the fixture
 const EXTRA_ROWS = 7     // inserted in beforeEach for larger dataset
@@ -61,7 +61,7 @@ test.describe('Deletion count refresh', () => {
     await page.getByRole('button', { name: 'Data', exact: true }).click()
 
     // Wait for the AG Grid to render rows
-    await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
+    await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('Deletion immediately updates row count in toolbar', async ({ page }) => {
@@ -69,13 +69,13 @@ test.describe('Deletion count refresh', () => {
     await expect(page.locator('main').getByText(rowCountLabel(TOTAL_ROWS))).toBeVisible({ timeout: 5_000 })
 
     // Select first 2 rows via their checkboxes
-    // Use .ag-row to scope to data rows only (header has .ag-header-row)
-    const rowCheckboxes = page.locator('.ag-row .ag-checkbox-input')
+    // Row checkboxes live in pinned-left rows; data cells live in center rows.
+    const rowCheckboxes = page.locator('.ag-pinned-left-cols-container .ag-row .ag-checkbox-input')
     await rowCheckboxes.nth(0).click()
     await rowCheckboxes.nth(1).click()
 
     // Right-click on a cell in the first row to open the context menu
-    await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
+    await dataGridRows(page).first().locator('[col-id="title"]').click({ button: 'right' })
 
     // Context menu appears with "Delete N rows" option
     const deleteBtn = page.getByRole('menuitem', { name: 'Delete 2 rows' })
@@ -90,7 +90,7 @@ test.describe('Deletion count refresh', () => {
     await expect(page.locator('main').getByText(rowCountLabel(expectedAfterFirst))).toBeVisible({ timeout: 5_000 })
 
     // Assert deleted rows are no longer visible in the grid
-    await expect(page.locator('.ag-row')).toHaveCount(expectedAfterFirst)
+    await expect(dataGridRows(page)).toHaveCount(expectedAfterFirst)
   })
 
   test('Rapid successive deletions show correct final count', async ({ page }) => {
@@ -98,10 +98,10 @@ test.describe('Deletion count refresh', () => {
     await expect(page.locator('main').getByText(rowCountLabel(TOTAL_ROWS))).toBeVisible({ timeout: 5_000 })
 
     // --- First deletion: select and delete 2 rows ---
-    const rowCheckboxes = page.locator('.ag-row .ag-checkbox-input')
+    const rowCheckboxes = page.locator('.ag-pinned-left-cols-container .ag-row .ag-checkbox-input')
     await rowCheckboxes.nth(0).click()
     await rowCheckboxes.nth(1).click()
-    await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
+    await dataGridRows(page).first().locator('[col-id="title"]').click({ button: 'right' })
 
     const firstDeleteBtn = page.getByRole('menuitem', { name: /^Delete/ })
     await expect(firstDeleteBtn).toBeVisible({ timeout: 3_000 })
@@ -122,13 +122,13 @@ test.describe('Deletion count refresh', () => {
 
     // Select two more rows by checkbox. Keyboard Space can start editing in
     // editable grids, which is not what this deletion test is exercising.
-    const refreshedRowCheckboxes = page.locator('.ag-row .ag-checkbox-input')
+    const refreshedRowCheckboxes = page.locator('.ag-pinned-left-cols-container .ag-row .ag-checkbox-input')
     await expect(refreshedRowCheckboxes).toHaveCount(afterFirst)
     await refreshedRowCheckboxes.nth(0).click({ force: true })
     await refreshedRowCheckboxes.nth(1).click({ force: true })
 
     // Right-click on a data cell to open context menu
-    await page.locator('.ag-row').nth(0).locator('.ag-cell').nth(1).click({ button: 'right' })
+    await dataGridRows(page).first().locator('[col-id="title"]').click({ button: 'right' })
 
     const secondDeleteBtn = page.getByRole('menuitem', { name: 'Delete 2 rows' })
     await expect(secondDeleteBtn).toBeVisible({ timeout: 3_000 })
@@ -140,6 +140,6 @@ test.describe('Deletion count refresh', () => {
     await expect(page.locator('main').getByText(rowCountLabel(expectedFinal))).toBeVisible({ timeout: 10_000 })
 
     // Assert grid shows the correct final number of rows
-    await expect(page.locator('.ag-row')).toHaveCount(expectedFinal)
+    await expect(dataGridRows(page)).toHaveCount(expectedFinal)
   })
 })

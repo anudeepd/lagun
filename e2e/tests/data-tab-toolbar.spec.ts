@@ -18,7 +18,7 @@
  * See e2e/README.md for setup instructions.
  */
 import type { Page } from '@playwright/test'
-import { test, expect } from '../fixtures'
+import { dataGridRows, test, expect } from '../fixtures'
 
 /** Activate the seeded session, open `e2e_test.products` and switch to Data. */
 async function openProductsDataView(page: Page) {
@@ -33,7 +33,7 @@ async function openProductsDataView(page: Page) {
 
   // Switch to Data view and wait for rows
   await page.getByRole('button', { name: 'Data', exact: true }).click()
-  await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
+  await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
 }
 
 test('double-clicking the db.table caption selects the name', async ({ page, sessionId }) => {

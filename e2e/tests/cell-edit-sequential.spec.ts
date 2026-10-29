@@ -4,7 +4,7 @@
  * Verifies that many consecutive edit→Apply→reload cycles do not
  * accumulate stale state that causes a later update to silently fail.
  */
-import { test, expect } from '../fixtures'
+import { dataGridRows, test, expect } from '../fixtures'
 
 async function editCellAndApply(
   page,
@@ -12,7 +12,7 @@ async function editCellAndApply(
   rowIndex: number,
   newValue: string
 ) {
-  const cell = page.locator('.ag-row').nth(rowIndex).locator('[col-id="price"]')
+  const cell = dataGridRows(page).nth(rowIndex).locator('[col-id="price"]')
   const editor = page.locator('.ag-text-field-input')
   await expect(cell).toBeVisible({ timeout: 10_000 })
   await cell.scrollIntoViewIfNeeded()
@@ -57,7 +57,7 @@ test('ten sequential edit-Apply cycles followed by an 11th that also works', asy
   await page.getByText('products').click()
   await page.getByRole('button', { name: 'Data', exact: true }).click()
 
-  await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
+  await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
 
   for (let i = 0; i < 10; i++) {
     await editCellAndApply(page, sessionId, 0, (10.0 + i * 0.01).toFixed(2))

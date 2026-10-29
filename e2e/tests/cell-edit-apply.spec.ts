@@ -5,7 +5,7 @@
  * changes are staged, they click "Apply", the grid reloads,
  * and the new value is persisted.
  */
-import { test, expect } from '../fixtures'
+import { dataGridRows, test, expect } from '../fixtures'
 
 test('edit a cell, click Apply, and verify persistence', async ({ page, sessionId }) => {
   await page.goto('/')
@@ -15,9 +15,9 @@ test('edit a cell, click Apply, and verify persistence', async ({ page, sessionI
   await page.getByText('products').click()
   await page.getByRole('button', { name: 'Data', exact: true }).click()
 
-  await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
+  await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
 
-  const priceCell = page.locator('.ag-row').first().locator('[col-id="price"]')
+  const priceCell = dataGridRows(page).first().locator('[col-id="price"]')
   await priceCell.dblclick()
 
   const cellEditor = page.locator('.ag-text-field-input')

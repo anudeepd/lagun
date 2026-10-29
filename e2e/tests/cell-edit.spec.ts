@@ -7,7 +7,7 @@
  * Cell editing is only available in the TableTab (schema-tree → Data view),
  * not in the plain query result grid.
  */
-import { test, expect } from '../fixtures'
+import { dataGridRows, test, expect } from '../fixtures'
 
 test('edit a cell and verify the change persists', async ({ page, sessionId }) => {
   await page.goto('/')
@@ -25,10 +25,10 @@ test('edit a cell and verify the change persists', async ({ page, sessionId }) =
   await page.getByRole('button', { name: 'Data', exact: true }).click()
 
   // Wait for rows to load
-  await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
+  await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
 
   // Double-click the price cell to enter edit mode
-  const priceCell = page.locator('.ag-row').first().locator('[col-id="price"]')
+  const priceCell = dataGridRows(page).first().locator('[col-id="price"]')
   await priceCell.dblclick()
 
   // Type the new value into the cell editor
