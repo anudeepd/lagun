@@ -46,7 +46,7 @@ test('test connection before saving shows success banner', async ({ page }) => {
   await page.getByLabel(/Username/i).fill(E2E_USER)
   await page.getByLabel(/Password/i).fill(E2E_PASS)
 
-  await page.getByRole('button', { name: /Test/i }).click()
+  await page.getByRole('button', { name: 'Test', exact: true }).click()
 
   // Should show "Connected!" with the MySQL version
   await expect(page.getByText(/Connected!/i)).toBeVisible({ timeout: 10_000 })

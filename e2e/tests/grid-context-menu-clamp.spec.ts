@@ -16,7 +16,7 @@
  */
 /* eslint-env node */
 import type { Page } from '@playwright/test'
-import { test, expect, openSessionQueryTab } from '../fixtures'
+import { test, expect, openSessionQueryTab, runShortcut } from '../fixtures'
 
 /**
  * Earlier runs may have left sessions named "E2E Test Session" in the DB.
@@ -47,7 +47,7 @@ test.describe('Grid cell context menu viewport clamp', () => {
     await editor.click()
     await editor.pressSequentially('SELECT * FROM e2e_test.products')
     await page.waitForTimeout(500)
-    await page.keyboard.press('Control+Enter')
+    await page.keyboard.press(runShortcut)
 
     await expect(page.locator('.lagun-result-grid')).toBeVisible({ timeout: 10_000 })
     const cell = page.locator('.ag-row').last().locator('.ag-cell').last()
