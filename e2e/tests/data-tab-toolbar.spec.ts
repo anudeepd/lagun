@@ -17,24 +17,7 @@
  * http://127.0.0.1:8080 (started automatically by playwright.config.ts).
  * See e2e/README.md for setup instructions.
  */
-import type { Page } from '@playwright/test'
-import { dataGridRows, test, expect } from '../fixtures'
-
-/** Activate the seeded session, open `e2e_test.products` and switch to Data. */
-async function openProductsDataView(page: Page) {
-  await page.goto('/')
-
-  // Activate the session to show the schema tree
-  await page.locator('span.text-xs.truncate', { hasText: 'E2E Test Session' }).click()
-
-  // Expand the e2e_test database node, then open the products table
-  await page.getByText('e2e_test').click()
-  await page.getByText('products').click()
-
-  // Switch to Data view and wait for rows
-  await page.getByRole('button', { name: 'Data', exact: true }).click()
-  await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
-}
+import { dataGridRows, openProductsDataView, test, expect } from '../fixtures'
 
 test('double-clicking the db.table caption selects the name', async ({ page, sessionId }) => {
   expect(sessionId).toBeTruthy()

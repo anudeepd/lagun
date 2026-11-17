@@ -87,6 +87,17 @@ export async function teardownDatabase(page: Page, sessionId: string) {
   })
 }
 
+/** Activate the seeded session, open `e2e_test.products` and switch to Data. */
+export async function openProductsDataView(page: Page) {
+  await page.goto('/')
+
+  await page.locator('span.text-xs.truncate', { hasText: 'E2E Test Session' }).click()
+  await page.getByText('e2e_test', { exact: true }).click()
+  await page.getByRole('button', { name: 'products', exact: true }).click()
+  await page.getByRole('button', { name: 'Data', exact: true }).click()
+  await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
+}
+
 /**
  * Click a session in the sidebar and open a new query tab via the context menu.
  * Needed because the editor (.cm-content) only exists inside an open query tab.
