@@ -24,7 +24,7 @@
  */
 /* eslint-env node */
 import type { Page } from '@playwright/test'
-import { test, expect, openSessionQueryTab } from '../fixtures'
+import { test, expect, openSessionQueryTab, runShortcut } from '../fixtures'
 
 const findShortcut = process.platform === 'darwin' ? 'Meta+f' : 'Control+f'
 
@@ -54,7 +54,7 @@ async function openGridWithResults(page: Page, sessionId: string, sql = 'SELECT 
   await editor.click()
   await editor.pressSequentially(sql)
   await page.waitForTimeout(500)
-  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press(runShortcut)
 
   await expect(page.locator('.lagun-result-grid')).toBeVisible({ timeout: 10_000 })
   await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })

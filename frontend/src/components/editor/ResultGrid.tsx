@@ -19,6 +19,8 @@ import GridSearchBar from './GridSearchBar'
 export interface ResultGridHandle {
   isAnyFilterPresent: () => boolean
   getFilteredData: () => ExportOverrideData
+  getSelectedData: () => ExportOverrideData
+  scrollToTop: () => void
   stopEditing: () => void
   deselectAll: () => void
   clearSort: () => void
@@ -298,7 +300,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     getFilteredData: () => {
       const rows: unknown[][] = []
       agApiRef.current?.forEachNodeAfterFilterAndSort(node => {
-        if (node.data) rows.push(visibleColumns.map(col => node.data[col] ?? null))
+        if (node.data) rows.push(visibleColumns.map(col => node.data![col] ?? null))
       })
       return {
         columns: visibleColumns,
@@ -306,6 +308,33 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         autoIncrementColumns: (columns ?? []).filter(c => c.is_auto_increment).map(c => c.name),
       }
     },
+    // Selection lives in a Map keyed by click order, so `getSelectedRows`
+    // returns rows in the order the user selected them, not the order the grid
+    // displays them. Walk the sorted row model first to keep exports aligned
+    // with what the user sees, then append any selected node the model omits
+    // (a selected row hidden by a column filter).
+    getSelectedData: () => {
+      const api = agApiRef.current
+      const rows: unknown[][] = []
+      const seen = new Set<string>()
+      const addRow = (data: Record<string, unknown> | undefined) => {
+        if (!data) return
+        const rowId = String(data.__ag_rowId ?? '')
+        if (seen.has(rowId)) return
+        seen.add(rowId)
+        rows.push(visibleColumns.map(col => data[col] ?? null))
+      }
+      api?.forEachNodeAfterFilterAndSort(node => {
+        if (node.isSelected()) addRow(node.data)
+      })
+      api?.getSelectedNodes().forEach(node => addRow(node.data))
+      return {
+        columns: visibleColumns,
+        rows,
+        autoIncrementColumns: (columns ?? []).filter(c => c.is_auto_increment).map(c => c.name),
+      }
+    },
+    scrollToTop: () => { agApiRef.current?.ensureIndexVisible(0, 'top') },
     stopEditing: () => { agApiRef.current?.stopEditing() },
     deselectAll: () => { agApiRef.current?.deselectAll() },
     clearSort: () => {

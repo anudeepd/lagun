@@ -870,3 +870,48 @@ describe('buildEmptyRowDraftValues', () => {
     expect(values).not.toHaveProperty('email')
   })
 })
+
+describe('data filter Escape handling', () => {
+  it('keeps the applied filter when Escape arrives while a dialog is open', async () => {
+    useSchemaStore.setState({
+      columns: {
+        'session-1/db/users': [makeColumn('id', true, true), makeColumn('name')],
+      },
+    })
+    vi.spyOn(api, 'getFunctions').mockResolvedValue([])
+    vi.spyOn(api, 'executeQuery').mockResolvedValue(makeResult(['id', 'name'], [[1, 'Alice']]))
+
+    const tab: Tab = {
+      id: 'table-filter-escape',
+      label: 'users',
+      type: 'table',
+      sessionId: 'session-1',
+      database: 'db',
+      table: 'users',
+      dataState: {
+        view: 'data',
+        whereFilter: "name = 'Alice'",
+        appliedWhere: "name = 'Alice'",
+        showFilterBar: true,
+      },
+    }
+
+    const view = render(createElement(TabContent, { tab }))
+    await waitFor(() => expect(view.container.querySelector('.cm-content')).not.toBeNull())
+
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    document.getElementById('lagun-overlays')!.appendChild(dialog)
+
+    const editor = view.container.querySelector('.cm-content') as HTMLElement
+    editor.focus()
+    fireEvent.keyDown(editor, { key: 'Escape' })
+
+    expect(editor.textContent).toBe("name = 'Alice'")
+    expect(view.container.querySelector('.cm-content')).not.toBeNull()
+
+    view.unmount()
+    vi.restoreAllMocks()
+    useSchemaStore.setState({ columns: {} })
+  })
+})

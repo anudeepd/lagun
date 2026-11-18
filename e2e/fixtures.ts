@@ -14,6 +14,8 @@ export const E2E_HOST = process.env.E2E_MYSQL_HOST ?? '127.0.0.1'
 export const E2E_PORT = parseInt(process.env.E2E_MYSQL_PORT ?? '3306')
 export const E2E_USER = process.env.E2E_MYSQL_USER ?? 'dev'
 export const E2E_PASS = process.env.E2E_MYSQL_PASS ?? 'dev'
+/** CodeMirror binds Cmd-Enter on macOS and Ctrl-Enter elsewhere. */
+export const runShortcut = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
 /** Use center rows: selection checkboxes live in AG Grid's pinned-left container. */
 export function dataGridRows(page: Page) {
   return page.locator('.ag-center-cols-container .ag-row')
@@ -85,6 +87,17 @@ export async function teardownDatabase(page: Page, sessionId: string) {
   await page.request.post(`/api/v1/sessions/${sessionId}/query`, {
     data: { sql: 'DROP DATABASE IF EXISTS `e2e_test`' },
   })
+}
+
+/** Activate the seeded session, open `e2e_test.products` and switch to Data. */
+export async function openProductsDataView(page: Page) {
+  await page.goto('/')
+
+  await page.locator('span.text-xs.truncate', { hasText: 'E2E Test Session' }).click()
+  await page.getByText('e2e_test', { exact: true }).click()
+  await page.getByRole('button', { name: 'products', exact: true }).click()
+  await page.getByRole('button', { name: 'Data', exact: true }).click()
+  await expect(dataGridRows(page).first()).toBeVisible({ timeout: 10_000 })
 }
 
 /**

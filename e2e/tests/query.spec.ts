@@ -4,7 +4,7 @@
  * Tests that a user can select a database, type a query in the editor,
  * run it, and see results in the grid.
  */
-import { test, expect, openSessionQueryTab } from '../fixtures'
+import { test, expect, openSessionQueryTab, runShortcut } from '../fixtures'
 
 test('run a SELECT query and see results in the grid', async ({ page, sessionId }) => {
   await page.goto('/')
@@ -16,7 +16,7 @@ test('run a SELECT query and see results in the grid', async ({ page, sessionId 
   await editor.pressSequentially('SELECT * FROM e2e_test.products')
 
   // Run the query
-  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press(runShortcut)
 
   // Wait for the ag-grid to render rows
   await expect(page.locator('.ag-row').first()).toBeVisible({ timeout: 10_000 })
@@ -37,7 +37,7 @@ test('run a COUNT query and see scalar result', async ({ page, sessionId }) => {
   const editor = page.locator('.cm-content')
   await editor.click()
   await editor.pressSequentially('SELECT COUNT(*) FROM e2e_test.products')
-  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press(runShortcut)
 
   await expect(page.locator('.ag-cell', { hasText: '3' })).toBeVisible({ timeout: 10_000 })
 })
@@ -65,7 +65,7 @@ test('bulk execution commits a large insert script', async ({ page, sessionId })
   const editor = page.locator('.cm-content')
   await editor.click()
   await editor.pressSequentially(sql)
-  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press(runShortcut)
 
   await expect(page.getByText('Large write script')).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText('Committed')).toBeVisible({ timeout: 10_000 })
@@ -100,7 +100,7 @@ test('bulk execution rolls back a failed large insert script', async ({ page, se
   const editor = page.locator('.cm-content')
   await editor.click()
   await editor.pressSequentially(statements.join(';\n'))
-  await page.keyboard.press('Control+Enter')
+  await page.keyboard.press(runShortcut)
 
   await expect(page.getByText('Rolled back', { exact: true })).toBeVisible({ timeout: 10_000 })
 

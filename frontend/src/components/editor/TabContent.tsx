@@ -289,6 +289,11 @@ export const buildSelectedRowsExportData = (
       }
 }
 
+/** True while a dialog opened through `#lagun-overlays` is mounted. */
+export function isOverlayDialogOpen(): boolean {
+  return document.querySelector('#lagun-overlays [role="dialog"], #lagun-overlays [role="alertdialog"]') !== null
+}
+
 function quoteDataTabIdent(identifier: string): string {
   return `\`${identifier.replace(/`/g, '``')}\``
 }
@@ -1167,6 +1172,7 @@ function TableTab({ tab, active = true }: Props) {
   const [functions, setFunctions] = useState<string[]>([])
   const [dataSortActive, setDataSortActive] = useState(false)
   const gridRef = useRef<ResultGridHandle>(null)
+  const scrollToTopOnNextResultRef = useRef(false)
   const [showImport, setShowImport] = useState(false)
   // Same mount gating as the query tab: keep the lazy chunks out of the first
   // render while still keeping the dialog mounted for its exit animation once
@@ -1236,7 +1242,7 @@ function TableTab({ tab, active = true }: Props) {
     [columns, pkColumns],
   )
 
-  const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string, commitWhereOnSuccess?: string) => {
+  const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string, commitWhereOnSuccess?: string, resetScrollOnSuccess = false) => {
     if (!tab.database || !tab.table) return
     const effectiveLimit = overrideLimit ?? limit
     const effectiveSearch = searchOverride !== undefined ? searchOverride : globalSearch
@@ -1311,6 +1317,7 @@ function TableTab({ tab, active = true }: Props) {
       if (shouldKeepPreviousResultOnLoad(res, result)) {
         showToast(`Refresh failed; showing previous result. ${res.error}`, 'error')
       } else {
+        if (!res.error && resetScrollOnSuccess) scrollToTopOnNextResultRef.current = true
         setResult(res)
         if (!res.error && commitWhereOnSuccess !== undefined) {
           setAppliedWhere(commitWhereOnSuccess)
@@ -1343,6 +1350,17 @@ function TableTab({ tab, active = true }: Props) {
 
   const loadDataRef = useRef(loadData)
   loadDataRef.current = loadData
+
+  // A filter or search can replace a long result with a short one while the
+  // grid keeps its old scroll offset, which leaves the matching rows above the
+  // viewport and shows only the tail of the set. Reset to the first row after
+  // the new row data has rendered.
+  useEffect(() => {
+    if (!scrollToTopOnNextResultRef.current) return
+    scrollToTopOnNextResultRef.current = false
+    const frame = window.requestAnimationFrame(() => gridRef.current?.scrollToTop())
+    return () => window.cancelAnimationFrame(frame)
+  }, [result])
 
   useEffect(() => {
     // Start downloading the heavy grid while the user is still reading Schema.
@@ -1463,7 +1481,7 @@ function TableTab({ tab, active = true }: Props) {
     if (!shouldDebounceDataSearch(previousSearch, globalSearch, view)) return
     const timer = window.setTimeout(() => {
       globalSearchTimerRef.current = null
-      loadDataRef.current(undefined, globalSearch, appliedWhereRef.current)
+      loadDataRef.current(undefined, globalSearch, appliedWhereRef.current, undefined, true)
     }, 400)
     globalSearchTimerRef.current = timer
     return () => {
@@ -1786,24 +1804,24 @@ function TableTab({ tab, active = true }: Props) {
 
   const handleLimitChange = (newLimit: number) => {
     setLimit(newLimit)
-    if (result) loadData(newLimit)
+    if (result) loadData(newLimit, undefined, undefined, undefined, true)
   }
 
   const handleApplyFilter = useCallback(() => {
-    loadDataRef.current(undefined, globalSearch, whereFilter, whereFilter)
+    loadDataRef.current(undefined, globalSearch, whereFilter, whereFilter, true)
   }, [whereFilter, globalSearch])
 
   // Picking a recent filter commits it immediately (same contract as Apply),
   // passing the picked value directly so no stale-state round-trip is needed.
   const handleSelectFilterHistory = useCallback((filter: string) => {
     setWhereFilter(filter)
-    loadDataRef.current(undefined, globalSearch, filter, filter)
+    loadDataRef.current(undefined, globalSearch, filter, filter, true)
   }, [globalSearch])
 
   const handleClearFilter = () => {
     setWhereFilter('')
     setAppliedWhere('')
-    loadData(undefined, globalSearch, '')
+    loadData(undefined, globalSearch, '', undefined, true)
   }
 
   const dismissWhereFilter = useCallback(() => {
@@ -1811,7 +1829,7 @@ function TableTab({ tab, active = true }: Props) {
     if (!whereFilter && !appliedWhere) return
     setWhereFilter('')
     setAppliedWhere('')
-    loadDataRef.current(undefined, globalSearch, '')
+    loadDataRef.current(undefined, globalSearch, '', undefined, true)
   }, [whereFilter, appliedWhere, globalSearch])
 
   const handleClearSearch = () => {
@@ -1894,10 +1912,18 @@ function TableTab({ tab, active = true }: Props) {
       { key: 'Mod-Enter', run: () => { applyFilterRef.current(); return true } },
     ])),
   [])
-  // Lowest precedence lets autocomplete consume Escape first when its menu is open.
+  // Lowest precedence lets autocomplete consume Escape first when its menu is
+  // open. While a dialog is open, Escape belongs to the dialog: the filter
+  // editor can still be the focused element for the frame before the lazily
+  // loaded export modal takes focus, and clearing the filter there made closing
+  // the export discard the query.
   const filterEscapeExtension = useMemo(() =>
     Prec.lowest(keymap.of([
-      { key: 'Escape', run: () => { dismissFilterRef.current(); return true } },
+      { key: 'Escape', run: () => {
+        if (isOverlayDialogOpen()) return false
+        dismissFilterRef.current()
+        return true
+      } },
     ])),
   [])
   const filterExtensions = useMemo(
@@ -1942,7 +1968,7 @@ function TableTab({ tab, active = true }: Props) {
                     window.clearTimeout(globalSearchTimerRef.current)
                     globalSearchTimerRef.current = null
                   }
-                  loadDataRef.current(undefined, globalSearch, appliedWhereRef.current)
+                  loadDataRef.current(undefined, globalSearch, appliedWhereRef.current, undefined, true)
                   return
                 }
                 if (e.key !== 'Escape') return
@@ -2146,8 +2172,11 @@ function TableTab({ tab, active = true }: Props) {
             type="button"
             onClick={() => {
               if (selectedRows.length > 0) {
+                const selected = gridRef.current?.getSelectedData()
                 setDataExportContext({
-                  rowsOverride: buildSelectedRowsExportData(result, selectedRows, columns),
+                  rowsOverride: selected && selected.rows.length > 0
+                    ? selected
+                    : buildSelectedRowsExportData(result, selectedRows, columns),
                   rowsOverrideLabel: 'selected rows',
                 })
                 return
@@ -2191,7 +2220,7 @@ function TableTab({ tab, active = true }: Props) {
                 setWhereFilter(val)
                 if (!val.trim() && appliedWhere) {
                   setAppliedWhere('')
-                  loadData(undefined, globalSearch, '')
+                  loadData(undefined, globalSearch, '', undefined, true)
                 }
               }}
               extensions={filterExtensions}
