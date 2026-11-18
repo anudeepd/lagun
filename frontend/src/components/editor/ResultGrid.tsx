@@ -8,7 +8,7 @@ import {
   RowSelectionModule, ScrollApiModule, TextEditorModule, TextFilterModule,
   TooltipModule, ValidationModule, themeQuartz,
 } from 'ag-grid-community'
-import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine, Plus } from 'lucide-react'
+import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine, Plus, Eye } from 'lucide-react'
 import type { CellClassParams, ICellRendererParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
@@ -166,7 +166,8 @@ interface ActiveCell {
   data: Record<string, unknown>
 }
 
-interface CellEditorState {
+interface CellPanelState {
+  mode: 'edit' | 'view'
   columnName: string
   oldValue: unknown
   data: Record<string, unknown>
@@ -272,7 +273,7 @@ export const buildResultGridRowData = ({
 const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ result, onCellEdit, primaryKeyColumns = EMPTY_PRIMARY_KEY_COLUMNS, editable = false, selectable, onSelectionChange, columns, onDeleteRows, onDuplicateRow, onCreateEmptyRow, hiddenColumns, pendingChanges, insertDrafts, insertDraftAnchors, includeRowIndexInId, onSortActiveChange }: Props, ref) {
   const [menu, setMenu] = useState<MenuState | null>(null)
   const [emptyMenu, setEmptyMenu] = useState<{ x: number; y: number } | null>(null)
-  const [cellEditor, setCellEditor] = useState<CellEditorState | null>(null)
+  const [cellPanel, setCellPanel] = useState<CellPanelState | null>(null)
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findMatches, setFindMatches] = useState<Array<{ rowIndex: number; colId: string }>>([])
@@ -534,7 +535,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   const openLargeCellEditor = useCallback((cell: Pick<ActiveCell, 'columnName' | 'value' | 'data'>) => {
     if (!canEditColumn(cell.columnName)) return
-    setCellEditor({
+    setCellPanel({
+      mode: 'edit',
       columnName: cell.columnName,
       oldValue: cell.value,
       data: cell.data,
@@ -544,6 +546,18 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     setMenu(null)
   }, [canEditColumn])
 
+  const openCellViewer = useCallback((cell: Pick<ActiveCell, 'columnName' | 'value' | 'data'>) => {
+    setCellPanel({
+      mode: 'view',
+      columnName: cell.columnName,
+      oldValue: cell.value,
+      data: cell.data,
+      value: cell.value == null ? '' : String(cell.value),
+      wasNull: cell.value === null,
+    })
+    setMenu(null)
+  }, [])
+
   // Refs pin the latest canEditColumn / openLargeCellEditor so the window-level
   // keydown handler does not need to re-bind on every editable change.
   const canEditColumnRef = useRef(canEditColumn)
@@ -551,6 +565,9 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   const openLargeCellEditorRef = useRef(openLargeCellEditor)
   useEffect(() => { openLargeCellEditorRef.current = openLargeCellEditor }, [openLargeCellEditor])
+
+  const openCellViewerRef = useRef(openCellViewer)
+  useEffect(() => { openCellViewerRef.current = openCellViewer }, [openCellViewer])
 
   const rememberActiveCell = useCallback((cell: ActiveCell | null) => {
     activeCellRef.current = cell
@@ -687,9 +704,12 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         // large cell editor. stopPropagation cannot help: same target, same
         // phase — the other listener runs regardless.
         if (findOpen) return
-        if (!canEditColumnRef.current(activeCell.columnName)) return
         e.preventDefault()
-        openLargeCellEditorRef.current(activeCell)
+        if (canEditColumnRef.current(activeCell.columnName)) {
+          openLargeCellEditorRef.current(activeCell)
+        } else {
+          openCellViewerRef.current(activeCell)
+        }
       }
     }
 
@@ -806,7 +826,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }, [])
 
   const handleCellDoubleClicked = useCallback((e: CellDoubleClickedEvent<Record<string, unknown>>) => {
-    if (!e.colDef.field || e.rowIndex == null || !e.data || !canEditColumn(e.colDef.field)) return
+    if (!e.colDef.field || e.rowIndex == null || !e.data) return
 
     const cell: ActiveCell = {
       rowIndex: e.rowIndex,
@@ -816,13 +836,18 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     }
     rememberActiveCell(cell)
 
+    if (!canEditColumn(e.colDef.field)) {
+      openCellViewer(cell)
+      return
+    }
+
     if (valueNeedsLargeEditor(e.value, e.event?.target ?? null)) {
       openLargeCellEditor(cell)
       return
     }
 
     startInlineCellEditing(e.api, e.rowIndex, e.colDef.field)
-  }, [canEditColumn, openLargeCellEditor, rememberActiveCell])
+  }, [canEditColumn, openCellViewer, openLargeCellEditor, rememberActiveCell])
 
   const handleColumnHeaderClicked = useCallback((e: ColumnHeaderClickedEvent) => {
     if (!('getActualWidth' in e.column)) return  // skip column groups
@@ -892,6 +917,19 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     delete displayRow.__lagun_insertDraft
 
     const items: ContextMenuItem[] = [
+      {
+        type: 'item',
+        label: 'View full value',
+        icon: <Eye size={14} />,
+        onClick: () => {
+          openCellViewer({
+            columnName: menu.columnName,
+            value: menu.cellValue,
+            data: menu.rowData,
+          })
+          closeMenu()
+        },
+      },
       {
         type: 'item',
         label: 'Copy cell',
@@ -966,7 +1004,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
     }
 
     return items
-  }, [menu, columns, editable, onCellEdit, onDeleteRows, onDuplicateRow, primaryKeyColumns, closeMenu, rowData, openLargeCellEditor])
+  }, [menu, columns, editable, onCellEdit, onDeleteRows, onDuplicateRow, primaryKeyColumns, closeMenu, rowData, openLargeCellEditor, openCellViewer])
 
   const emptyMenuItems = useMemo((): ContextMenuItem[] => {
     if (!emptyMenu || !editable || !onCreateEmptyRow) return []
@@ -982,17 +1020,22 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }, [emptyMenu, editable, onCreateEmptyRow, closeMenu])
 
   const handleApplyCellEditor = useCallback(() => {
-    if (!cellEditor) return
+    if (!cellPanel || cellPanel.mode !== 'edit') return
     onCellEdit?.({
-      column: cellEditor.columnName,
+      column: cellPanel.columnName,
       // The editor opens a NULL cell as an empty textarea and shows a NULL
       // badge; applying it unchanged must write NULL back, not ''.
-      newValue: cellEditor.wasNull && cellEditor.value === '' ? null : cellEditor.value,
-      oldValue: cellEditor.oldValue,
-      data: cellEditor.data,
+      newValue: cellPanel.wasNull && cellPanel.value === '' ? null : cellPanel.value,
+      oldValue: cellPanel.oldValue,
+      data: cellPanel.data,
     })
-    setCellEditor(null)
-  }, [cellEditor, onCellEdit])
+    setCellPanel(null)
+  }, [cellPanel, onCellEdit])
+
+  const handleCopyCellPanel = useCallback(() => {
+    if (!cellPanel) return
+    clipboardWrite(cellPanel.value).catch(() => {})
+  }, [cellPanel])
 
   if (result.error) {
     return <QueryErrorState error={result.error} />
@@ -1078,38 +1121,57 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
         prop) made Escape close it in a single frame.
       */}
       <Modal
-        open={!!cellEditor}
-        onClose={() => setCellEditor(null)}
-        title="Edit cell"
+        open={!!cellPanel}
+        onClose={() => setCellPanel(null)}
+        title={cellPanel?.mode === 'view' ? 'View cell' : 'Edit cell'}
         width="max-w-3xl"
         motionPreset="subtle"
-        footer={(
+        footer={cellPanel?.mode === 'view' ? (
           <>
-            <Button variant="ghost" onClick={() => setCellEditor(null)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setCellPanel(null)}>Close</Button>
+            <Button variant="primary" onClick={handleCopyCellPanel}>
+              <Copy size={14} aria-hidden="true" /> Copy
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={() => setCellPanel(null)}>Cancel</Button>
             <Button variant="primary" onClick={handleApplyCellEditor}>Apply</Button>
           </>
         )}
       >
-        {cellEditor && (
+        {cellPanel && (
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <PencilLine size={14} className="text-muted" aria-hidden="true" />
-              <span className="lagun-data-text font-data text-slate-200">{cellEditor.columnName}</span>
-              {cellEditor.wasNull && (
+              {cellPanel.mode === 'view'
+                ? <Eye size={14} className="text-muted" aria-hidden="true" />
+                : <PencilLine size={14} className="text-muted" aria-hidden="true" />}
+              <span className="lagun-data-text font-data text-slate-200">{cellPanel.columnName}</span>
+              {cellPanel.wasNull && (
                 <span className="px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700 text-muted">
                   NULL
                 </span>
               )}
             </div>
-            <textarea
-              ref={focusTextareaAtEnd}
-              aria-label={`Edit ${cellEditor.columnName}`}
-              className="min-h-[240px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 lagun-field focus:outline-none focus:ring-1 focus:ring-brand-400 focus:border-brand-400"
-              value={cellEditor.value}
-              onChange={e => setCellEditor(prev => prev ? { ...prev, value: e.target.value } : prev)}
-              spellCheck={false}
-            />
-            <p className="text-xs text-muted">Changes are staged until you apply them to the database.</p>
+            {cellPanel.mode === 'view' ? (
+              <div className="max-h-[60vh] overflow-auto rounded-md border border-surface-700 bg-surface-950 px-3 py-2">
+                <pre className={`whitespace-pre-wrap break-words font-mono text-sm leading-6 ${cellPanel.wasNull ? 'italic text-muted' : 'text-slate-100'}`}>
+                  {cellPanel.wasNull ? 'NULL' : cellPanel.value}
+                </pre>
+              </div>
+            ) : (
+              <>
+                <textarea
+                  ref={focusTextareaAtEnd}
+                  aria-label={`Edit ${cellPanel.columnName}`}
+                  className="min-h-[240px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 lagun-field focus:outline-none focus:ring-1 focus:ring-brand-400 focus:border-brand-400"
+                  value={cellPanel.value}
+                  onChange={e => setCellPanel(prev => prev ? { ...prev, value: e.target.value } : prev)}
+                  spellCheck={false}
+                />
+                <p className="text-xs text-muted">Changes are staged until you apply them to the database.</p>
+              </>
+            )}
           </div>
         )}
       </Modal>
