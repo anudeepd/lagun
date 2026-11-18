@@ -70,7 +70,7 @@ dev = [
     "uvicorn[standard]>=0.29.0,<1",
 ]
 ldap = [
-    "ldapgate>=0.1.29",
+    "ldapgate>=0.2.0,<0.3",
 ]
 
 [tool.pytest.ini_options]
