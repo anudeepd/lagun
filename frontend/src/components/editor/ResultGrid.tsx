@@ -71,6 +71,11 @@ const darkTheme = themeQuartz.withParams({
 
 const DATE_TYPES = new Set(['datetime', 'timestamp', 'date', 'time'])
 const COLUMN_WIDTH_SAMPLE_SIZE = 40
+// Columns wider than this stop flexing and keep their content width, so a wide
+// result overflows into the grid's horizontal scrollbar instead of shrinking to
+// an equal share of the viewport.
+const MAX_FLEX_COLUMN_WIDTH = 480
+const MAX_CONTENT_COLUMN_WIDTH = 1200
 // Stable default so the destructured default does not allocate a fresh array on
 // every render (which would invalidate the rowData memo and re-trigger the
 // debounced find-scan effect, causing an infinite render loop).
@@ -399,6 +404,11 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       const sampledCellWidth = result.rows
         .slice(0, COLUMN_WIDTH_SAMPLE_SIZE)
         .reduce((max, row) => Math.max(max, displayLength(row[colIdx])), 0)
+      // Reserve fixed room for filter/sort/multi-sort indicators so labels do not disappear behind controls.
+      const minWidth = Math.ceil(Math.max(120, col.length * 7.5 + 104, Math.min(sampledCellWidth, 36) * 7.2 + 32))
+      // Sample farther than `minWidth` so a wide cell can claim its own width.
+      const contentWidth = Math.ceil(Math.max(minWidth, Math.min(sampledCellWidth, 200) * 7.2 + 32))
+      const wide = contentWidth > MAX_FLEX_COLUMN_WIDTH
 
       return {
         field: col,
@@ -429,8 +439,10 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
           parts.push(text.slice(start))
           return <span>{parts}</span>
         },
-        // Reserve fixed room for filter/sort/multi-sort indicators so labels do not disappear behind controls.
-        minWidth: Math.ceil(Math.max(120, col.length * 7.5 + 104, Math.min(sampledCellWidth, 36) * 7.2 + 32)),
+        minWidth,
+        ...(wide
+          ? { width: Math.min(contentWidth, MAX_CONTENT_COLUMN_WIDTH) }
+          : { flex: 1 }),
         cellStyle: (params: CellClassParams<Record<string, unknown>>) => {
           const base = {
             fontFamily: 'var(--lagun-data-font)',
@@ -513,7 +525,6 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   const defaultColDef = useMemo(() => ({
     minWidth: 80,
-    flex: 1,
   }), [])
 
   const canEditColumn = useCallback((columnName: string) =>
