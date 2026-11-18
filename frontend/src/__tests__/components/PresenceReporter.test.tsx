@@ -19,6 +19,7 @@ afterEach(() => {
   useTabStore.setState({ tabs: [], activeTabId: null, pendingSqls: {} })
   sessionStorage.clear()
   vi.clearAllMocks()
+  vi.restoreAllMocks()
 })
 
 describe('PresenceReporter', () => {
@@ -145,7 +146,8 @@ describe('PresenceReporter', () => {
     expect(vi.mocked(api.reportPresence).mock.calls[0][0].tabs).toHaveLength(100)
   })
 
-  it('surfaces the first publish failure and stays quiet on retries', async () => {
+  it('keeps a failed background publish quiet', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.mocked(api.reportPresence).mockRejectedValue(new Error('503 Service Unavailable'))
     useTabStore.setState({
       tabs: [{
@@ -160,16 +162,17 @@ describe('PresenceReporter', () => {
 
     render(<PresenceReporter />)
 
-    await waitFor(() => expect(showToast).toHaveBeenCalledTimes(1))
-    expect(showToast).toHaveBeenCalledWith(
+    await waitFor(() => expect(warn).toHaveBeenCalledTimes(1))
+    expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('Could not publish presence: 503 Service Unavailable'),
-      'error',
     )
+    expect(showToast).not.toHaveBeenCalled()
 
-    // A new payload restarts the heartbeat and fails again; the user has
-    // already been told, so there is no second toast.
+    // A new payload restarts the heartbeat and fails again; the first failure
+    // was already logged, so the console must not fill up on every retry.
     act(() => useTabStore.setState({ activeTabId: null }))
     await waitFor(() => expect(api.reportPresence).toHaveBeenCalledTimes(2))
-    expect(showToast).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(showToast).not.toHaveBeenCalled()
   })
 })
