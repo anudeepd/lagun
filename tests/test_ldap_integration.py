@@ -52,6 +52,18 @@ async def test_server_config_exposes_ldap_idle_timeout(monkeypatch):
     }
 
 
+def test_shipped_ldap_config_keeps_idle_timeout_reachable():
+    """The sample must not set an idle timeout the cookie lifetime overrides."""
+    pytest.importorskip("ldapgate")
+
+    from ldapgate.config import load_config
+
+    config = load_config(str(Path(__file__).resolve().parents[1] / "ldapgate.example.yaml"))
+
+    assert config.proxy.idle_timeout > 0
+    assert config.proxy.session_ttl >= config.proxy.idle_timeout
+
+
 def test_login_template_uses_nonce_for_inline_assets():
     template = _login_template()
     assert '<link rel="icon" type="image/svg+xml" href="/favicon.svg">' in template

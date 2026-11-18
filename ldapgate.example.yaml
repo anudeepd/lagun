@@ -1,0 +1,19 @@
+ldap:
+    url: ldaps://ldap.example.com:636
+    bind_dn: cn=svc,dc=example,dc=com
+    bind_password: "replace-with-bind-password"
+    base_dn: dc=example,dc=com
+    user_filter: "(uid={username})"
+    timeout: 30
+    pool_size: 16
+    allowed_users:
+        - alice
+        - bob
+proxy:
+    secret_key: replace-with-at-least-32-random-characters
+    # Absolute LDAP session lifetime in seconds. Must be at least idle_timeout.
+    session_ttl: 43200
+    # Browser inactivity timeout in seconds. 4 hours. 0 disables idle expiry.
+    idle_timeout: 14400
+    app_name: Lagun
+    secure_cookies: true

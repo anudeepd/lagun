@@ -130,6 +130,8 @@ ldap:
   pool_size: 16
 ```
 
+Use `ldapgate.example.yaml` in this repository as the starting template. `proxy.session_ttl` is the absolute lifetime of the LDAP cookie and token. `proxy.idle_timeout` is the inactivity limit and must not exceed it. The sample uses 12 hours and 4 hours. Restart and sign in again after changing either value so the browser receives the new cookie lifetime.
+
 ### Shared connections and audit log
 
 For LDAP deployments, an administrator can provide connections centrally and
