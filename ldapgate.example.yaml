@@ -17,3 +17,6 @@ proxy:
     idle_timeout: 14400
     app_name: Lagun
     secure_cookies: true
+    # Largest request the gate accepts. The 10 MiB default is below the 1 GiB
+    # import limit, so keep this above LAGUN_IMPORT_MAX_FILE_BYTES.
+    max_body_size: 2147483648

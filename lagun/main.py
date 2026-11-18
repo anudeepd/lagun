@@ -534,6 +534,25 @@ def _ensure_ldapgate_static_paths(config) -> None:
     proxy_config.static_paths = static_paths
 
 
+def _warn_if_ldap_body_limit_blocks_imports(config) -> None:
+    """Warn when the gate rejects an import body the app would accept."""
+    proxy_config = getattr(config, "proxy", None)
+    if proxy_config is None:
+        return
+    limit = int(getattr(proxy_config, "max_body_size", 0) or 0)
+    import_limit = import_data.IMPORT_MAX_FILE_BYTES
+    required = import_limit + 1024 * 1024
+    if limit < required:
+        _log.warning(
+            "ldapgate proxy.max_body_size (%d bytes) is below the %d bytes "
+            "needed for a %d byte import plus multipart overhead; larger "
+            "imports fail with 413. Raise max_body_size in the ldapgate config.",
+            limit,
+            required,
+            import_limit,
+        )
+
+
 _ldap_config_path = os.getenv("LAGUN_LDAP_CONFIG")
 if _ldap_config_path:
     try:
@@ -547,6 +566,7 @@ if _ldap_config_path:
     _login_template = Path(__file__).parent / "templates" / "login.html"
     _ldap_config = load_config(_ldap_config_path)
     _ensure_ldapgate_static_paths(_ldap_config)
+    _warn_if_ldap_body_limit_blocks_imports(_ldap_config)
     os.environ["LAGUN_LDAP_IDLE_TIMEOUT"] = str(
         getattr(getattr(_ldap_config, "proxy", None), "idle_timeout", 0) or 0
     )
