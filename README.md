@@ -130,6 +130,10 @@ ldap:
   pool_size: 16
 ```
 
+Use `ldapgate.example.yaml` in this repository as the starting template. `proxy.session_ttl` is the absolute lifetime of the LDAP cookie and token. `proxy.idle_timeout` is the inactivity limit and must not exceed it. The sample uses 12 hours and 4 hours. Restart and sign in again after changing either value so the browser receives the new cookie lifetime.
+
+`proxy.max_body_size` must be larger than `LAGUN_IMPORT_MAX_FILE_BYTES` because ldapgate checks the whole multipart body. The example sets 2 GiB for the default 1 GiB import limit.
+
 ### Shared connections and audit log
 
 For LDAP deployments, an administrator can provide connections centrally and
@@ -292,7 +296,8 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/lagun.internal.example/privkey.pem;
 
     # Imports are streamed up to LAGUN_IMPORT_MAX_FILE_BYTES (1 GiB by default).
-    client_max_body_size 1g;
+    # The multipart body adds overhead, so keep this above the file limit.
+    client_max_body_size 2g;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
