@@ -269,7 +269,10 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           <m.button
             onClick={handleToggleBookmarksOnly}
             whileTap={{ scale: 0.78, rotate: -12 }}
-            animate={{ scale: showBookmarksOnly ? 1.12 : 1, rotate: showBookmarksOnly ? 8 : 0 }}
+            animate={{
+              scale: showBookmarksOnly ? [1, 1.45, 1] : 1,
+              rotate: showBookmarksOnly ? [0, 14, 0] : 0,
+            }}
             transition={surfaceTransition}
             aria-label={showBookmarksOnly ? 'Show all tables' : 'Show bookmarks only'}
             aria-pressed={showBookmarksOnly}
