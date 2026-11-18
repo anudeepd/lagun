@@ -41,4 +41,11 @@ test('scrolls a wide query result column horizontally', async ({ page, sessionId
     return el.scrollLeft
   })
   expect(scrollLeft).toBeGreaterThan(0)
+
+  await page.locator('.ag-row').first().locator('[col-id="payload"]').dblclick()
+  const dialog = page.getByRole('dialog', { name: 'View cell' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('pre')).toHaveText(payload)
+  await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(dialog).toBeHidden()
 })

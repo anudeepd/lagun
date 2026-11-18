@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import ResultGrid from '../../components/editor/ResultGrid'
 import * as agGridReact from 'ag-grid-react'
@@ -38,5 +38,25 @@ describe('ResultGrid cell editor styling', () => {
 
     await waitFor(() => expect(screen.getByRole('dialog', { name: 'Edit cell' })).toBeInTheDocument())
     expect(screen.getByRole('textbox', { name: 'Edit name' })).toHaveClass('font-mono', 'text-sm')
+  })
+
+  it('opens a read-only viewer with the full query cell value', async () => {
+    const value = 'x'.repeat(3000)
+    render(<ResultGrid result={{ columns: ['payload'], rows: [[value]], row_count: 1, exec_time_ms: 1 }} />)
+
+    await act(async () => {
+      __latestProps.current?.onCellDoubleClicked?.({
+        colDef: { field: 'payload' },
+        rowIndex: 0,
+        data: { payload: value },
+        value,
+        api: {},
+      })
+    })
+
+    const dialog = await screen.findByRole('dialog', { name: 'View cell' })
+    expect(within(dialog).getByText(value)).toBeInTheDocument()
+    expect(within(dialog).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Copy' })).toBeInTheDocument()
   })
 })
