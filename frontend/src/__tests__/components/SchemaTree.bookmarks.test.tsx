@@ -24,6 +24,7 @@ describe('SchemaTree bookmarks', () => {
       dbErrors: {},
       tables: { [`${SESSION}/app_db`]: [table('users'), table('orders')] },
       columns: {},
+      rowKeys: {},
       loadingDbs: new Set(),
       loadingTables: new Set(),
     })

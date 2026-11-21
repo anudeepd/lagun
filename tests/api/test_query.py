@@ -890,7 +890,7 @@ async def test_row_delete_without_primary_key_uses_all_columns(
     assert data["affected_rows"] == 1
     assert data["sql_executed"] == (
         f"DELETE FROM `{test_db}`.`no_pk_delete_users` "
-        "WHERE `name` = 'Alice' AND `email` IS NULL AND `age` = 30"
+        "WHERE `name` = 'Alice' AND `email` IS NULL AND `age` = 30 LIMIT 1"
     )
 
     r2 = await client.post(
@@ -1043,7 +1043,10 @@ async def test_row_update_no_pk_with_null(client, session_id, test_db):
         },
     )
     assert r.status_code == 200
-    assert r.json()["affected_rows"] == 1
+    data = r.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+    assert data["sql_executed"].endswith(" LIMIT 1")
 
     r2 = await client.post(
         f"/api/v1/sessions/{session_id}/query",

@@ -9,6 +9,7 @@ function resetStore() {
     databases: {},
     tables: {},
     columns: {},
+    rowKeys: {},
     loadingDbs: new Set(),
     loadingTables: new Set(),
   })
@@ -67,11 +68,20 @@ describe('schemaStore', () => {
     })
   })
 
+  describe('loadRowKey', () => {
+    it('fetches and stores the columns that identify one row', async () => {
+      const key = await useSchemaStore.getState().loadRowKey(SESSION, DB, TABLE)
+      expect(key).toEqual({ columns: ['id'], kind: 'primary' })
+      expect(useSchemaStore.getState().rowKeys[`${SESSION}/${DB}/${TABLE}`]).toEqual(key)
+    })
+  })
+
   describe('invalidateSession', () => {
     it('removes all cached data for the session', async () => {
       await useSchemaStore.getState().loadDatabases(SESSION)
       await useSchemaStore.getState().loadTables(SESSION, DB)
       await useSchemaStore.getState().loadColumns(SESSION, DB, TABLE)
+      await useSchemaStore.getState().loadRowKey(SESSION, DB, TABLE)
 
       useSchemaStore.getState().invalidateSession(SESSION)
 
@@ -79,6 +89,7 @@ describe('schemaStore', () => {
       expect(state.databases[SESSION]).toBeUndefined()
       expect(state.tables[`${SESSION}/${DB}`]).toBeUndefined()
       expect(state.columns[`${SESSION}/${DB}/${TABLE}`]).toBeUndefined()
+      expect(state.rowKeys[`${SESSION}/${DB}/${TABLE}`]).toBeUndefined()
     })
 
     it('does not affect data from other sessions', async () => {
@@ -93,11 +104,13 @@ describe('schemaStore', () => {
     it('removes only the specified table columns from cache', async () => {
       await useSchemaStore.getState().loadColumns(SESSION, DB, TABLE)
       await useSchemaStore.getState().loadColumns(SESSION, DB, 'orders')
+      await useSchemaStore.getState().loadRowKey(SESSION, DB, TABLE)
 
       useSchemaStore.getState().invalidateTable(SESSION, DB, TABLE)
 
       const state = useSchemaStore.getState()
       expect(state.columns[`${SESSION}/${DB}/${TABLE}`]).toBeUndefined()
+      expect(state.rowKeys[`${SESSION}/${DB}/${TABLE}`]).toBeUndefined()
       expect(state.columns[`${SESSION}/${DB}/orders`]).toBeDefined()
     })
   })

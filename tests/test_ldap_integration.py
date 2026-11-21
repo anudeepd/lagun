@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from lagun.api.config import get_server_config
-from lagun.main import APP_CSP, _ensure_ldapgate_static_paths
+from lagun.main import (
+    APP_CSP,
+    _ensure_ldapgate_static_paths,
+    _warn_if_ldap_body_limit_blocks_imports,
+)
 
 
 def _login_template() -> str:
@@ -50,6 +54,47 @@ async def test_server_config_exposes_ldap_idle_timeout(monkeypatch):
         "ldap_idle_timeout": 900,
         "is_admin": False,
     }
+
+
+def test_shipped_ldap_config_keeps_idle_timeout_reachable():
+    """The sample must not set an idle timeout the cookie lifetime overrides."""
+    pytest.importorskip("ldapgate")
+
+    from ldapgate.config import load_config
+
+    config = load_config(str(Path(__file__).resolve().parents[1] / "ldapgate.example.yaml"))
+
+    assert config.proxy.idle_timeout > 0
+    assert config.proxy.session_ttl >= config.proxy.idle_timeout
+
+
+def test_shipped_ldap_config_allows_the_import_limit():
+    """The gate must accept the multipart body of the largest import."""
+    pytest.importorskip("ldapgate")
+
+    from ldapgate.config import load_config
+
+    config = load_config(str(Path(__file__).resolve().parents[1] / "ldapgate.example.yaml"))
+
+    assert config.proxy.max_body_size > 1024 * 1024 * 1024
+
+
+def test_ldap_body_limit_warning_names_the_setting(caplog):
+    caplog.clear()
+    proxy = types.SimpleNamespace(max_body_size=10 * 1024 * 1024)
+
+    _warn_if_ldap_body_limit_blocks_imports(types.SimpleNamespace(proxy=proxy))
+
+    assert "max_body_size" in caplog.text
+
+
+def test_ldap_body_limit_accepts_two_gib(caplog):
+    caplog.clear()
+    proxy = types.SimpleNamespace(max_body_size=2 * 1024 * 1024 * 1024)
+
+    _warn_if_ldap_body_limit_blocks_imports(types.SimpleNamespace(proxy=proxy))
+
+    assert "max_body_size" not in caplog.text
 
 
 def test_login_template_uses_nonce_for_inline_assets():

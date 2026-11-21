@@ -540,7 +540,7 @@ describe('data tab search loading', () => {
 
     view.unmount()
     vi.restoreAllMocks()
-    useSchemaStore.setState({ columns: {} })
+    useSchemaStore.setState({ columns: {}, rowKeys: {} })
   })
 })
 
@@ -912,6 +912,6 @@ describe('data filter Escape handling', () => {
 
     view.unmount()
     vi.restoreAllMocks()
-    useSchemaStore.setState({ columns: {} })
+    useSchemaStore.setState({ columns: {}, rowKeys: {} })
   })
 })

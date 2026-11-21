@@ -1,7 +1,7 @@
 """Pydantic models for schema introspection."""
 
-from typing import Optional
-from pydantic import BaseModel
+from typing import Literal, Optional
+from pydantic import BaseModel, Field
 
 
 class ColumnInfo(BaseModel):
@@ -21,6 +21,13 @@ class IndexInfo(BaseModel):
     columns: list[str]
     is_unique: bool
     index_type: str
+
+
+class RowKeyInfo(BaseModel):
+    """Columns the data grid may use to address one row, empty when none exist."""
+
+    columns: list[str] = Field(default_factory=list)
+    kind: Optional[Literal["primary", "unique"]] = None
 
 
 class TableInfo(BaseModel):
