@@ -25,6 +25,7 @@ describe('SchemaTree search', () => {
       databases: {},
       tables: {},
       columns: {},
+      rowKeys: {},
       loadingDbs: new Set(),
       loadingTables: new Set(),
     })

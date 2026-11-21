@@ -152,6 +152,54 @@ async def test_list_indexes(client, session_id, test_db):
     assert "id" in primary["columns"]
 
 
+async def test_row_key_prefers_the_primary_key(client, session_id, test_db):
+    r = await client.get(
+        f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/row-key"
+    )
+    assert r.status_code == 200
+    assert r.json() == {"columns": ["id"], "kind": "primary"}
+
+
+async def test_row_key_uses_a_not_null_unique_index(client, session_id, test_db):
+    await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "sql": "CREATE TABLE unique_rows (email VARCHAR(100) NOT NULL UNIQUE, age INT)",
+            "database": test_db,
+        },
+    )
+
+    r = await client.get(
+        f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/unique_rows/row-key"
+    )
+    assert r.status_code == 200
+    assert r.json() == {"columns": ["email"], "kind": "unique"}
+
+
+async def test_row_key_is_empty_without_a_usable_unique_key(
+    client, session_id, test_db
+):
+    await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "sql": (
+                "CREATE TABLE keyless_rows ("
+                "  name VARCHAR(100),"
+                "  email VARCHAR(100) UNIQUE,"
+                "  age INT"
+                ")"
+            ),
+            "database": test_db,
+        },
+    )
+
+    r = await client.get(
+        f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/keyless_rows/row-key"
+    )
+    assert r.status_code == 200
+    assert r.json() == {"columns": [], "kind": None}
+
+
 async def test_get_create_sql(client, session_id, test_db):
     r = await client.get(
         f"/api/v1/sessions/{session_id}/databases/{test_db}/tables/users/create_sql"

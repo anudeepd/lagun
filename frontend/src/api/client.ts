@@ -8,7 +8,7 @@ export const API_BASE = '/api/v1'
  * 200 with `ok: false`. Returning a discriminated union makes ignoring the
  * failure a type error instead of a silent success.
  */
-export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string }
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: string; data?: T }
 
 function formatApiError(status: number, payload: unknown): string {
   if (payload && typeof payload === 'object' && 'detail' in payload) {
@@ -117,7 +117,7 @@ export async function requestResult<T extends { error?: string | null }>(
   try {
     const data = await request<T>(path, options)
     if (data && typeof data === 'object' && data.error) {
-      return { ok: false, error: String(data.error) }
+      return { ok: false, error: String(data.error), data }
     }
     return { ok: true, data }
   } catch (error) {
@@ -225,6 +225,11 @@ export const api = {
   getColumns: (sessionId: string, db: string, table: string, signal?: AbortSignal) =>
     request<import('../types').ColumnInfo[]>(
       `/sessions/${sessionId}/databases/${db}/tables/${table}/columns`,
+      { signal }
+    ),
+  getRowKey: (sessionId: string, db: string, table: string, signal?: AbortSignal) =>
+    request<import('../types').RowKeyInfo>(
+      `/sessions/${sessionId}/databases/${db}/tables/${table}/row-key`,
       { signal }
     ),
   getIndexes: (sessionId: string, db: string, table: string, signal?: AbortSignal) =>

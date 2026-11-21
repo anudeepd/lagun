@@ -163,6 +163,9 @@ export const handlers = [
   http.get(`${BASE}/sessions/:id/databases/:db/tables/:table/columns`, () =>
     HttpResponse.json(mockColumns)
   ),
+  http.get(`${BASE}/sessions/:id/databases/:db/tables/:table/row-key`, () =>
+    HttpResponse.json({ columns: ['id'], kind: 'primary' })
+  ),
   http.post(`${BASE}/sessions/:id/databases/:db/tables/:table/analyze`, () =>
     HttpResponse.json({ ok: true, analyzed: true, row_count: 2, data_length: 16384 })
   ),
