@@ -278,6 +278,40 @@ async def test_keyless_delete_batch_deletes_one_row_per_key(
     assert check.json()["rows"] == [["Bob"]]
 
 
+async def test_row_update_accepts_an_all_columns_key_on_a_keyed_table(
+    client, session_id, test_db
+):
+    # A cached older frontend sends every column. The primary key is part of
+    # that key, so the write is still unique and needs no LIMIT.
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "CREATE TABLE keyed_users (id INT PRIMARY KEY, name VARCHAR(100), age INT)",
+    )
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "INSERT INTO keyed_users (id, name, age) VALUES (1, 'Alice', 30)",
+    )
+
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/row-update",
+        json={
+            "database": test_db,
+            "table": "keyed_users",
+            "primary_key": {"id": 1, "name": "Alice", "age": 30},
+            "updates": {"age": 31},
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+    assert " LIMIT " not in data["sql_executed"]
+
+
 async def test_row_update_requires_every_key_column(client, session_id, test_db):
     await _create(
         client,
