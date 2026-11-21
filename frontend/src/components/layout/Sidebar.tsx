@@ -9,6 +9,7 @@ import ConfigImportDialog from '../sessions/ConfigImportDialog'
 import SchemaTree from '../schema/SchemaTree'
 import Button from '../ui/Button'
 import Logo from '../ui/Logo'
+import Tooltip from '../ui/Tooltip'
 import { submitLdapLogout } from '../../utils/authRedirect'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
@@ -35,43 +36,51 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-3 py-3 border-b border-surface-800">
         <Logo size="sm" showText={true} />
         <div className="flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowImport(true)}
-            title="Import connections"
-            className="lagun-icon-button p-1"
-          >
-            <Upload size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowExport(true)}
-            title="Export connections"
-            className="lagun-icon-button p-1"
-          >
-            <Download size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowForm(true)}
-            title="New connection"
-            className="lagun-icon-button p-1"
-          >
-            <Plus size={14} />
-          </Button>
-          {ldapEnabled && (
+          <Tooltip portal side="bottom" label="Import connections">
             <Button
               variant="ghost"
               size="sm"
-              onClick={submitLogout}
-              title="Logout"
+              onClick={() => setShowImport(true)}
+              aria-label="Import connections"
               className="lagun-icon-button p-1"
             >
-              <LogOut size={14} />
+              <Upload size={14} />
             </Button>
+          </Tooltip>
+          <Tooltip portal side="bottom" label="Export connections">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowExport(true)}
+              aria-label="Export connections"
+              className="lagun-icon-button p-1"
+            >
+              <Download size={14} />
+            </Button>
+          </Tooltip>
+          <Tooltip portal side="bottom" label="New connection">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowForm(true)}
+              aria-label="New connection"
+              className="lagun-icon-button p-1"
+            >
+              <Plus size={14} />
+            </Button>
+          </Tooltip>
+          {ldapEnabled && (
+            <Tooltip portal side="bottom" label="Logout">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={submitLogout}
+                aria-label="Logout"
+                className="lagun-icon-button p-1"
+              >
+                <LogOut size={14} />
+              </Button>
+            </Tooltip>
           )}
         </div>
       </div>
