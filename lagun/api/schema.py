@@ -148,7 +148,8 @@ async def get_row_key(session_id: str, db: str, table: str) -> RowKeyInfo:
     """Columns the data grid may use to address one row.
 
     An empty `columns` list means the table has no primary key and no NOT NULL
-    unique key, so the grid must not offer row edits or deletes.
+    unique key. The grid then matches every column it displays and the write
+    endpoints add `LIMIT 1`, so one edit still changes at most one row.
     """
     s = await get_session(session_id)
     if not s:

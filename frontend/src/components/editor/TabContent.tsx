@@ -1239,9 +1239,15 @@ function TableTab({ tab, active = true }: Props) {
     columns.filter(c => c.is_primary_key).map(c => c.name),
     [columns],
   )
-  const rowKeyColumns = useMemo(() =>
+  const uniqueRowKeyColumns = useMemo(() =>
     rowKey?.columns ?? [],
     [rowKey],
+  )
+  // A table with no usable key is matched by every column it displays. The
+  // server adds LIMIT 1, so the edit still changes at most one row.
+  const rowKeyColumns = useMemo(() =>
+    uniqueRowKeyColumns.length > 0 ? uniqueRowKeyColumns : columns.map(c => c.name),
+    [columns, uniqueRowKeyColumns],
   )
 
   const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string, commitWhereOnSuccess?: string, resetScrollOnSuccess = false) => {
@@ -1687,7 +1693,7 @@ function TableTab({ tab, active = true }: Props) {
       syncPending(new Map(remainingPending))
       // Immutable update, only after the server write succeeded: fresh row
       // array for the edited row, untouched references for the rest.
-      setResult(prev => applyEditsToRows(prev, new Map([[rowId, { original, changes }]]), rowKeyColumns, rowKeyColumns))
+      setResult(prev => applyEditsToRows(prev, new Map([[rowId, { original, changes }]]), rowKeyColumns, uniqueRowKeyColumns))
     }
     for (const [draftId, values] of normalizedDrafts) {
       const start = Date.now()
@@ -2025,12 +2031,8 @@ function TableTab({ tab, active = true }: Props) {
             <button
               type="button"
               onClick={handleCreateEmptyRow}
-              disabled={!(columns.length > 0 && rowKeyColumns.length > 0 && !initialLoading && !refreshing)}
-              title={
-                rowKeyColumns.length > 0
-                  ? 'Add a row to insert'
-                  : 'Read-only: this table has no unique row key. Insert rows from the SQL editor.'
-              }
+              disabled={!(columns.length > 0 && !initialLoading && !refreshing)}
+              title="Add a row to insert"
               className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors text-muted hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted"
             >
               <Plus size={14} aria-hidden="true" />
@@ -2039,13 +2041,11 @@ function TableTab({ tab, active = true }: Props) {
             <button
               type="button"
               onClick={() => requestDeleteRows(selectedRows.filter(row => !row.__lagun_insertDraft))}
-              disabled={!(columns.length > 0 && rowKeyColumns.length > 0 && !initialLoading && !refreshing) || selectedRows.every(row => row.__lagun_insertDraft)}
+              disabled={!(columns.length > 0 && !initialLoading && !refreshing) || selectedRows.every(row => row.__lagun_insertDraft)}
               title={
-                rowKeyColumns.length === 0
-                  ? 'Read-only: this table has no unique row key'
-                  : selectedRows.some(row => !row.__lagun_insertDraft)
-                    ? `Delete ${formatRowCount(selectedRows.filter(row => !row.__lagun_insertDraft).length)}`
-                    : 'Select rows to delete'
+                selectedRows.some(row => !row.__lagun_insertDraft)
+                  ? `Delete ${formatRowCount(selectedRows.filter(row => !row.__lagun_insertDraft).length)}`
+                  : 'Select rows to delete'
               }
               className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors text-muted hover:text-red-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted"
             >
@@ -2304,14 +2304,14 @@ function TableTab({ tab, active = true }: Props) {
       )}
       </AnimatePresence>
 
-      {view === 'data' && !initialLoading && columns.length > 0 && rowKeyColumns.length === 0 && (
+      {view === 'data' && !initialLoading && columns.length > 0 && uniqueRowKeyColumns.length === 0 && (
         <div
           role="note"
           className="border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-xs text-amber-300"
         >
-          Read-only: this table has no primary key or NOT NULL unique key, so
-          Lagun cannot update or delete one row safely. Add one, or run the
-          change in the SQL editor.
+          Rows are matched by every column because this table has no primary key
+          or NOT NULL unique key. Each edit or delete changes at most one row.
+          Add a key for exact row targeting.
         </div>
       )}
 
@@ -2367,9 +2367,9 @@ function TableTab({ tab, active = true }: Props) {
             <ResultGrid
                 ref={gridRef}
                 result={result}
-                editable={columns.length > 0 && rowKeyColumns.length > 0 && !initialLoading && !refreshing}
+                editable={columns.length > 0 && !initialLoading && !refreshing}
                 primaryKeyColumns={rowKeyColumns}
-                includeRowIndexInId={rowKeyColumns.length === 0}
+                includeRowIndexInId={uniqueRowKeyColumns.length === 0}
                 onCellEdit={handleCellEdit}
                 onDeleteRows={requestDeleteRows}
                 onDuplicateRow={handleDuplicateRow}

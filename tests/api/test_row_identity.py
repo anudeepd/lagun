@@ -29,7 +29,7 @@ async def _visible_age(mysql_server, test_db: str, row_id: int) -> int:
         conn.close()
 
 
-async def test_row_update_rejects_table_without_unique_key(
+async def test_row_update_without_unique_key_updates_one_row(
     client, session_id, test_db
 ):
     await _create(
@@ -56,20 +56,18 @@ async def test_row_update_rejects_table_without_unique_key(
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["ok"] is False
-    assert "unique" in data["error"].lower()
-    assert data["affected_rows"] == 0
-    # The query log shows the statement that was attempted, not a runnable
-    # unbounded UPDATE.
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
     assert data["sql_executed"].startswith(
         f"UPDATE `{test_db}`.`no_key_users` SET `age` = 31 WHERE "
     )
+    assert data["sql_executed"].endswith(" LIMIT 1")
 
     check = await client.post(
         f"/api/v1/sessions/{session_id}/query",
         json={"sql": "SELECT age FROM no_key_users", "database": test_db},
     )
-    assert check.json()["rows"] == [[30]]
+    assert check.json()["rows"] == [[31]]
 
 
 async def test_row_update_does_not_mass_update_duplicates(client, session_id, test_db):
@@ -79,15 +77,17 @@ async def test_row_update_does_not_mass_update_duplicates(client, session_id, te
         test_db,
         "CREATE TABLE duplicate_users (name VARCHAR(100), email VARCHAR(100), age INT, note VARCHAR(100))",
     )
+    values = ", ".join("('Alice', NULL, 30, 'same')" for _ in range(83))
     await _create(
         client,
         session_id,
         test_db,
         "INSERT INTO duplicate_users (name, email, age, note) VALUES "
-        "('Alice', NULL, 30, 'same'), ('Alice', NULL, 30, 'same'), "
-        "('Alice', NULL, 30, 'same'), ('Bob', 'b@example.com', 25, 'other')",
+        f"{values}, ('Bob', 'b@example.com', 25, 'other')",
     )
 
+    # The grid sends every displayed column as the key for a table with no
+    # usable unique key. The server adds LIMIT 1, so only one duplicate changes.
     r = await client.post(
         f"/api/v1/sessions/{session_id}/row-update",
         json={
@@ -104,20 +104,26 @@ async def test_row_update_does_not_mass_update_duplicates(client, session_id, te
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["ok"] is False
-    assert data["affected_rows"] == 0
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+    assert " LIMIT 1" in data["sql_executed"]
 
     check = await client.post(
         f"/api/v1/sessions/{session_id}/query",
         json={
-            "sql": "SELECT COUNT(*) FROM duplicate_users WHERE note = 'edited'",
+            "sql": (
+                "SELECT note, COUNT(*) FROM duplicate_users "
+                "GROUP BY note ORDER BY note"
+            ),
             "database": test_db,
         },
     )
-    assert check.json()["rows"] == [[0]]
+    assert check.json()["rows"] == [["edited", 1], ["other", 1], ["same", 82]]
 
 
-async def test_row_delete_rejects_table_without_unique_key(client, session_id, test_db):
+async def test_row_delete_without_unique_key_deletes_one_row(
+    client, session_id, test_db
+):
     await _create(
         client,
         session_id,
@@ -142,14 +148,15 @@ async def test_row_delete_rejects_table_without_unique_key(client, session_id, t
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["ok"] is False
-    assert data["affected_rows"] == 0
+    assert data["ok"] is True
+    assert data["affected_rows"] == 1
+    assert data["sql_executed"].endswith(" LIMIT 1")
 
     check = await client.post(
         f"/api/v1/sessions/{session_id}/query",
-        json={"sql": "SELECT COUNT(*) FROM no_key_delete", "database": test_db},
+        json={"sql": "SELECT name FROM no_key_delete", "database": test_db},
     )
-    assert check.json()["rows"] == [[2]]
+    assert check.json()["rows"] == [["Bob"]]
 
 
 async def test_row_update_accepts_not_null_unique_key(client, session_id, test_db):
@@ -188,6 +195,87 @@ async def test_row_update_accepts_not_null_unique_key(client, session_id, test_d
         },
     )
     assert check.json()["rows"] == [[31]]
+
+
+async def test_keyless_row_edit_applies_to_duplicate_rows_one_at_a_time(
+    client, session_id, test_db
+):
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "CREATE TABLE duplicate_edit (name VARCHAR(100), note VARCHAR(100))",
+    )
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "INSERT INTO duplicate_edit (name, note) VALUES "
+        "('Alice', 'same'), ('Alice', 'same'), ('Alice', 'same')",
+    )
+    key = {"name": "Alice", "note": "same"}
+
+    for _ in range(2):
+        r = await client.post(
+            f"/api/v1/sessions/{session_id}/row-update",
+            json={
+                "database": test_db,
+                "table": "duplicate_edit",
+                "primary_key": key,
+                "updates": {"note": "edited"},
+            },
+        )
+        assert r.json()["ok"] is True
+        assert r.json()["affected_rows"] == 1
+
+    check = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={
+            "sql": "SELECT note, COUNT(*) FROM duplicate_edit GROUP BY note ORDER BY note",
+            "database": test_db,
+        },
+    )
+    assert check.json()["rows"] == [["edited", 2], ["same", 1]]
+
+
+async def test_keyless_delete_batch_deletes_one_row_per_key(
+    client, session_id, test_db
+):
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "CREATE TABLE duplicate_delete (name VARCHAR(100), note VARCHAR(100))",
+    )
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "INSERT INTO duplicate_delete (name, note) VALUES "
+        "('Alice', 'same'), ('Alice', 'same'), ('Alice', 'same'), "
+        "('Bob', 'other')",
+    )
+    key = {"name": "Alice", "note": "same"}
+
+    r = await client.request(
+        "DELETE",
+        f"/api/v1/sessions/{session_id}/rows",
+        json={
+            "database": test_db,
+            "table": "duplicate_delete",
+            "primary_keys": [key, key, key],
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["affected_rows"] == 3
+
+    check = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT name FROM duplicate_delete", "database": test_db},
+    )
+    assert check.json()["rows"] == [["Bob"]]
 
 
 async def test_row_update_requires_every_key_column(client, session_id, test_db):

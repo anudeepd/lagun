@@ -1628,33 +1628,33 @@ class _RowKeyError(ValueError):
     """A grid write cannot be aimed at exactly one row."""
 
 
-def _require_row_key(
-    row_key: RowKey | None,
-    key: dict[str, Any],
-    database: str,
-    table: str,
-) -> None:
-    """Reject a key that does not identify one row.
+def _check_row_key(row_key: RowKey | None, key: dict[str, Any]) -> bool:
+    """Check a grid write's key and return whether it identifies one row.
 
-    The grid is told the same key by the schema endpoint, but the server must
-    not rely on the caller having read it. A superset of a unique key is safe:
-    the unique columns alone match at most one row.
+    A table with a primary key or a NOT NULL unique key must include every
+    column of that key. A superset is safe because the unique columns alone
+    match at most one row.
+
+    A table with no usable key returns False. The caller then matches every
+    column the grid supplied and adds ``LIMIT 1`` so the write still changes at
+    most one row. That match is by value: if another session changed the row,
+    the write can match a duplicate instead of the intended row, which is why
+    the data grid warns about it.
     """
-    if row_key is None:
-        raise _RowKeyError(
-            f"{database}.{table} has no primary key or NOT NULL unique key, so "
-            "Lagun cannot target one row. Add one, or run the change in the SQL "
-            "editor."
-        )
-    by_name = {name.lower(): value for name, value in key.items()}
-    missing = [name for name in row_key.columns if name.lower() not in by_name]
-    if missing:
-        raise _RowKeyError(
-            f"The row key must include {', '.join(row_key.columns)} to target "
-            "exactly one row."
-        )
-    if any(by_name[name.lower()] is None for name in row_key.columns):
-        raise _RowKeyError("A NULL row-key value cannot identify exactly one row.")
+    if row_key is not None:
+        by_name = {name.lower(): value for name, value in key.items()}
+        missing = [name for name in row_key.columns if name.lower() not in by_name]
+        if missing:
+            raise _RowKeyError(
+                f"The row key must include {', '.join(row_key.columns)} to target "
+                "exactly one row."
+            )
+        if any(by_name[name.lower()] is None for name in row_key.columns):
+            raise _RowKeyError("A NULL row-key value cannot identify exactly one row.")
+        return True
+    if not key:
+        raise _RowKeyError("A row key is required to target a row.")
+    return False
 
 
 async def _rollback_quietly(conn) -> None:
@@ -1728,6 +1728,7 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
             await restore_connection_state(conn)
             async with conn.cursor() as cur:
                 row_key = await select_row_key(cur, req.database, req.table)
+                unique = _check_row_key(row_key, req.primary_key)
                 data_types = await _column_data_types(
                     cur, req.database, req.table, [req.column, *req.primary_key]
                 )
@@ -1739,9 +1740,10 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
                 )
 
                 sql = f"UPDATE {db_q}.{tbl_q} SET {col_q} = %s WHERE {pk_clauses}"
+                if not unique:
+                    sql += " LIMIT 1"
                 params = [new_value] + pk_values
                 display_sql = _display_sql(sql, params)
-                _require_row_key(row_key, req.primary_key, req.database, req.table)
 
                 # Single-row writes had no deadline at all; a stuck statement
                 # held a pooled connection for as long as the server allowed.
@@ -1778,6 +1780,7 @@ async def row_update(session_id: str, req: RowUpdateRequest):
             await restore_connection_state(conn)
             async with conn.cursor() as cur:
                 row_key = await select_row_key(cur, req.database, req.table)
+                unique = _check_row_key(row_key, req.primary_key)
                 data_types = await _column_data_types(
                     cur, req.database, req.table, [*req.updates, *req.primary_key]
                 )
@@ -1789,9 +1792,10 @@ async def row_update(session_id: str, req: RowUpdateRequest):
                 )
                 set_clauses = ", ".join(f"{quote_ident(col)} = %s" for col in updates)
                 sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
+                if not unique:
+                    sql += " LIMIT 1"
                 params = list(updates.values()) + pk_values
                 display_sql = _display_sql(sql, params)
-                _require_row_key(row_key, req.primary_key, req.database, req.table)
 
                 try:
                     async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
@@ -1872,17 +1876,16 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                 )
                 deletes: list[tuple[str, list[Any]]] = []
                 for pk in req.primary_keys:
+                    unique = _check_row_key(row_key, pk)
                     pk_clauses, pk_values = _build_pk_where(
                         _coerce_binary_map(pk, data_types)
                     )
                     sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
+                    if not unique:
+                        sql += " LIMIT 1"
                     if len(display_sqls) < _ROW_DELETE_MAX_ECHO:
                         display_sqls.append(_display_sql(sql, pk_values))
                     deletes.append((sql, pk_values))
-                # Validate every key before the first delete so a bad key cannot
-                # leave an earlier delete committed and a later one unapplied.
-                for pk in req.primary_keys:
-                    _require_row_key(row_key, pk, req.database, req.table)
                 try:
                     # The whole batch shares one transaction, so it also shares
                     # one deadline: a huge key list must not hold a pooled

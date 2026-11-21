@@ -154,7 +154,7 @@ describe('TabContent data tab — row mutation wiring', () => {
     expect(gridProps().rowData.map(row => row.name)).toEqual(['Alicia', 'Bob'])
   })
 
-  it('renders a table without a unique row key as read-only', async () => {
+  it('warns when a keyless table is matched by value', async () => {
     server.use(
       http.get(`${BASE}/sessions/:id/databases/:db/tables/:table/row-key`, () =>
         HttpResponse.json({ columns: [], kind: null }),
@@ -162,10 +162,30 @@ describe('TabContent data tab — row mutation wiring', () => {
     )
     await renderLoadedDataTab()
 
-    expect(await screen.findByRole('note')).toHaveTextContent(/read-only/i)
-    expect(screen.getByRole('button', { name: 'Add row' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /^Delete/ })).toBeDisabled()
-    expect(gridProps().columnDefs?.every(def => def.editable === false)).toBe(true)
+    expect(await screen.findByRole('note')).toHaveTextContent(/every column/i)
+    expect(screen.getByRole('button', { name: 'Add row' })).toBeEnabled()
+    expect(gridProps().columnDefs?.every(def => def.editable === true)).toBe(true)
+  })
+
+  it('sends every column as the key when the table has no unique key', async () => {
+    server.use(
+      http.get(`${BASE}/sessions/:id/databases/:db/tables/:table/row-key`, () =>
+        HttpResponse.json({ columns: [], kind: null }),
+      ),
+    )
+    await renderLoadedDataTab()
+
+    commitCellEdit(rowByName('Alice'), 'name', 'Alice', 'Alicia')
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply (1)' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply Changes' }))
+
+    await waitFor(() => expect(dataRequests.rowUpdate).toHaveLength(1))
+    expect(dataRequests.rowUpdate[0].body).toEqual({
+      database: 'app_db',
+      table: 'users',
+      primary_key: { id: 1, name: 'Alice' },
+      updates: { name: 'Alicia' },
+    })
   })
 
   it('announces rejected updates and leaves the staged edit available to retry', async () => {
