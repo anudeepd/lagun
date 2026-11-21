@@ -233,7 +233,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
                 )}
                 <span className="truncate max-w-[120px]">{tab.type === 'table' ? tab.table ?? tab.label : tab.label}</span>
               </button>
-              <Tooltip portal side="bottom" label={getCloseTitle(tab)}>
+              <Tooltip side="bottom" label={getCloseTitle(tab)}>
               <button
                 type="button"
                 onClick={() => requestCloseTab(tab.id)}

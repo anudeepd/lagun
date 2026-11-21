@@ -271,7 +271,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
       <div className="flex flex-shrink-0 items-center justify-between px-3 py-1">
         <Label as="span">Databases</Label>
         <div className="flex items-center gap-1">
-          <Tooltip portal label={showBookmarksOnly ? 'Show all tables' : 'Show bookmarks only'}>
+          <Tooltip label={showBookmarksOnly ? 'Show all tables' : 'Show bookmarks only'}>
           <m.button
             onClick={handleToggleBookmarksOnly}
             whileTap={starMotion.press}
@@ -284,7 +284,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
             <Star size={12} aria-hidden="true" fill={showBookmarksOnly ? 'currentColor' : 'none'} />
           </m.button>
           </Tooltip>
-          <Tooltip portal label="Refresh databases">
+          <Tooltip label="Refresh databases">
           <m.button
             onClick={refresh}
             whileTap={{ scale: 0.9 }}

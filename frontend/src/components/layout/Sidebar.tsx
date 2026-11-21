@@ -36,7 +36,7 @@ export default function Sidebar() {
       <div className="flex items-center justify-between px-3 py-3 border-b border-surface-800">
         <Logo size="sm" showText={true} />
         <div className="flex items-center gap-0.5">
-          <Tooltip portal side="bottom" label="Import connections">
+          <Tooltip side="bottom" label="Import connections">
             <Button
               variant="ghost"
               size="sm"
@@ -47,7 +47,7 @@ export default function Sidebar() {
               <Upload size={14} />
             </Button>
           </Tooltip>
-          <Tooltip portal side="bottom" label="Export connections">
+          <Tooltip side="bottom" label="Export connections">
             <Button
               variant="ghost"
               size="sm"
@@ -58,7 +58,7 @@ export default function Sidebar() {
               <Download size={14} />
             </Button>
           </Tooltip>
-          <Tooltip portal side="bottom" label="New connection">
+          <Tooltip side="bottom" label="New connection">
             <Button
               variant="ghost"
               size="sm"
@@ -70,7 +70,7 @@ export default function Sidebar() {
             </Button>
           </Tooltip>
           {ldapEnabled && (
-            <Tooltip portal side="bottom" label="Logout">
+            <Tooltip side="bottom" label="Logout">
               <Button
                 variant="ghost"
                 size="sm"

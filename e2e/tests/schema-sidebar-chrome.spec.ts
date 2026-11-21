@@ -9,7 +9,7 @@
  *
  * Every API route is mocked, so this spec needs no database.
  */
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
 
 const SESSION = {
   id: 's1',
@@ -66,6 +66,17 @@ function hasNoClippingAncestor(el: Element) {
   return node === document.body
 }
 
+async function expectFullyVisible(page: Page, tip: Locator) {
+  const box = await tip.boundingBox()
+  const viewport = page.viewportSize()
+  expect(box).not.toBeNull()
+  expect(viewport).not.toBeNull()
+  expect(box!.x).toBeGreaterThanOrEqual(0)
+  expect(box!.y).toBeGreaterThanOrEqual(0)
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width)
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height)
+}
+
 test('lists bookmarked tables in name order', async ({ page }) => {
   await mockSchemaApi(page)
   await page.addInitScript(() => {
@@ -100,6 +111,46 @@ test('keeps the databases tooltips outside the clipping pane', async ({ page }) 
   const refreshTip = page.getByRole('tooltip', { name: 'Refresh databases' })
   await expect(refreshTip).toBeVisible()
   expect(await refreshTip.evaluate(hasNoClippingAncestor)).toBe(true)
+})
+
+test('keeps the session actions tooltip visible at the sidebar edge', async ({ page }) => {
+  await mockSchemaApi(page)
+  await page.goto('/')
+
+  await page.getByRole('button', { name: 'Actions for Sidebar Test' }).hover()
+  const tip = page.getByRole('tooltip', { name: 'Actions for Sidebar Test' })
+  await expect(tip).toBeVisible()
+  expect(await tip.evaluate(hasNoClippingAncestor)).toBe(true)
+  await expectFullyVisible(page, tip)
+})
+
+test('keeps the query log tooltips inside the viewport', async ({ page }) => {
+  await mockSchemaApi(page)
+  await page.addInitScript(() => {
+    localStorage.setItem('lagun-query-log', JSON.stringify({
+      state: {
+        entries: [{
+          id: 'log-1',
+          timestamp: new Date().toISOString(),
+          sql: 'SELECT 1',
+          sessionId: 's1',
+          rowCount: 1,
+          execTimeMs: 1,
+        }],
+      },
+      version: 3,
+    }))
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: /Query Log/ }).click()
+
+  for (const label of ['Copy SQL', 'Open in new query tab']) {
+    await page.getByRole('button', { name: label, exact: true }).hover()
+    const tip = page.getByRole('tooltip', { name: label })
+    await expect(tip).toBeVisible()
+    expect(await tip.evaluate(hasNoClippingAncestor)).toBe(true)
+    await expectFullyVisible(page, tip)
+  }
 })
 
 test('gives the connection header icons tooltips', async ({ page }) => {

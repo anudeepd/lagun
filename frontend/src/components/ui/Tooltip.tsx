@@ -17,10 +17,13 @@ interface Props {
   label: string
   children: ReactElement<TooltipChildProps>
   side?: 'top' | 'bottom'
-  portal?: boolean
 }
 
-export default function Tooltip({ label, children, side = 'top', portal = false }: Props) {
+// Tips always mount under <body>. Left in their trigger's tree they were
+// clipped by any ancestor with overflow (the schema pane, the query log body,
+// the sidebar) and could be painted over by a later sibling. The portal also
+// lets the position clamp to the viewport instead of running off its edge.
+export default function Tooltip({ label, children, side = 'top' }: Props) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ left: 0, top: 0 })
   const wrapperRef = useRef<HTMLSpanElement>(null)
@@ -28,7 +31,7 @@ export default function Tooltip({ label, children, side = 'top', portal = false 
   const id = useId()
 
   useLayoutEffect(() => {
-    if (!open || !portal || !wrapperRef.current) return
+    if (!open || !wrapperRef.current) return
     const updatePosition = () => {
       const rect = wrapperRef.current?.getBoundingClientRect()
       if (!rect) return
@@ -46,7 +49,7 @@ export default function Tooltip({ label, children, side = 'top', portal = false 
       window.removeEventListener('scroll', updatePosition, true)
       window.removeEventListener('resize', updatePosition)
     }
-  }, [open, portal, side])
+  }, [open, side])
 
   // A hover-opened tip must be dismissible without moving the pointer or focus
   // (WCAG 1.4.13): Escape closes it even when focus is somewhere else.
@@ -91,12 +94,8 @@ export default function Tooltip({ label, children, side = 'top', portal = false 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1, transition: { duration: motionDuration.micro } }}
           exit={{ opacity: 0, transition: exitTransition }}
-          className={`pointer-events-none whitespace-nowrap rounded border border-surface-700 bg-surface-800 px-1.5 py-0.5 text-[11px] text-slate-200 shadow-lg ${
-            portal
-              ? 'fixed z-critical -translate-x-1/2'
-              : `absolute left-1/2 z-popover -translate-x-1/2 ${side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'}`
-          }`}
-          style={portal ? { left: position.left, top: side === 'top' ? position.top - 6 : position.top + 6 } : undefined}
+          className="pointer-events-none fixed z-critical whitespace-nowrap rounded border border-surface-700 bg-surface-800 px-1.5 py-0.5 text-[11px] text-slate-200 shadow-lg -translate-x-1/2"
+          style={{ left: position.left, top: side === 'top' ? position.top - 6 : position.top + 6 }}
         >
           {label}
         </m.span>
@@ -107,7 +106,7 @@ export default function Tooltip({ label, children, side = 'top', portal = false 
   return (
     <span ref={wrapperRef} className="relative inline-flex">
       {child}
-      {portal ? (typeof document !== 'undefined' ? createPortal(tooltip, document.body) : null) : tooltip}
+      {typeof document !== 'undefined' ? createPortal(tooltip, document.body) : null}
     </span>
   )
 }

@@ -40,6 +40,22 @@ describe('Tooltip', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
+  it('mounts the tip outside a clipping ancestor', async () => {
+    const { container } = render(
+      <div style={{ overflow: 'hidden', width: 20, height: 20 }}>
+        <Tooltip label="Refresh databases">
+          <button type="button" aria-label="Refresh databases">icon</button>
+        </Tooltip>
+      </div>,
+    )
+
+    await userEvent.hover(screen.getByRole('button', { name: 'Refresh databases' }))
+
+    const tip = screen.getByRole('tooltip')
+    expect(tip.parentElement).toBe(document.body)
+    expect(container.contains(tip)).toBe(false)
+  })
+
   it('hides on blur and on Escape, and keeps the control clickable', async () => {
     const onClick = vi.fn()
     renderTooltip(onClick)
