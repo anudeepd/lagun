@@ -218,9 +218,9 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
     return promise
   },
 
-  // Same fencing as loadColumns. A failed request resolves to "no usable key"
-  // rather than throwing: an unknown key must leave the grid read-only, never
-  // optimistic.
+  // Same fencing as loadColumns. A failed request resolves to "no unique key"
+  // rather than throwing: the grid then matches every column and the server
+  // limits the write to one row, so a metadata failure cannot mass-update.
   loadRowKey: async (sessionId, db, table) => {
     const key = `${sessionId}/${db}/${table}`
     const { rowKeys } = get()
