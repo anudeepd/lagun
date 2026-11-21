@@ -48,10 +48,20 @@ export async function apiFetch(input: RequestInfo | URL, options?: RequestInit):
  */
 export function errorMessageFromBody(status: number, statusText: string, text: string): string {
   let payload: unknown = text || statusText
+  let parsed = false
   try {
     payload = text ? JSON.parse(text) : { detail: statusText }
+    parsed = true
   } catch {
     // Keep the plain response body.
+  }
+  // A non-JSON 5xx body comes from the proxy or a crashed process, not from
+  // Lagun's error model. It is often an HTML page that pads the message for old
+  // browsers, so show only the status line.
+  const nonJsonServerError = status >= 500
+  const fromProxyHtml = /^\s*<(?:!doctype|html|head|body)\b/i.test(text)
+  if (!parsed && (nonJsonServerError || fromProxyHtml)) {
+    return statusText ? `HTTP ${status} ${statusText}` : `HTTP ${status}`
   }
   return formatApiError(status, payload)
 }

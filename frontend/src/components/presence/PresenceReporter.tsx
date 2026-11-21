@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api/client'
 import { useTabStore } from '../../store/tabStore'
-import { showToast } from '../../utils/toast'
 import type { PresenceUpdate } from '../../types'
 
 const CLIENT_ID_KEY = 'lagun-presence-client-id'
@@ -62,9 +61,10 @@ export default function PresenceReporter() {
     })),
   }), [activeTabId, clientId, tabs])
 
-  // Surface the first failure only, for the lifetime of this reporter: the
-  // heartbeat retries every 15 s and a payload change restarts it, so a
-  // persistent outage must not produce a toast per attempt.
+  // Presence is a background heartbeat for administrators. A failed report has
+  // no action for the user, so it must not interrupt their work with a toast.
+  // Log the first failure only: the heartbeat retries every 15 s and a payload
+  // change restarts it, so a persistent outage would otherwise flood the console.
   const failureReportedRef = useRef(false)
 
   useEffect(() => {
@@ -74,9 +74,8 @@ export default function PresenceReporter() {
       void api.reportPresence(payload).catch((error: unknown) => {
         if (failureReportedRef.current) return
         failureReportedRef.current = true
-        showToast(
+        console.warn(
           `Could not publish presence: ${error instanceof Error ? error.message : String(error)}`,
-          'error',
         )
       })
     }
