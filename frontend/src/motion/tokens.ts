@@ -37,6 +37,19 @@ export const exitTransition: Transition = {
   ease: motionEase.exit,
 }
 
+// Bookmark stars share one pop so the databases-filter star and the per-table
+// stars behave identically: the press dips and tilts, activation overshoots
+// scale and rotation, then both settle.
+export const starMotion = {
+  press: { scale: 0.7, rotate: -18 },
+  active: { scale: [1, 1.45, 1], rotate: [0, 14, 0] },
+  rest: { scale: 1, rotate: 0 },
+  transition: {
+    duration: motionDuration.surface,
+    ease: 'easeOut',
+  } as Transition,
+}
+
 export const exitSpring: Transition = {
   type: 'spring',
   stiffness: 380,

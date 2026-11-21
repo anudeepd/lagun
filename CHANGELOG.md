@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sidebar bookmark and tooltip fixes.** The databases bookmark filter uses the
+  same pop animation as table stars. Every tooltip now renders outside its
+  clipping pane and stays inside the viewport, so the schema header, session
+  actions, and query log tips remain visible. The connection header import,
+  export, and new-connection icons use the same tooltips. The bookmarks filter
+  lists tables in name order.
+
 - **Safe single-row edits.** A table without a primary key or NOT NULL unique
   key is matched by every column, and each edit or delete is limited to one row,
   so one change can no longer update 83 duplicates. The data tab warns when the

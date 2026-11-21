@@ -14,7 +14,7 @@ import RefreshIcon from '../ui/RefreshIcon'
 import Tooltip from '../ui/Tooltip'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
-import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+import { exitTransition, motionDistance, starMotion, surfaceTransition } from '../../motion/tokens'
 import Label from '../ui/Label'
 
 const ImportDialog = lazy(() => import('../table/ImportDialog'))
@@ -193,6 +193,12 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     let filtered = tbls
     if (showBookmarksOnly) filtered = filtered.filter(t => isBookmarked(db, t.name))
     if (q) filtered = filtered.filter(t => t.name.toLowerCase().includes(q))
+    // The listing endpoint is not required to return a sorted array, and the
+    // bookmark view must still read alphabetically. Sort the view, not the
+    // cached response, so every mode has one stable order.
+    filtered = [...filtered].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+    )
     return { db, tbls: filtered }
   }).filter(({ db, tbls }) => {
     if (showBookmarksOnly) {
@@ -268,12 +274,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
           <Tooltip label={showBookmarksOnly ? 'Show all tables' : 'Show bookmarks only'}>
           <m.button
             onClick={handleToggleBookmarksOnly}
-            whileTap={{ scale: 0.78, rotate: -12 }}
-            animate={{
-              scale: showBookmarksOnly ? [1, 1.45, 1] : 1,
-              rotate: showBookmarksOnly ? [0, 14, 0] : 0,
-            }}
-            transition={surfaceTransition}
+            whileTap={starMotion.press}
+            animate={showBookmarksOnly ? starMotion.active : starMotion.rest}
+            transition={starMotion.transition}
             aria-label={showBookmarksOnly ? 'Show all tables' : 'Show bookmarks only'}
             aria-pressed={showBookmarksOnly}
             className={`lagun-hit-target rounded transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${showBookmarksOnly ? 'text-amber-400' : 'text-muted hover:text-slate-300'}`}
@@ -420,9 +423,9 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
                         title={starred ? 'Remove bookmark' : 'Bookmark table'}
                         aria-label={`${starred ? 'Remove bookmark from' : 'Bookmark'} ${db}.${tbl.name}`}
                         onClick={() => toggleBookmark(db, tbl.name)}
-                        whileTap={{ scale: 0.7, rotate: -18 }}
-                        animate={{ scale: starred ? [1, 1.45, 1] : 1, rotate: starred ? [0, 14, 0] : 0 }}
-                        transition={{ duration: 0.28, ease: 'easeOut' }}
+                        whileTap={starMotion.press}
+                        animate={starred ? starMotion.active : starMotion.rest}
+                        transition={starMotion.transition}
                         className={`mr-1 rounded p-1 transition-colors hover:text-amber-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 ${starred ? 'text-amber-400' : 'text-muted opacity-0 focus:opacity-100 group-hover:opacity-100'}`}
                       >
                         <Star size={12} fill={starred ? 'currentColor' : 'none'} />
