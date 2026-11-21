@@ -61,4 +61,27 @@ describe('SchemaTree bookmarks', () => {
 
     await waitFor(() => expect(JSON.parse(localStorage.getItem(`lagun-bookmarks-${SESSION}`) ?? '[]')).toEqual(['app_db/orders']))
   })
+
+  it('lists bookmarked tables in name order', async () => {
+    useSchemaStore.setState({
+      tables: {
+        [`${SESSION}/app_db`]: [table('zebra'), table('alpha'), table('mango'), table('beta')],
+      },
+    })
+    localStorage.setItem(
+      `lagun-bookmarks-${SESSION}`,
+      JSON.stringify(['app_db/zebra', 'app_db/mango', 'app_db/beta', 'app_db/alpha']),
+    )
+    const { container } = render(<SchemaTree sessionId={SESSION} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Show bookmarks only' }))
+
+    await waitFor(() =>
+      expect(
+        Array.from(container.querySelectorAll('[title^="app_db."]')).map(node =>
+          node.getAttribute('title'),
+        ),
+      ).toEqual(['app_db.alpha', 'app_db.beta', 'app_db.mango', 'app_db.zebra']),
+    )
+  })
 })
