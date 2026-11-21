@@ -35,6 +35,14 @@ def test_coerce_binary_preserves_plain_text():
     assert query_api._coerce_binary_value(None, "varbinary") is None
 
 
+def test_display_value_renders_binary_as_hex():
+    """The query log must show binary values as replayable SQL literals."""
+    assert query_api._display_value(b"\x01\x02") == "0x0102"
+    assert query_api._display_value(bytearray(b"\xff")) == "0xff"
+    assert query_api._display_value(None) == "NULL"
+    assert query_api._display_value(True) == "1"
+
+
 def test_discard_lease_connection_closes_and_never_raises():
     closed = []
 

@@ -1705,6 +1705,9 @@ def _display_value(value: Any) -> str:
         return "NULL"
     if isinstance(value, bool):
         return "1" if value else "0"
+    if isinstance(value, (bytes, bytearray)):
+        # The grid displays binary as 0x…; the log must stay replayable.
+        return "0x" + bytes(value).hex()
     if isinstance(value, (int, float, decimal.Decimal)) and not isinstance(value, bool):
         return str(value)
     return escape_value(str(value))
