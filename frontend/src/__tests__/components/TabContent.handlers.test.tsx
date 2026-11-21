@@ -36,6 +36,7 @@ interface GridRow extends Record<string, unknown> {
  *  here is the same path a real edit commit / selection takes. */
 interface MockGridProps {
   rowData: GridRow[]
+  columnDefs?: { field?: string; editable?: boolean }[]
   onCellValueChanged?: (params: {
     colDef: { field?: string | null }
     newValue: unknown
@@ -149,6 +150,20 @@ describe('TabContent data tab — row mutation wiring', () => {
     // not run a second optimistic pass over the same row.
     await waitFor(() => expect(dataRequests.query.length).toBeGreaterThan(1))
     expect(gridProps().rowData.map(row => row.name)).toEqual(['Alicia', 'Bob'])
+  })
+
+  it('renders a table without a unique row key as read-only', async () => {
+    server.use(
+      http.get(`${BASE}/sessions/:id/databases/:db/tables/:table/row-key`, () =>
+        HttpResponse.json({ columns: [], kind: null }),
+      ),
+    )
+    await renderLoadedDataTab()
+
+    expect(await screen.findByRole('note')).toHaveTextContent(/read-only/i)
+    expect(screen.getByRole('button', { name: 'Add row' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Delete/ })).toBeDisabled()
+    expect(gridProps().columnDefs?.every(def => def.editable === false)).toBe(true)
   })
 
   it('announces rejected updates and leaves the staged edit available to retry', async () => {
