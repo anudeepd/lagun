@@ -16,7 +16,7 @@ test('create a session and see databases in the sidebar', async ({ page }) => {
   // Fill in the connection form
   await page.getByLabel(/Connection Name/i).fill('E2E Session')
   await page.getByLabel(/Host/i).fill(E2E_HOST)
-  await page.getByLabel(/Port/i).fill(String(E2E_PORT))
+  await page.getByRole('spinbutton', { name: 'Port' }).fill(String(E2E_PORT))
   await page.getByLabel(/Username/i).fill(E2E_USER)
   await page.getByLabel(/Password/i).fill(E2E_PASS)
 
@@ -42,7 +42,7 @@ test('test connection before saving shows success banner', async ({ page }) => {
   await newConnBtn.click()
 
   await page.getByLabel(/Host/i).fill(E2E_HOST)
-  await page.getByLabel(/Port/i).fill(String(E2E_PORT))
+  await page.getByRole('spinbutton', { name: 'Port' }).fill(String(E2E_PORT))
   await page.getByLabel(/Username/i).fill(E2E_USER)
   await page.getByLabel(/Password/i).fill(E2E_PASS)
 
