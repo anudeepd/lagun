@@ -17,6 +17,7 @@ describe('SchemaTree refresh', () => {
       databases: {},
       tables: {},
       columns: {},
+      rowKeys: {},
       loadingDbs: new Set(),
       loadingTables: new Set(),
       dbErrors: {},

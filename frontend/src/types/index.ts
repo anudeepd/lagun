@@ -146,6 +146,11 @@ export interface IndexInfo {
   index_type: string
 }
 
+export interface RowKeyInfo {
+  columns: string[]
+  kind: 'primary' | 'unique' | null
+}
+
 export interface TableInfo {
   name: string
   table_type: string

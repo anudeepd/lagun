@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Safe single-row edits.** The data tab now edits and deletes only tables that
+  have a primary key or a NOT NULL unique key, so one cell change can no longer
+  update duplicate rows. A keyless table opens read-only with an explanation.
+  Grid writes commit before they report success. A pooled connection that a
+  query left with autocommit off or a transaction open is reset before reuse, so
+  a later edit cannot report rows that were rolled back. Setting a column to its
+  current value reports the matched row instead of a missing one.
+
 - **MySQL import warnings reach the import result.** Duplicate-key and other
   diagnostics from CSV imports are returned in `warnings` instead of being
   written to the server log, so `INSERT IGNORE` and `REPLACE` results explain

@@ -8,7 +8,7 @@ import time
 from contextlib import suppress
 
 import aiomysql
-from pymysql.constants import CLIENT
+from pymysql.constants import CLIENT, SERVER_STATUS
 
 from lagun.db.net_policy import require_host_allowed
 from lagun.db.session_store import get_session, get_session_password
@@ -49,6 +49,34 @@ class DatabaseConnectionError(Exception):
 
 class DatabaseCapacityError(Exception):
     """Raised when bounded database capacity cannot be acquired promptly."""
+
+
+async def restore_connection_state(conn: aiomysql.Connection) -> bool:
+    """Return a leased connection to autocommit with no open transaction.
+
+    A pooled connection is shared by every tab and request of a session. A raw
+    statement such as `SET autocommit=0`, `BEGIN`, or `START TRANSACTION` must
+    not outlive its request: the next grid read would see uncommitted state and
+    the next grid write would report rows it never committed. aiomysql's pool
+    already closes a connection that still has an open transaction, which
+    silently rolls the write back after the response said it succeeded. Resetting
+    here keeps the write and the response honest.
+
+    Returns True when the connection needed reset. The status bits come from the
+    last server response, so this adds no round-trip to an ordinary query.
+    """
+    if conn.closed:
+        return False
+    status = getattr(conn, "server_status", 0) or 0
+    in_transaction = bool(status & SERVER_STATUS.SERVER_STATUS_IN_TRANS)
+    autocommit = bool(status & SERVER_STATUS.SERVER_STATUS_AUTOCOMMIT)
+    if not in_transaction and autocommit:
+        return False
+    if in_transaction:
+        await conn.rollback()
+    if not autocommit:
+        await conn.autocommit(True)
+    return True
 
 
 class _PoolLease:
@@ -94,8 +122,20 @@ class _PoolLease:
     async def __aexit__(self, exc_type, exc, traceback):
         try:
             if self.connection is not None:
-                self.pool.raw.release(self.connection)
-                self.connection = None
+                conn = self.connection
+                try:
+                    await restore_connection_state(conn)
+                except asyncio.CancelledError:
+                    # A connection that cannot be cleaned must not be reused.
+                    with suppress(Exception):
+                        conn.close()
+                    raise
+                except Exception:
+                    with suppress(Exception):
+                        conn.close()
+                finally:
+                    self.pool.raw.release(conn)
+                    self.connection = None
         finally:
             if self.global_slot:
                 _get_global_semaphore().release()
@@ -217,7 +257,9 @@ async def get_pool(session_id: str) -> ManagedPool:
         ssl_ctx = None
         if session.ssl_enabled:
             ssl_ctx = ssl_mod.create_default_context()
-        safe_flags = CLIENT.MULTI_RESULTS & ~CLIENT.MULTI_STATEMENTS
+        safe_flags = (
+            CLIENT.MULTI_RESULTS | CLIENT.FOUND_ROWS
+        ) & ~CLIENT.MULTI_STATEMENTS
         try:
             raw = await aiomysql.create_pool(
                 host=session.host,

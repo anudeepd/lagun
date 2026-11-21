@@ -850,7 +850,7 @@ async def test_row_delete(client, session_id, test_db):
     assert r3.json()["rows"][0][0] == 1
 
 
-async def test_row_delete_without_primary_key_uses_all_columns(
+async def test_row_delete_without_primary_key_is_rejected(
     client, session_id, test_db
 ):
     await client.post(
@@ -886,12 +886,10 @@ async def test_row_delete_without_primary_key_uses_all_columns(
     )
     assert r.status_code == 200
     data = r.json()
-    assert data["ok"] is True
-    assert data["affected_rows"] == 1
-    assert data["sql_executed"] == (
-        f"DELETE FROM `{test_db}`.`no_pk_delete_users` "
-        "WHERE `name` = 'Alice' AND `email` IS NULL AND `age` = 30"
-    )
+    assert data["ok"] is False
+    assert data["affected_rows"] == 0
+    assert "primary key" in data["error"].lower()
+    assert "unique" in data["error"].lower()
 
     r2 = await client.post(
         f"/api/v1/sessions/{session_id}/query",
@@ -900,7 +898,7 @@ async def test_row_delete_without_primary_key_uses_all_columns(
             "database": test_db,
         },
     )
-    assert r2.json()["rows"] == [["Bob"]]
+    assert r2.json()["rows"] == [["Alice"], ["Bob"]]
 
 
 async def test_row_delete_large_bigint_primary_key_round_trips_as_string(
@@ -1010,7 +1008,7 @@ async def test_row_update_many_in_sequence(client, session_id, test_db):
     assert r2.json()["rows"][0][0] == 200
 
 
-async def test_row_update_no_pk_with_null(client, session_id, test_db):
+async def test_row_update_no_pk_with_null_is_rejected(client, session_id, test_db):
     await client.post(
         f"/api/v1/sessions/{session_id}/query",
         json={
@@ -1043,7 +1041,11 @@ async def test_row_update_no_pk_with_null(client, session_id, test_db):
         },
     )
     assert r.status_code == 200
-    assert r.json()["affected_rows"] == 1
+    data = r.json()
+    assert data["ok"] is False
+    assert data["affected_rows"] == 0
+    assert "primary key" in data["error"].lower()
+    assert "unique" in data["error"].lower()
 
     r2 = await client.post(
         f"/api/v1/sessions/{session_id}/query",
@@ -1052,7 +1054,7 @@ async def test_row_update_no_pk_with_null(client, session_id, test_db):
             "database": test_db,
         },
     )
-    assert r2.json()["rows"][0][0] == 31
+    assert r2.json()["rows"][0][0] == 30
 
 
 async def test_script_query_kill_returns_error_when_no_active_script(

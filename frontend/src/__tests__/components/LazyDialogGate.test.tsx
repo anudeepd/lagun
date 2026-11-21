@@ -22,6 +22,7 @@ describe('lazily loaded dialogs mount only after their first open', () => {
       databases: { [SESSION]: ['app_db'] },
       tables: {},
       columns: {},
+      rowKeys: {},
       loadingDbs: new Set(),
       loadingTables: new Set(),
       dbErrors: {},

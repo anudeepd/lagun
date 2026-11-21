@@ -3,9 +3,16 @@
 from fastapi import APIRouter, HTTPException, Query
 from lagun.api.scope import filter_databases, require_db_scope
 from lagun.db.pool import get_pool
+from lagun.db.row_key import select_row_key
 from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, SYSTEM_DBS
-from lagun.models.schema import ColumnInfo, CreateSqlResult, IndexInfo, TableInfo
+from lagun.models.schema import (
+    ColumnInfo,
+    CreateSqlResult,
+    IndexInfo,
+    RowKeyInfo,
+    TableInfo,
+)
 
 router = APIRouter(tags=["schema"])
 
@@ -131,6 +138,29 @@ async def list_columns(session_id: str, db: str, table: str) -> list[ColumnInfo]
         )
         for r in rows
     ]
+
+
+@router.get(
+    "/sessions/{session_id}/databases/{db}/tables/{table}/row-key",
+    response_model=RowKeyInfo,
+)
+async def get_row_key(session_id: str, db: str, table: str) -> RowKeyInfo:
+    """Columns the data grid may use to address one row.
+
+    An empty `columns` list means the table has no primary key and no NOT NULL
+    unique key, so the grid must not offer row edits or deletes.
+    """
+    s = await get_session(session_id)
+    if not s:
+        raise HTTPException(404, "Session not found")
+    require_db_scope(s, db)
+    pool = await get_pool(session_id)
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            key = await select_row_key(cur, db, table)
+    if key is None:
+        return RowKeyInfo()
+    return RowKeyInfo(columns=list(key.columns), kind=key.kind)
 
 
 @router.get("/sessions/{session_id}/databases/{db}/tables/{table}/indexes")

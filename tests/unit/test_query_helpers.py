@@ -9,6 +9,8 @@ import asyncio
 import time
 from types import SimpleNamespace
 
+from pymysql.constants import SERVER_STATUS
+
 from lagun.api import query as query_api
 from lagun.api.export import (
     _ExportTimeout,
@@ -57,6 +59,7 @@ async def test_cell_update_timeout_discards_the_leased_connection(monkeypatch):
         def __init__(self, conn):
             self._conn = conn
             self.calls = 0
+            self.sql = ""
 
         async def __aenter__(self):
             return self
@@ -66,21 +69,30 @@ async def test_cell_update_timeout_discards_the_leased_connection(monkeypatch):
 
         async def execute(self, sql, params=None):
             self.calls += 1
-            if self.calls == 1:
+            self.sql = sql
+            if "information_schema.STATISTICS" in sql:
+                return None  # row-key lookup
+            if "information_schema.COLUMNS" in sql:
                 return None  # metadata lookup for _column_data_types
             raise TimeoutError("stalled")
 
         async def fetchall(self):
+            if "information_schema.STATISTICS" in self.sql:
+                return [("PRIMARY", "id", "")]
             return [("age", "int")]
 
     class _Conn:
         def __init__(self):
             self.closed = False
             self.cursor_calls = 0
+            self.server_status = SERVER_STATUS.SERVER_STATUS_AUTOCOMMIT
 
         def cursor(self):
             self.cursor_calls += 1
             return _Cursor(self)
+
+        async def autocommit(self, value):
+            pass
 
         def close(self):
             self.closed = True

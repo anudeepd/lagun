@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react'
 import { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
-import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult, SequentialScriptResult, ExportOverrideData } from '../../types'
+import type { Tab, QueryResult, ColumnInfo, DataTabState, ScriptQueryResult, ScriptQueryValidationResult, SequentialScriptResult, ExportOverrideData, RowKeyInfo } from '../../types'
 import { api } from '../../api/client'
 import { showToast } from '../../utils/toast'
 import { useSchemaStore } from '../../store/schemaStore'
@@ -1162,6 +1162,7 @@ function TableTab({ tab, active = true }: Props) {
   const [dataVisited, setDataVisited] = useState(initialDataState.view === 'data')
   const [result, setResult] = useState<QueryResult | null>(null)
   const [columns, setColumns] = useState<ColumnInfo[]>([])
+  const [rowKey, setRowKey] = useState<RowKeyInfo | null>(null)
   const [initialLoading, setInitialLoading] = useState(false)
   const viewHandoff = useHandoff(view, view === 'data' ? initialLoading : false)
   const [refreshing, setRefreshing] = useState(false)
@@ -1232,14 +1233,15 @@ function TableTab({ tab, active = true }: Props) {
   const invalidateTablesForDb = useSchemaStore(s => s.invalidateTablesForDb)
   const loadTables = useSchemaStore(s => s.loadTables)
   const loadColumns = useSchemaStore(s => s.loadColumns)
+  const loadRowKey = useSchemaStore(s => s.loadRowKey)
 
   const pkColumns = useMemo(() =>
     columns.filter(c => c.is_primary_key).map(c => c.name),
     [columns],
   )
   const rowKeyColumns = useMemo(() =>
-    pkColumns.length > 0 ? pkColumns : columns.map(c => c.name),
-    [columns, pkColumns],
+    rowKey?.columns ?? [],
+    [rowKey],
   )
 
   const loadData = async (overrideLimit?: number, searchOverride?: string, whereOverride?: string, commitWhereOnSuccess?: string, resetScrollOnSuccess = false) => {
@@ -1281,7 +1283,10 @@ function TableTab({ tab, active = true }: Props) {
     const started = performance.now()
     try {
       const metadataStarted = performance.now()
-      const cols = await loadColumns(tab.sessionId, tab.database, tab.table)
+      const [cols, key] = await Promise.all([
+        loadColumns(tab.sessionId, tab.database, tab.table),
+        loadRowKey(tab.sessionId, tab.database, tab.table),
+      ])
       const metadataMs = Math.round((performance.now() - metadataStarted) * 100) / 100
       if (
         loadAbortRef.current !== controller
@@ -1291,6 +1296,7 @@ function TableTab({ tab, active = true }: Props) {
       ) return
       if (cols.length === 0) throw new Error('Could not load table columns.')
       setColumns(cols)
+      setRowKey(key)
       const selectSql = buildTableDataSelectSql(tab.database, tab.table, cols, effectiveSearch, effectiveWhere)
 
       const response = await api.executeQuery(
@@ -1407,6 +1413,7 @@ function TableTab({ tab, active = true }: Props) {
     setView(nextState.view)
     setResult(null)
     setColumns([])
+    setRowKey(null)
     setGlobalSearch(nextState.globalSearch)
     setWhereFilter(nextState.whereFilter)
     setAppliedWhere(nextState.appliedWhere)
@@ -1652,7 +1659,8 @@ function TableTab({ tab, active = true }: Props) {
       })
       try {
         addEntry({
-          sql: (r.ok ? r.data.sql_executed : '') || `UPDATE ${tab.database}.${tab.table}`,
+          sql: r.data?.sql_executed ||
+            `-- UPDATE ${tab.database}.${tab.table} rejected: ${r.ok ? 'no SQL returned' : r.error}`,
           sessionId: tab.sessionId,
           database: tab.database,
           affectedRows: r.ok ? r.data.affected_rows : undefined,
@@ -1660,10 +1668,13 @@ function TableTab({ tab, active = true }: Props) {
           error: r.ok ? r.data.error ?? undefined : r.error,
         })
       } catch { /* ignore */ }
-      if (!r.ok) {
+      if (!r.ok || r.data.ok === false) {
         mergeConcurrentStaged()
         syncPending(new Map(remainingPending))
-        showToast(r.error, 'error')
+        showToast(
+          r.ok ? (r.data.error ?? 'Update failed') : r.error,
+          'error',
+        )
         return
       }
       if (r.data.affected_rows === 0) {
@@ -1676,7 +1687,7 @@ function TableTab({ tab, active = true }: Props) {
       syncPending(new Map(remainingPending))
       // Immutable update, only after the server write succeeded: fresh row
       // array for the edited row, untouched references for the rest.
-      setResult(prev => applyEditsToRows(prev, new Map([[rowId, { original, changes }]]), rowKeyColumns, pkColumns))
+      setResult(prev => applyEditsToRows(prev, new Map([[rowId, { original, changes }]]), rowKeyColumns, rowKeyColumns))
     }
     for (const [draftId, values] of normalizedDrafts) {
       const start = Date.now()
@@ -1687,7 +1698,8 @@ function TableTab({ tab, active = true }: Props) {
       })
       try {
         addEntry({
-          sql: (r.ok ? r.data.sql_executed : '') || `INSERT INTO \`${tab.database}\`.\`${tab.table}\``,
+          sql: r.data?.sql_executed ||
+            `-- INSERT INTO \`${tab.database}\`.\`${tab.table}\` rejected: ${r.ok ? 'no SQL returned' : r.error}`,
           sessionId: tab.sessionId,
           database: tab.database,
           affectedRows: r.ok ? r.data.affected_rows ?? 1 : 0,
@@ -1695,10 +1707,13 @@ function TableTab({ tab, active = true }: Props) {
           error: r.ok ? r.data.error ?? undefined : r.error,
         })
       } catch { /* ignore */ }
-      if (!r.ok) {
+      if (!r.ok || r.data.ok === false) {
         mergeConcurrentStaged()
         syncPending(new Map(remainingPending))
-        showToast(r.error, 'error')
+        showToast(
+          r.ok ? (r.data.error ?? 'Insert failed') : r.error,
+          'error',
+        )
         loadData()
         return
       }
@@ -1760,35 +1775,46 @@ function TableTab({ tab, active = true }: Props) {
       table: tab.table,
       primary_keys,
     })
-    if (r.ok) {
-      if (r.data.affected_rows === 0) {
-        showToast('Delete matched 0 rows — the row may have changed since it was loaded.', 'error')
-        try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: 0, execTimeMs: 0 }) } catch { /* ignore */ }
-        loadData()
-        return
-      }
-
-      // Optimistically remove deleted rows from the local result state
-      setResult(prev => filterDeletedRows(prev, rows, rowKeyColumns))
-
-      // Clear selected rows for deleted items (both React state and AG Grid internal selection)
-      setSelectedRows(prev => {
-        const deletedKeys = deletedRowKeys(rows, rowKeyColumns)
-        return prev.filter(row => {
-          const key = rowKeyColumns.map(pk => String(row[pk])).join('\x00')
-          return !deletedKeys.has(key)
+    if (!r.ok || r.data.ok === false) {
+      const error = r.ok ? (r.data.error ?? 'Delete failed') : r.error
+      showToast(error, 'error')
+      try {
+        addEntry({
+          sql: r.data?.sql_executed ||
+            `-- DELETE FROM \`${tab.database}\`.\`${tab.table}\` rejected: ${error}`,
+          sessionId: tab.sessionId,
+          database: tab.database,
+          execTimeMs: 0,
+          error,
         })
-      })
-      gridRef.current?.deselectAll()
-
-      showToast(`Deleted ${r.data.affected_rows} row${r.data.affected_rows !== 1 ? 's' : ''}.`, 'success')
-      try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.data.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
-      invalidateTablesForDb(tab.sessionId!, tab.database!)
-      loadTables(tab.sessionId!, tab.database!)
-      loadData()
-    } else {
-      showToast(r.error, 'error')
+      } catch { /* ignore */ }
+      return
     }
+    if (r.data.affected_rows === 0) {
+      showToast('Delete matched 0 rows — the row may have changed since it was loaded.', 'error')
+      try { addEntry({ sql: r.data.sql_executed || `-- DELETE FROM \`${tab.database}\`.\`${tab.table}\` matched 0 rows`, sessionId: tab.sessionId, database: tab.database, affectedRows: 0, execTimeMs: 0 }) } catch { /* ignore */ }
+      loadData()
+      return
+    }
+
+    // Optimistically remove deleted rows from the local result state
+    setResult(prev => filterDeletedRows(prev, rows, rowKeyColumns))
+
+    // Clear selected rows for deleted items (both React state and AG Grid internal selection)
+    setSelectedRows(prev => {
+      const deletedKeys = deletedRowKeys(rows, rowKeyColumns)
+      return prev.filter(row => {
+        const key = rowKeyColumns.map(pk => String(row[pk])).join('\x00')
+        return !deletedKeys.has(key)
+      })
+    })
+    gridRef.current?.deselectAll()
+
+    showToast(`Deleted ${r.data.affected_rows} row${r.data.affected_rows !== 1 ? 's' : ''}.`, 'success')
+    try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.data.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
+    invalidateTablesForDb(tab.sessionId!, tab.database!)
+    loadTables(tab.sessionId!, tab.database!)
+    loadData()
   }
 
   const requestDeleteRows = (rows: Record<string, unknown>[]) => {
@@ -1999,8 +2025,12 @@ function TableTab({ tab, active = true }: Props) {
             <button
               type="button"
               onClick={handleCreateEmptyRow}
-              disabled={!(columns.length > 0 && !initialLoading && !refreshing)}
-              title="Add a row to insert"
+              disabled={!(columns.length > 0 && rowKeyColumns.length > 0 && !initialLoading && !refreshing)}
+              title={
+                rowKeyColumns.length > 0
+                  ? 'Add a row to insert'
+                  : 'Read-only: this table has no unique row key. Insert rows from the SQL editor.'
+              }
               className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors text-muted hover:text-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted"
             >
               <Plus size={14} aria-hidden="true" />
@@ -2009,11 +2039,13 @@ function TableTab({ tab, active = true }: Props) {
             <button
               type="button"
               onClick={() => requestDeleteRows(selectedRows.filter(row => !row.__lagun_insertDraft))}
-              disabled={!(columns.length > 0 && !initialLoading && !refreshing) || selectedRows.every(row => row.__lagun_insertDraft)}
+              disabled={!(columns.length > 0 && rowKeyColumns.length > 0 && !initialLoading && !refreshing) || selectedRows.every(row => row.__lagun_insertDraft)}
               title={
-                selectedRows.some(row => !row.__lagun_insertDraft)
-                  ? `Delete ${formatRowCount(selectedRows.filter(row => !row.__lagun_insertDraft).length)}`
-                  : 'Select rows to delete'
+                rowKeyColumns.length === 0
+                  ? 'Read-only: this table has no unique row key'
+                  : selectedRows.some(row => !row.__lagun_insertDraft)
+                    ? `Delete ${formatRowCount(selectedRows.filter(row => !row.__lagun_insertDraft).length)}`
+                    : 'Select rows to delete'
               }
               className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md transition-colors text-muted hover:text-red-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted"
             >
@@ -2272,6 +2304,17 @@ function TableTab({ tab, active = true }: Props) {
       )}
       </AnimatePresence>
 
+      {view === 'data' && !initialLoading && columns.length > 0 && rowKeyColumns.length === 0 && (
+        <div
+          role="note"
+          className="border-b border-amber-900/40 bg-amber-950/20 px-3 py-1.5 text-xs text-amber-300"
+        >
+          Read-only: this table has no primary key or NOT NULL unique key, so
+          Lagun cannot update or delete one row safely. Add one, or run the
+          change in the SQL editor.
+        </div>
+      )}
+
       {/* Content */}
       <m.div
         initial={false}
@@ -2324,9 +2367,9 @@ function TableTab({ tab, active = true }: Props) {
             <ResultGrid
                 ref={gridRef}
                 result={result}
-                editable={columns.length > 0 && !initialLoading && !refreshing}
+                editable={columns.length > 0 && rowKeyColumns.length > 0 && !initialLoading && !refreshing}
                 primaryKeyColumns={rowKeyColumns}
-                includeRowIndexInId={pkColumns.length === 0}
+                includeRowIndexInId={rowKeyColumns.length === 0}
                 onCellEdit={handleCellEdit}
                 onDeleteRows={requestDeleteRows}
                 onDuplicateRow={handleDuplicateRow}

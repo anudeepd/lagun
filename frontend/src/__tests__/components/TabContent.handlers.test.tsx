@@ -6,6 +6,7 @@ import TabContent from '../../components/editor/TabContent'
 import ToastViewport from '../../components/ui/ToastViewport'
 import { server } from '../server'
 import { useSchemaStore } from '../../store/schemaStore'
+import { useQueryLogStore } from '../../store/queryLogStore'
 import type { Tab } from '../../types'
 import {
   dataRequests,
@@ -114,7 +115,8 @@ describe('TabContent data tab — row mutation wiring', () => {
   beforeEach(() => {
     resetDataRequests()
     resetMockTableRows()
-    useSchemaStore.setState({ databases: {}, tables: {}, columns: {}, dbErrors: {} })
+    useSchemaStore.setState({ databases: {}, tables: {}, columns: {}, rowKeys: {}, dbErrors: {} })
+    useQueryLogStore.getState().clearLog()
   })
 
   it('sends a staged cell edit as row-update and renders the edited value', async () => {
@@ -182,6 +184,33 @@ describe('TabContent data tab — row mutation wiring', () => {
     expect(screen.getByRole('button', { name: 'Apply (1)' })).toBeInTheDocument()
   })
 
+  it('logs the attempted SQL when the server rejects an edit', async () => {
+    const attempted =
+      "UPDATE `app_db`.`users` SET `name` = 'Alicia' WHERE `id` = 1"
+    server.use(
+      http.post(`${BASE}/sessions/:id/row-update`, () =>
+        HttpResponse.json({
+          ok: false,
+          affected_rows: 0,
+          sql_executed: attempted,
+          error: 'Table has no unique row key',
+        }),
+      ),
+    )
+    await renderLoadedDataTab()
+
+    commitCellEdit(rowByName('Alice'), 'name', 'Alice', 'Alicia')
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply (1)' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply Changes' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Table has no unique row key',
+    )
+    const entries = useQueryLogStore.getState().entries
+    expect(entries[0]?.sql).toBe(attempted)
+    expect(entries[0]?.error).toBe('Table has no unique row key')
+  })
+
   it('sends a selected row as DELETE /rows and drops it from the grid', async () => {
     await renderLoadedDataTab()
 
@@ -242,7 +271,8 @@ describe('TabContent view panels — the hidden view leaves the tab order', () =
   beforeEach(() => {
     resetDataRequests()
     resetMockTableRows()
-    useSchemaStore.setState({ databases: {}, tables: {}, columns: {}, dbErrors: {} })
+    useSchemaStore.setState({ databases: {}, tables: {}, columns: {}, rowKeys: {}, dbErrors: {} })
+    useQueryLogStore.getState().clearLog()
   })
 
   it('marks the schema panel inert once the data view is selected', async () => {

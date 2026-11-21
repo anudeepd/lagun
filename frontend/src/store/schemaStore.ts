@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../api/client'
-import type { TableInfo, ColumnInfo } from '../types'
+import type { TableInfo, ColumnInfo, RowKeyInfo } from '../types'
 
 // Module-level in-flight promise maps — not in Zustand state (which is only for UI indicators)
 const _inflightDbs: Partial<Record<string, Promise<string[]>>> = {}
@@ -9,6 +9,7 @@ const _inflightTables: Partial<Record<string, Promise<TableInfo[]>>> = {}
 // re-request the same schemas.
 const _pendingTableBatches = new Set<string>()
 const _inflightColumns: Partial<Record<string, Promise<ColumnInfo[]>>> = {}
+const _inflightRowKeys: Partial<Record<string, Promise<RowKeyInfo>>> = {}
 
 // Per-key generation counters, keyed exactly like the in-flight maps above. An
 // invalidation bumps the key, and a loader that captured the old value drops
@@ -25,6 +26,7 @@ const forget = (key: string): void => {
   delete _inflightDbs[key]
   delete _inflightTables[key]
   delete _inflightColumns[key]
+  delete _inflightRowKeys[key]
   _pendingTableBatches.delete(key)
 }
 
@@ -49,6 +51,8 @@ interface SchemaState {
   tables: Record<string, TableInfo[]>
   // Map of `${sessionId}/${db}/${table}` → column list
   columns: Record<string, ColumnInfo[]>
+  // Map of `${sessionId}/${db}/${table}` → columns that identify one row
+  rowKeys: Record<string, RowKeyInfo>
   // Loading states
   loadingDbs: Set<string>
   loadingTables: Set<string>
@@ -61,6 +65,7 @@ interface SchemaState {
   loadTables: (sessionId: string, db: string) => Promise<TableInfo[]>
   loadTablesBatch: (sessionId: string, dbs: string[]) => Promise<void>
   loadColumns: (sessionId: string, db: string, table: string) => Promise<ColumnInfo[]>
+  loadRowKey: (sessionId: string, db: string, table: string) => Promise<RowKeyInfo>
   invalidateSession: (sessionId: string) => void
   invalidateTable: (sessionId: string, db: string, table: string) => void
   invalidateTablesForDb: (sessionId: string, db: string) => void
@@ -70,6 +75,7 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
   databases: {},
   tables: {},
   columns: {},
+  rowKeys: {},
   loadingDbs: new Set(),
   loadingTables: new Set(),
   dbErrors: {},
@@ -212,9 +218,34 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
     return promise
   },
 
+  // Same fencing as loadColumns. A failed request resolves to "no usable key"
+  // rather than throwing: an unknown key must leave the grid read-only, never
+  // optimistic.
+  loadRowKey: async (sessionId, db, table) => {
+    const key = `${sessionId}/${db}/${table}`
+    const { rowKeys } = get()
+    if (rowKeys[key]) return rowKeys[key]
+    if (_inflightRowKeys[key]) return _inflightRowKeys[key]
+
+    const generation = generationOf(key)
+    const promise = api.getRowKey(sessionId, db, table).then(keyInfo => {
+      if (generation === generationOf(key)) {
+        set(s => ({ rowKeys: { ...s.rowKeys, [key]: keyInfo } }))
+      }
+      return keyInfo
+    }).catch(() => {
+      return { columns: [], kind: null } as RowKeyInfo
+    }).finally(() => {
+      if (_inflightRowKeys[key] === promise) delete _inflightRowKeys[key]
+    })
+    _inflightRowKeys[key] = promise
+    return promise
+  },
+
   invalidateSession: (sessionId) => {
-    // Forget every key the session owns: its own listing plus each table and
-    // column key, whether cached, in flight, or queued in a pending batch.
+    // Forget every key the session owns: its own listing plus each table,
+    // column, and row-key entry, whether cached, in flight, or queued in a
+    // pending batch.
     const prefix = `${sessionId}/`
     const forgotten = [sessionId]
     for (const key of Object.keys(_inflightTables)) if (key.startsWith(prefix)) forgotten.push(key)
@@ -232,7 +263,10 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
       const columns = Object.fromEntries(
         Object.entries(s.columns).filter(([k]) => !k.startsWith(`${sessionId}/`))
       )
-      return { databases, dbErrors, tables, columns, ...clearLoading(s, forgotten) }
+      const rowKeys = Object.fromEntries(
+        Object.entries(s.rowKeys).filter(([k]) => !k.startsWith(`${sessionId}/`))
+      )
+      return { databases, dbErrors, tables, columns, rowKeys, ...clearLoading(s, forgotten) }
     })
   },
 
@@ -242,7 +276,9 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
     set(s => {
       const columns = { ...s.columns }
       delete columns[key]
-      return { columns, ...clearLoading(s, [key]) }
+      const rowKeys = { ...s.rowKeys }
+      delete rowKeys[key]
+      return { columns, rowKeys, ...clearLoading(s, [key]) }
     })
   },
 

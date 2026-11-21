@@ -59,6 +59,11 @@ async def test_row_update_rejects_table_without_unique_key(
     assert data["ok"] is False
     assert "unique" in data["error"].lower()
     assert data["affected_rows"] == 0
+    # The query log shows the statement that was attempted, not a runnable
+    # unbounded UPDATE.
+    assert data["sql_executed"].startswith(
+        f"UPDATE `{test_db}`.`no_key_users` SET `age` = 31 WHERE "
+    )
 
     check = await client.post(
         f"/api/v1/sessions/{session_id}/query",
@@ -183,6 +188,41 @@ async def test_row_update_accepts_not_null_unique_key(client, session_id, test_d
         },
     )
     assert check.json()["rows"] == [[31]]
+
+
+async def test_row_update_requires_every_key_column(client, session_id, test_db):
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "CREATE TABLE partial_key_users (id INT PRIMARY KEY, age INT)",
+    )
+    await _create(
+        client,
+        session_id,
+        test_db,
+        "INSERT INTO partial_key_users (id, age) VALUES (1, 30)",
+    )
+
+    r = await client.post(
+        f"/api/v1/sessions/{session_id}/row-update",
+        json={
+            "database": test_db,
+            "table": "partial_key_users",
+            "primary_key": {},
+            "updates": {"age": 31},
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is False
+    assert "must include id" in data["error"]
+
+    check = await client.post(
+        f"/api/v1/sessions/{session_id}/query",
+        json={"sql": "SELECT age FROM partial_key_users", "database": test_db},
+    )
+    assert check.json()["rows"] == [[30]]
 
 
 async def test_row_update_same_value_reports_matched_row(client, session_id, test_db):

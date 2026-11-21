@@ -15,7 +15,13 @@ import aiomysql
 from fastapi import APIRouter, HTTPException, Request
 
 from lagun.auth import request_username
-from lagun.db.pool import DatabaseCapacityError, DatabaseConnectionError, get_pool
+from lagun.db.pool import (
+    DatabaseCapacityError,
+    DatabaseConnectionError,
+    get_pool,
+    restore_connection_state,
+)
+from lagun.db.row_key import RowKey, select_row_key
 from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident, escape_value, format_mysql_time
 from lagun.api.scope import effective_scope, require_db_scope
@@ -100,6 +106,13 @@ _BULK_PREVIEW_CHARS = 160
 # is a convenience for the query log, not a record, so it is capped rather than
 # grown with the request.
 _ROW_DELETE_MAX_ECHO = 50
+# Returned when a raw statement leaves the pooled connection in a transaction
+# state that cannot carry over to the next request.
+_CONNECTION_RESET_ERROR = (
+    "Lagun reset the shared connection because this statement left a transaction "
+    "open or autocommit off, so the change cannot be committed from this tab. "
+    "Run the transaction and its writes as one script."
+)
 _NONTRANSACTIONAL_ENGINES = {
     "MYISAM",
     "MEMORY",
@@ -755,6 +768,7 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
 
         pool_wait_started = time.monotonic()
         async with pool.acquire() as conn:
+            await restore_connection_state(conn)
             pool_wait_ms = _elapsed_ms(pool_wait_started)
             try:
                 async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
@@ -795,6 +809,7 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
                                 [_serialize(value) for value in row] for row in raw_rows
                             ]
                             value_serialize_ms = _elapsed_ms(serialize_started)
+                            reset = await restore_connection_state(conn)
                             timings = _query_timings(
                                 started,
                                 pool_wait_ms=pool_wait_ms,
@@ -803,6 +818,16 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
                                 fetch_ms=fetch_ms,
                                 value_serialize_ms=value_serialize_ms,
                             )
+                            if reset:
+                                return QueryResult(
+                                    columns=[],
+                                    rows=[],
+                                    row_count=0,
+                                    exec_time_ms=timings.total_ms,
+                                    error=_CONNECTION_RESET_ERROR,
+                                    execution_id=req.execution_id,
+                                    timings=timings,
+                                )
                             return QueryResult(
                                 columns=columns,
                                 rows=rows,
@@ -811,6 +836,7 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
                                 execution_id=req.execution_id,
                                 timings=timings,
                             )
+                        reset = await restore_connection_state(conn)
                         timings = _query_timings(
                             started,
                             pool_wait_ms=pool_wait_ms,
@@ -819,6 +845,16 @@ async def execute_query(session_id: str, req: QueryRequest, request: Request):
                             fetch_ms=fetch_ms,
                             value_serialize_ms=value_serialize_ms,
                         )
+                        if reset:
+                            return QueryResult(
+                                columns=[],
+                                rows=[],
+                                row_count=0,
+                                exec_time_ms=timings.total_ms,
+                                error=_CONNECTION_RESET_ERROR,
+                                execution_id=req.execution_id,
+                                timings=timings,
+                            )
                         return QueryResult(
                             columns=[],
                             rows=[],
@@ -1394,6 +1430,19 @@ async def execute_sequential_script(
                             statements_executed += 1
                         failed_idx = None
                 finally:
+                    try:
+                        dirty = await restore_connection_state(conn)
+                    except asyncio.CancelledError:
+                        _discard_lease_connection(conn)
+                        raise
+                    except Exception:
+                        dirty = False
+                    if dirty and execution_error is None:
+                        execution_error = (
+                            "The script ended with a transaction open or autocommit "
+                            "off, so its uncommitted statements were rolled back. "
+                            "Add COMMIT or leave autocommit on."
+                        )
                     _discard_lease_connection(conn)
     except (DatabaseCapacityError, DatabaseConnectionError):
         raise
@@ -1575,6 +1624,46 @@ def _coerce_binary_map(
     }
 
 
+class _RowKeyError(ValueError):
+    """A grid write cannot be aimed at exactly one row."""
+
+
+def _require_row_key(
+    row_key: RowKey | None,
+    key: dict[str, Any],
+    database: str,
+    table: str,
+) -> None:
+    """Reject a key that does not identify one row.
+
+    The grid is told the same key by the schema endpoint, but the server must
+    not rely on the caller having read it. A superset of a unique key is safe:
+    the unique columns alone match at most one row.
+    """
+    if row_key is None:
+        raise _RowKeyError(
+            f"{database}.{table} has no primary key or NOT NULL unique key, so "
+            "Lagun cannot target one row. Add one, or run the change in the SQL "
+            "editor."
+        )
+    by_name = {name.lower(): value for name, value in key.items()}
+    missing = [name for name in row_key.columns if name.lower() not in by_name]
+    if missing:
+        raise _RowKeyError(
+            f"The row key must include {', '.join(row_key.columns)} to target "
+            "exactly one row."
+        )
+    if any(by_name[name.lower()] is None for name in row_key.columns):
+        raise _RowKeyError("A NULL row-key value cannot identify exactly one row.")
+
+
+async def _rollback_quietly(conn) -> None:
+    try:
+        await conn.rollback()
+    except Exception:
+        pass
+
+
 def _discard_lease_connection(conn: Any) -> None:
     """Drop a leased connection so a timed-out statement cannot be reused.
 
@@ -1633,7 +1722,9 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
         col_q = quote_ident(req.column)
 
         async with pool.acquire() as conn:
+            await restore_connection_state(conn)
             async with conn.cursor() as cur:
+                row_key = await select_row_key(cur, req.database, req.table)
                 data_types = await _column_data_types(
                     cur, req.database, req.table, [req.column, *req.primary_key]
                 )
@@ -1647,6 +1738,7 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
                 sql = f"UPDATE {db_q}.{tbl_q} SET {col_q} = %s WHERE {pk_clauses}"
                 params = [new_value] + pk_values
                 display_sql = _display_sql(sql, params)
+                _require_row_key(row_key, req.primary_key, req.database, req.table)
 
                 # Single-row writes had no deadline at all; a stuck statement
                 # held a pooled connection for as long as the server allowed.
@@ -1656,6 +1748,7 @@ async def cell_update(session_id: str, req: CellUpdateRequest):
                     async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
                         await cur.execute(sql, params)
                         affected = cur.rowcount
+                        await conn.commit()
                 except TimeoutError:
                     _discard_lease_connection(conn)
                     raise
@@ -1679,11 +1772,15 @@ async def row_update(session_id: str, req: RowUpdateRequest):
         tbl_q = quote_ident(req.table)
 
         async with pool.acquire() as conn:
+            await restore_connection_state(conn)
             async with conn.cursor() as cur:
+                row_key = await select_row_key(cur, req.database, req.table)
                 data_types = await _column_data_types(
                     cur, req.database, req.table, [*req.updates, *req.primary_key]
                 )
                 updates = _coerce_binary_map(req.updates, data_types)
+                if not updates:
+                    raise ValueError("No changes were supplied.")
                 pk_clauses, pk_values = _build_pk_where(
                     _coerce_binary_map(req.primary_key, data_types)
                 )
@@ -1691,11 +1788,13 @@ async def row_update(session_id: str, req: RowUpdateRequest):
                 sql = f"UPDATE {db_q}.{tbl_q} SET {set_clauses} WHERE {pk_clauses}"
                 params = list(updates.values()) + pk_values
                 display_sql = _display_sql(sql, params)
+                _require_row_key(row_key, req.primary_key, req.database, req.table)
 
                 try:
                     async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
                         await cur.execute(sql, params)
                         affected = cur.rowcount
+                        await conn.commit()
                 except TimeoutError:
                     _discard_lease_connection(conn)
                     raise
@@ -1718,6 +1817,7 @@ async def row_insert(session_id: str, req: RowInsertRequest):
         db_q = quote_ident(req.database)
         tbl_q = quote_ident(req.table)
         async with pool.acquire() as conn:
+            await restore_connection_state(conn)
             async with conn.cursor() as cur:
                 data_types = await _column_data_types(
                     cur, req.database, req.table, req.values
@@ -1734,6 +1834,7 @@ async def row_insert(session_id: str, req: RowInsertRequest):
                 try:
                     async with asyncio.timeout(max(0.1, _QUERY_MAX_RUNTIME_SECONDS)):
                         await cur.execute(sql, params)
+                        await conn.commit()
                 except TimeoutError:
                     _discard_lease_connection(conn)
                     raise
@@ -1757,20 +1858,28 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
         tbl_q = quote_ident(req.table)
         total_affected = 0
         async with pool.acquire() as conn:
+            await restore_connection_state(conn)
             async with conn.cursor() as cur:
-                await cur.execute("SET autocommit=0")
-                await cur.execute("SELECT @@autocommit")
-                autocommit_row = await cur.fetchone()
-                if autocommit_row and autocommit_row[0]:
-                    raise RuntimeError(
-                        "Failed to disable autocommit for transactional delete"
-                    )
+                row_key = await select_row_key(cur, req.database, req.table)
                 data_types = await _column_data_types(
                     cur,
                     req.database,
                     req.table,
                     [key for pk in req.primary_keys for key in pk],
                 )
+                deletes: list[tuple[str, list[Any]]] = []
+                for pk in req.primary_keys:
+                    pk_clauses, pk_values = _build_pk_where(
+                        _coerce_binary_map(pk, data_types)
+                    )
+                    sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
+                    if len(display_sqls) < _ROW_DELETE_MAX_ECHO:
+                        display_sqls.append(_display_sql(sql, pk_values))
+                    deletes.append((sql, pk_values))
+                # Validate every key before the first delete so a bad key cannot
+                # leave an earlier delete committed and a later one unapplied.
+                for pk in req.primary_keys:
+                    _require_row_key(row_key, pk, req.database, req.table)
                 try:
                     # The whole batch shares one transaction, so it also shares
                     # one deadline: a huge key list must not hold a pooled
@@ -1780,24 +1889,18 @@ async def row_delete(session_id: str, req: RowDeleteRequest):
                         async with asyncio.timeout(
                             max(0.1, _QUERY_MAX_RUNTIME_SECONDS)
                         ):
-                            for pk in req.primary_keys:
-                                pk_clauses, pk_values = _build_pk_where(
-                                    _coerce_binary_map(pk, data_types)
-                                )
-                                sql = f"DELETE FROM {db_q}.{tbl_q} WHERE {pk_clauses}"
-                                if len(display_sqls) < _ROW_DELETE_MAX_ECHO:
-                                    display_sqls.append(_display_sql(sql, pk_values))
+                            await conn.begin()
+                            for sql, pk_values in deletes:
                                 await cur.execute(sql, pk_values)
                                 total_affected += cur.rowcount
+                            await conn.commit()
                     except TimeoutError:
+                        await _rollback_quietly(conn)
                         _discard_lease_connection(conn)
                         raise
-                    await cur.execute("COMMIT")
                 except Exception:
-                    await cur.execute("ROLLBACK")
+                    await _rollback_quietly(conn)
                     raise
-                finally:
-                    await cur.execute("SET autocommit=1")
         return RowDeleteResult(
             ok=True,
             affected_rows=total_affected,
