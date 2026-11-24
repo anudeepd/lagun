@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import GridSearchBar from '../../components/editor/GridSearchBar'
 
@@ -61,6 +61,19 @@ describe('GridSearchBar', () => {
 
     await userEvent.keyboard('{Escape}')
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('does not navigate while Enter confirms an IME composition', () => {
+    const onNext = vi.fn()
+    const onPrev = vi.fn()
+    renderBar({ onNext, onPrev })
+    const input = screen.getByRole('searchbox')
+
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', isComposing: true })
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', keyCode: 229 })
+
+    expect(onNext).not.toHaveBeenCalled()
+    expect(onPrev).not.toHaveBeenCalled()
   })
 
 

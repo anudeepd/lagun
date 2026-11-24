@@ -243,17 +243,20 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
         </div>
         <div className="max-h-[50vh] overflow-auto border border-surface-700 rounded-md">
           <table className="w-full text-xs">
+            <caption className="sr-only">Table columns</caption>
             <thead className="sticky top-0 z-20 bg-surface-800 text-slate-400">
               <tr>
-                <th className="sticky left-0 z-20 bg-surface-800 w-10 text-right px-2 py-1.5 font-medium">#</th>
-                <th className="sticky left-10 z-10 bg-surface-800 text-left px-2 py-1.5 font-medium min-w-[10rem]">Name</th>
-                <th className="text-left px-2 py-1.5 font-medium min-w-[8rem]">Type</th>
-                <th className="text-left px-2 py-1.5 font-medium min-w-[5rem]">Nullable</th>
-                <th className="text-left px-2 py-1.5 font-medium min-w-[8rem]">Default</th>
-                <th className="text-left px-2 py-1.5 font-medium min-w-[4rem]">Key</th>
-                <th className="text-left px-2 py-1.5 font-medium min-w-[6rem]">Extra</th>
-                <th className="text-left px-2 py-1.5 font-medium min-w-[10rem]">Comment</th>
-                <th className="sticky right-0 z-20 bg-surface-800 text-left px-2 py-1.5 font-medium w-16" />
+                <th scope="col" className="sticky left-0 z-20 bg-surface-800 w-10 text-right px-2 py-1.5 font-medium">#</th>
+                <th scope="col" className="sticky left-10 z-10 bg-surface-800 text-left px-2 py-1.5 font-medium min-w-[10rem]">Name</th>
+                <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[8rem]">Type</th>
+                <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[5rem]">Nullable</th>
+                <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[8rem]">Default</th>
+                <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[4rem]">Key</th>
+                <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[6rem]">Extra</th>
+                <th scope="col" className="text-left px-2 py-1.5 font-medium min-w-[10rem]">Comment</th>
+                <th scope="col" className="sticky right-0 z-20 bg-surface-800 text-left px-2 py-1.5 font-medium w-16">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -314,10 +317,13 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
         </div>
         <div className="max-h-[32vh] overflow-auto border border-surface-700 rounded-md">
           <table className="w-full text-xs">
+            <caption className="sr-only">Table indexes</caption>
             <thead className="sticky top-0 z-10 bg-surface-800 text-slate-400">
               <tr>
                 {['Name', 'Columns', 'Unique', 'Type', ''].map((h, i) => (
-                  <th key={h || i} className={h ? 'text-left px-2 py-1.5 font-medium' : 'text-left px-2 py-1.5 font-medium w-16'}>{h}</th>
+                  <th key={h || i} scope="col" className={h ? 'text-left px-2 py-1.5 font-medium' : 'text-left px-2 py-1.5 font-medium w-16'}>
+                    {h || <span className="sr-only">Actions</span>}
+                  </th>
                 ))}
               </tr>
             </thead>

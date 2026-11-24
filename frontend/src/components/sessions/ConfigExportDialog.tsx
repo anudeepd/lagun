@@ -5,6 +5,7 @@ import Button from '../ui/Button'
 import Input from '../ui/Input'
 import { LoadingState } from '../ui/Spinner'
 import { api } from '../../api/client'
+import { isImeComposing } from '../../utils/keyboard'
 
 interface Props {
   open: boolean
@@ -87,7 +88,12 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
           placeholder="Repeat passphrase"
           autoComplete="new-password"
           disabled={loading}
-          onKeyDown={e => e.key === 'Enter' && !loading && handleExport()}
+          onKeyDown={e => {
+            if (e.key !== 'Enter' || loading) return
+            e.preventDefault()
+            if (isImeComposing(e)) return
+            handleExport()
+          }}
         />
         {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
       </div>

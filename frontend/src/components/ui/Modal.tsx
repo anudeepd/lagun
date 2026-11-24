@@ -79,7 +79,7 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
         className={`relative flex max-h-[90vh] w-full flex-col rounded-lg border border-surface-700 bg-surface-900 shadow-2xl ${width}`}
       >
         <div className="flex items-center justify-between border-b border-surface-700 px-4 py-3">
-          <h2 id={titleId} className="text-balance text-sm font-semibold text-slate-100">{title}</h2>
+          <h1 id={titleId} className="text-balance text-sm font-semibold text-slate-100">{title}</h1>
           <Button variant="ghost" size="sm" onClick={onClose} className="p-1" aria-label="Close dialog" disabled={!isPresent}>
             <X size={14} />
           </Button>
@@ -98,6 +98,20 @@ export default function Modal({ open, onClose, title, children, footer, width = 
   const titleId = useId()
 
   onCloseRef.current = onClose
+
+  // The dialog is portaled outside #root. Make the entire app behind it inert
+  // so keyboard, pointer, and assistive-tech navigation cannot reach the page
+  // while the modal is open. Nested modals restore the previous value on close.
+  useLayoutEffect(() => {
+    if (!open) return
+    const root = document.getElementById('root')
+    if (!root) return
+    const previousInert = root.inert === true
+    root.inert = true
+    return () => {
+      root.inert = previousInert
+    }
+  }, [open])
 
   // Escape and focus trapping must be active before the entrance's first frame.
   useLayoutEffect(() => {

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from lagun.auth import request_username
+from lagun.limits import QUERY_MAX_RESULT_ROWS
 from lagun.models.presence import PresenceAck, PresenceRemovalResult
 
 router = APIRouter(tags=["presence"])
@@ -26,7 +27,7 @@ class PresenceTab(BaseModel):
     view: str | None = Field(default=None, max_length=32)
     global_search: str | None = Field(default=None, max_length=1000)
     where_filter: str | None = Field(default=None, max_length=32000)
-    row_limit: int | None = Field(default=None, ge=1, le=100000)
+    row_limit: int | None = Field(default=None, ge=1, le=QUERY_MAX_RESULT_ROWS)
 
 
 class PresenceUpdate(BaseModel):

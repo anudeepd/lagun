@@ -196,7 +196,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     // The listing endpoint is not required to return a sorted array, and the
     // bookmark view must still read alphabetically. Sort the view, not the
     // cached response, so every mode has one stable order.
-    filtered = [...filtered].sort((a, b) =>
+    filtered = filtered.toSorted((a, b) =>
       a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
     )
     return { db, tbls: filtered }

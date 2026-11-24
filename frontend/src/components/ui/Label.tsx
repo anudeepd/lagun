@@ -1,7 +1,7 @@
 import { type ElementType, type HTMLAttributes, type ReactNode } from 'react'
 import clsx from 'clsx'
 
-type LabelTag = 'label' | 'span' | 'div' | 'p' | 'h3'
+type LabelTag = 'label' | 'span' | 'div' | 'p' | 'h2' | 'h3'
 
 interface LabelProps extends Omit<HTMLAttributes<HTMLElement>, 'className' | 'children'> {
   /**

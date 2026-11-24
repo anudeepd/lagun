@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import Modal from '../../components/ui/Modal'
 
@@ -34,6 +34,25 @@ function OpenableModal({ onClose }: { onClose: () => void }) {
 }
 
 describe('Modal', () => {
+  it('makes the background inert while open and restores it on close', async () => {
+    const user = userEvent.setup()
+    const root = document.createElement('div')
+    root.id = 'root'
+    document.body.appendChild(root)
+
+    try {
+      render(<OpenableModal onClose={() => {}} />)
+      await user.click(screen.getByRole('button', { name: 'Open editor' }))
+      expect(root.inert).toBe(true)
+      expect(screen.getByRole('heading', { level: 1, name: 'Edit cell' })).toBeInTheDocument()
+
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(root.inert).toBe(false))
+    } finally {
+      root.remove()
+    }
+  })
+
   it('does not steal focus from a controlled textarea while typing', async () => {
     const user = userEvent.setup()
     render(<ControlledTextareaModal />)

@@ -101,4 +101,87 @@ describe('ExportDialog copy stream guard', () => {
     ])
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it('keeps the prepared text and finishes copying on the next click when the browser blocks the first write', async () => {
+    writeMock
+      .mockRejectedValueOnce(new Error('The Clipboard API is unavailable on this connection'))
+      .mockResolvedValueOnce(undefined)
+
+    render(<ExportDialog
+      {...props}
+      rowsOverride={{
+        columns: ['id', 'name'],
+        rows: [[1, 'Alice']],
+        autoIncrementColumns: ['id'],
+      }}
+    />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/click Copy again/i)
+    expect(writeMock).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Copy again' }))
+    await waitFor(() => expect(writeMock).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('button', { name: /Copied/ })).toBeInTheDocument()
+  })
+
+  it('shows download progress until the complete file is ready, then closes', async () => {
+    const createObjectURL = vi.fn(() => 'blob:export')
+    const revokeObjectURL = vi.fn()
+    const originalCreate = URL.createObjectURL
+    const originalRevoke = URL.revokeObjectURL
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: revokeObjectURL })
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    let streamController!: ReadableStreamDefaultController<Uint8Array>
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) { streamController = controller },
+    })
+    fetchMock.mockResolvedValue(new Response(stream, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/plain',
+        'Content-Disposition': 'attachment; filename="lagun_test_users_insert.sql"',
+      },
+    }))
+
+    try {
+      render(<ExportDialog {...props} />)
+      await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+      expect(await screen.findByRole('progressbar', { name: 'Download progress' })).toBeInTheDocument()
+      streamController.enqueue(
+        new TextEncoder().encode(
+          '-- Lagun export: users\nINSERT INTO `users` (`id`) VALUES (1);\n' +
+          '-- Lagun export complete: 1 rows\n'
+        )
+      )
+      await waitFor(() =>
+        expect(screen.getByRole('status')).toHaveTextContent(/received/)
+      )
+
+      streamController.close()
+      await waitFor(() => expect(props.onClose).toHaveBeenCalledOnce())
+      expect(createObjectURL).toHaveBeenCalledOnce()
+      expect(showToast).toHaveBeenCalledWith('Downloaded lagun_test_users_insert.sql.')
+    } finally {
+      Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: originalCreate })
+      Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: originalRevoke })
+      clickSpy.mockRestore()
+    }
+  })
+
+  it('rejects a batch size above the server limit instead of silently substituting 500', async () => {
+    render(<ExportDialog {...props} />)
+    const batchSize = screen.getByLabelText('Batch Size')
+    await userEvent.clear(batchSize)
+    await userEvent.type(batchSize, '10001')
+    await userEvent.click(screen.getByRole('button', { name: 'Download' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('1 to 10,000')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

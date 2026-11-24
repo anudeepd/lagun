@@ -3,6 +3,8 @@
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
+from lagun.limits import QUERY_MAX_RESULT_ROWS
+
 # Upper bound on a single bulk row-delete request, matching the export path's
 # pk_values cap. Without it the key list — and the one transaction it opens —
 # is sized entirely by the caller.
@@ -12,7 +14,9 @@ _MAX_ROW_DELETE_KEYS = 10_000
 class QueryRequest(BaseModel):
     sql: str
     database: Optional[str] = None
-    limit: Optional[int] = Field(None, ge=1, le=100000)  # overrides session default
+    limit: Optional[int] = Field(
+        None, ge=1, le=QUERY_MAX_RESULT_ROWS
+    )  # overrides session default
     execution_id: Optional[str] = Field(
         None,
         min_length=1,
@@ -82,7 +86,7 @@ class SequentialScriptRequest(BaseModel):
     )
     sql: str
     database: Optional[str] = None
-    limit: Optional[int] = Field(None, ge=1, le=100000)
+    limit: Optional[int] = Field(None, ge=1, le=QUERY_MAX_RESULT_ROWS)
     tab_id: Optional[str] = Field(None, min_length=1, max_length=128)
 
 

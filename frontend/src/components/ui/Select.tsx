@@ -41,6 +41,7 @@ export default function Select({ label, error, className, containerClassName, co
   const generatedId = useId()
   const controlId = id ?? generatedId
   const menuId = `${controlId}-menu`
+  const errorId = error ? `${controlId}-error` : undefined
   const options: SelectOption[] = Children.toArray(children).flatMap(child => {
     if (!isValidElement(child) || child.type !== 'option') return []
     const option = child as ReactElement<{ value?: string | number, disabled?: boolean, children?: ReactNode }>
@@ -175,6 +176,8 @@ export default function Select({ label, error, className, containerClassName, co
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={menuId}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={errorId}
         onClick={() => {
           if (disabled || enabledOptions.length === 0) return
           setActiveIndex(Math.max(0, enabledOptions.findIndex(option => option.value === selectedValue)))
@@ -194,7 +197,7 @@ export default function Select({ label, error, className, containerClassName, co
         <span className="min-w-0 truncate">{selected?.label}</span>
         <m.span className="shrink-0" animate={{ rotate: open ? 180 : 0 }} transition={surfaceTransition}><ChevronDown size={compact ? 12 : 14} /></m.span>
       </m.button>
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && <p id={errorId} role="alert" className="text-xs text-red-400">{error}</p>}
       {createPortal(
         <AnimatePresence>
           {open && (

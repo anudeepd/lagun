@@ -15,6 +15,7 @@ import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
 import { clampToViewport } from '../../utils/clampToViewport'
+import { isImeComposing } from '../../utils/keyboard'
 
 interface ContextMenuState {
   tabId: string
@@ -347,7 +348,12 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
           <input
             value={renameValue}
             onChange={event => setRenameValue(event.target.value)}
-            onKeyDown={event => { if (event.key === 'Enter') saveRename() }}
+            onKeyDown={event => {
+              if (event.key !== 'Enter') return
+              event.preventDefault()
+              if (isImeComposing(event)) return
+              saveRename()
+            }}
             autoFocus
             className="rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm font-normal normal-case text-slate-100 focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400"
           />

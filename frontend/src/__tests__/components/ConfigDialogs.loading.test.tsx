@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ConfigExportDialog from '../../components/sessions/ConfigExportDialog'
 import ConfigImportDialog from '../../components/sessions/ConfigImportDialog'
@@ -49,5 +49,45 @@ describe('config dialogs loading announcements', () => {
     expect(screen.getByRole('button', { name: 'Import' })).toBeDisabled()
     // A live region inside the inert fieldset would never be announced.
     expect(screen.getByRole('status').closest('fieldset')).toBeNull()
+  })
+
+  it('does not start an export or import while Enter confirms an IME composition', async () => {
+    const exportConfig = vi.spyOn(api, 'exportConfig').mockImplementation(() => never())
+    const importConfig = vi.spyOn(api, 'importConfig').mockImplementation(() => never())
+    const user = userEvent.setup()
+
+    const exportView = render(<ConfigExportDialog open onClose={() => {}} />)
+    await user.type(screen.getByLabelText('Passphrase'), 'hunter2')
+    const confirmPassphrase = screen.getByLabelText('Confirm passphrase')
+    await user.type(confirmPassphrase, 'hunter2')
+
+    fireEvent.keyDown(confirmPassphrase, {
+      key: 'Enter',
+      code: 'Enter',
+      isComposing: true,
+    })
+    expect(exportConfig).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(confirmPassphrase, { key: 'Enter', code: 'Enter' })
+    await waitFor(() => expect(exportConfig).toHaveBeenCalledOnce())
+    exportView.unmount()
+
+    render(<ConfigImportDialog open onClose={() => {}} />)
+    await user.upload(
+      screen.getByLabelText('Export file'),
+      new File(['{"connections":[]}'], 'lagun-export.json', { type: 'application/json' }),
+    )
+    const importPassphrase = screen.getByLabelText('Passphrase')
+    await user.type(importPassphrase, 'hunter2')
+
+    fireEvent.keyDown(importPassphrase, {
+      key: 'Enter',
+      code: 'Enter',
+      isComposing: true,
+    })
+    expect(importConfig).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(importPassphrase, { key: 'Enter', code: 'Enter' })
+    await waitFor(() => expect(importConfig).toHaveBeenCalledOnce())
   })
 })

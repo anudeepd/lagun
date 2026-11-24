@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from lagun.limits import QUERY_MAX_RESULT_ROWS
+
 
 class SessionCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
@@ -12,7 +14,7 @@ class SessionCreate(BaseModel):
     username: str = Field(..., min_length=1)
     password: str = Field(default="")
     default_db: Optional[str] = None
-    query_limit: int = Field(default=100, ge=1, le=100000)
+    query_limit: int = Field(default=100, ge=1, le=QUERY_MAX_RESULT_ROWS)
     ssl_enabled: bool = False
     selected_databases: list[str] = Field(default_factory=list)
 
@@ -24,7 +26,7 @@ class SessionUpdate(BaseModel):
     username: Optional[str] = Field(None, min_length=1)
     password: Optional[str] = None
     default_db: Optional[str] = None
-    query_limit: Optional[int] = Field(None, ge=1, le=100000)
+    query_limit: Optional[int] = Field(None, ge=1, le=QUERY_MAX_RESULT_ROWS)
     ssl_enabled: Optional[bool] = None
     selected_databases: Optional[list[str]] = None
 

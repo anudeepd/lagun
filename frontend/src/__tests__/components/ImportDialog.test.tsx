@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import ImportDialog from '../../components/table/ImportDialog'
 
@@ -102,6 +102,8 @@ describe('ImportDialog formats', () => {
     expect(uploadedBytes).toBe(0)
     await userEvent.click(screen.getByRole('button', { name: 'Preview' }))
     await screen.findByText('Alice')
+    const preview = screen.getByRole('table', { name: 'Import preview' })
+    expect(within(preview).getByRole('columnheader', { name: 'name' })).toHaveAttribute('scope', 'col')
     expect(uploadedBytes).toBe(1024 * 1024)
     fetchSpy.mockRestore()
   })
@@ -132,13 +134,16 @@ describe('ImportDialog formats', () => {
     // No byte count yet, so no number: indeterminate rather than a fake 0%.
     const pending = screen.getByRole('progressbar', { name: 'Importing' })
     expect(pending).not.toHaveAttribute('aria-valuenow')
+    expect(screen.getByText(/server is processing the file/i)).toBeInTheDocument()
 
     act(() => sent[0].upload.onprogress?.({ lengthComputable: true, loaded: 30, total: 120 }))
     expect(screen.getByRole('progressbar', { name: 'Uploading file' })).toHaveAttribute('aria-valuenow', '25')
+    expect(screen.getByText('Uploading rows.csv… 25%')).toBeInTheDocument()
 
     // Body sent: the server-side import reports nothing until it finishes.
     act(() => sent[0].upload.onload?.())
     expect(screen.getByRole('progressbar', { name: 'Importing' })).not.toHaveAttribute('aria-valuenow')
+    expect(screen.getByText(/server is processing the file/i)).toBeInTheDocument()
 
     await act(async () => {
       sent[0].status = 200

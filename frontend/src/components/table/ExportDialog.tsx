@@ -2,10 +2,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import { clipboardWrite } from '../../utils/clipboard'
-import { API_BASE, api, apiFetch, errorMessageFromResponse } from '../../api/client'
+import { API_BASE, apiFetch, errorMessageFromResponse } from '../../api/client'
 import Modal from '../ui/Modal'
 import Button from '../ui/Button'
 import Progress from '../ui/Progress'
+import { LoadingState } from '../ui/Spinner'
 import Select from '../ui/Select'
 import Input from '../ui/Input'
 import { showToast } from '../../utils/toast'
@@ -239,37 +240,67 @@ export async function responseTextWithLimit(response: Response, limit = COPY_LIM
   return parts.join('')
 }
 
+export async function responseBlobWithProgress(
+  response: Response,
+  onProgress?: (bytes: number) => void,
+): Promise<{ blob: Blob; tail: string }> {
+  const contentType = response.headers.get('Content-Type') ?? 'application/octet-stream'
+  if (!response.body) {
+    const text = await response.text()
+    onProgress?.(new Blob([text]).size)
+    return { blob: new Blob([text], { type: contentType }), tail: text.slice(-64 * 1024) }
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const chunks: BlobPart[] = []
+  let bytes = 0
+  let tail = ''
+  onProgress?.(0)
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(new Uint8Array(value))
+    bytes += value.byteLength
+    tail = (tail + decoder.decode(value, { stream: true })).slice(-64 * 1024)
+    onProgress?.(bytes)
+  }
+  tail = (tail + decoder.decode()).slice(-64 * 1024)
+  return { blob: new Blob(chunks, { type: contentType }), tail }
+}
 
-function beginNativeDownload(url: string, config: string, onError: (message: string) => void) {
-  const target = `lagun-export-${Date.now()}-${Math.random().toString(36).slice(2)}`
-  const iframe = document.createElement('iframe')
-  iframe.name = target
-  iframe.title = 'Export download'
-  iframe.hidden = true
-  document.body.appendChild(iframe)
+export function exportFilename(response: Response, fallback: string): string {
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const match = disposition.match(/filename="([^"]+)"/)
+  return match ? match[1] : fallback
+}
 
-  const cleanup = () => iframe.remove()
-  iframe.addEventListener('load', () => {
-    if (iframe.contentWindow?.location.href === 'about:blank') return
-    const message = iframe.contentDocument?.body.textContent?.trim()
-    if (message) onError(message)
-    cleanup()
-  })
-  window.addEventListener('pagehide', cleanup, { once: true })
+export function formatExportBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
-  const form = document.createElement('form')
-  form.method = 'POST'
-  form.action = url
-  form.target = target
-  form.hidden = true
-  const input = document.createElement('input')
-  input.type = 'hidden'
-  input.name = 'config'
-  input.value = config
-  form.appendChild(input)
-  document.body.appendChild(form)
-  form.submit()
-  form.remove()
+function validateTextExport(text: string, format: ExportFormat): void {
+  if (format === 'csv' || format === 'json') return
+  const failedAt = text.indexOf(EXPORT_FAILURE_MARKER)
+  if (failedAt !== -1) {
+    const message = text
+      .slice(failedAt + EXPORT_FAILURE_MARKER.length)
+      .split('\n', 1)[0]
+    throw new Error(message || 'the export failed before it finished')
+  }
+  if (!EXPORT_COMPLETION_RE.test(text)) {
+    throw new Error('the download ended before the export finished')
+  }
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.download = filename
+  a.href = url
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export default function ExportDialog({ open, onClose, sessionId, database, table, sql: customSql, pkValues, rowsOverride, rowsOverrideLabel = 'filtered rows', pkColumnsForSql = [] }: Props) {
@@ -281,6 +312,8 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const [exporting, setExporting] = useState(false)
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [copyReady, setCopyReady] = useState(false)
+  const [downloadBytes, setDownloadBytes] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   // CSV advanced options
@@ -292,6 +325,9 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
   const [csvLineterminator, setCsvLineterminator] = useState('crlf')
   const [csvEncoding, setCsvEncoding] = useState('utf-8')
   const requestIdRef = useRef(0)
+  const exportAbortRef = useRef<AbortController | null>(null)
+  const copyAbortRef = useRef<AbortController | null>(null)
+  const preparedCopyRef = useRef<string | null>(null)
 
   // Callers keep this dialog mounted so Modal can play its exit animation, so a
   // fresh open no longer remounts and resets the form. Reset it here instead;
@@ -302,6 +338,11 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       // close, never on an unrelated prop change) keeps a late copy or export
       // from closing or repainting the dialog on the next open.
       requestIdRef.current += 1
+      exportAbortRef.current?.abort()
+      copyAbortRef.current?.abort()
+      exportAbortRef.current = null
+      copyAbortRef.current = null
+      preparedCopyRef.current = null
       return
     }
     setFormat(customSql ? 'csv' : 'insert')
@@ -312,6 +353,8 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     setExporting(false)
     setCopying(false)
     setCopied(false)
+    setCopyReady(false)
+    setDownloadBytes(0)
     setError(null)
     setShowAdvanced(false)
     setCsvDelimiter(',')
@@ -321,6 +364,17 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     setCsvLineterminator('crlf')
     setCsvEncoding('utf-8')
   }, [open, customSql])
+
+  // A prepared copy belongs to one exact export setup. Any change to that setup
+  // makes the cached text stale, so the next Copy must regenerate it.
+  useEffect(() => {
+    preparedCopyRef.current = null
+    setCopyReady(false)
+  }, [
+    format, insertMode, batchSize, includeSchema, includeAutoIncrement,
+    csvDelimiter, csvDelimiterCustom, csvQuotechar, csvEscapechar, csvLineterminator, csvEncoding,
+    database, table, customSql,
+  ])
 
   // Map line ending names to actual characters
   const lineTerminatorMap: Record<string, string> = {
@@ -354,13 +408,16 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       throw new Error('JSON export is only available for rows currently loaded in the grid')
     }
 
-    const parsedBatchSize = parseInt(batchSize, 10)
+    const parsedBatchSize = Number(batchSize)
+    if (!Number.isInteger(parsedBatchSize) || parsedBatchSize < 1 || parsedBatchSize > 10_000) {
+      throw new Error('Batch size must be a whole number from 1 to 10,000.')
+    }
     return JSON.stringify({
       database,
       ...(customSql ? { sql: customSql } : { table }),
       format,
       exclude_auto_increment: !includeAutoIncrement,
-      batch_size: Number.isNaN(parsedBatchSize) || parsedBatchSize < 1 || parsedBatchSize > 10_000 ? 500 : parsedBatchSize,
+      batch_size: parsedBatchSize,
       ...(format === 'insert' || format === 'delete+insert' ? { insert_mode: insertMode } : {}),
       ...(format !== 'csv' ? { include_schema: includeSchema } : {}),
       ...(pkValues ? { pk_values: pkValues } : {}),
@@ -382,32 +439,54 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     encoding: csvEncoding,
   })
 
+  const handleClose = () => {
+    requestIdRef.current += 1
+    exportAbortRef.current?.abort()
+    copyAbortRef.current?.abort()
+    onClose()
+  }
+
   const handleExport = async () => {
     setExporting(true)
+    setDownloadBytes(0)
     setError(null)
     const requestId = requestIdRef.current
     try {
       ensureValidCsvOptions()
       if (rowsOverride) {
+        // Yield once so the dialog paints its working state before building a
+        // large client-side file. Without this the click, build, download, and
+        // close all land in one frame and the user sees nothing.
+        await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+        if (requestId !== requestIdRef.current) return
         const content = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema, includeAutoIncrement)
         const extension = format === 'json' ? 'json' : format === 'csv' ? 'csv' : 'sql'
         const contentType = format === 'json' ? 'application/json;charset=utf-8' : 'text/plain;charset=utf-8'
         const blob = new Blob([content], { type: contentType })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.download = `${database}_${table}_filtered.${extension}`
-        a.href = url
-        a.click()
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        const filename = `${database}_${table}_filtered.${extension}`
+        if (requestId !== requestIdRef.current) return
+        triggerBlobDownload(blob, filename)
+        showToast(`Downloaded ${filename}.`)
       } else {
-        beginNativeDownload(
-          api.exportDownloadUrl(sessionId),
-          buildBody(),
-          message => {
-            const errorMessage = `Export failed: ${message}`
-            showToast(errorMessage, 'error')
-          },
-        )
+        const controller = new AbortController()
+        exportAbortRef.current = controller
+        const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/export`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: buildBody(),
+          signal: controller.signal,
+        })
+        if (!res.ok) throw new Error(await errorMessageFromResponse(res))
+        const { blob, tail } = await responseBlobWithProgress(res, bytes => {
+          if (requestId === requestIdRef.current) setDownloadBytes(bytes)
+        })
+        if (format !== 'csv' && format !== 'json') {
+          validateTextExport(tail, format)
+        }
+        const filename = exportFilename(res, `${database}_${table}.${format === 'csv' ? 'csv' : 'sql'}`)
+        if (requestId !== requestIdRef.current) return
+        triggerBlobDownload(blob, filename)
+        showToast(`Downloaded ${filename}.`)
       }
       if (requestId !== requestIdRef.current) return
       onClose()
@@ -418,86 +497,141 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
       setError(message)
       showToast(message, 'error')
     } finally {
-      if (requestId === requestIdRef.current) setExporting(false)
+      if (requestId === requestIdRef.current) {
+        exportAbortRef.current = null
+        setExporting(false)
+      }
     }
   }
 
-  const handleCopy = async () => {
-    setCopying(true)
-    setError(null)
+  const finishCopy = async (write: Promise<void>, text: string, requestId: number) => {
+    try {
+      await write
+      if (requestId !== requestIdRef.current) return
+      preparedCopyRef.current = null
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      if (requestId !== requestIdRef.current) return
+      preparedCopyRef.current = text
+      setCopyReady(true)
+      showToast('The export is ready. Click Copy again to finish copying.')
+    } finally {
+      if (requestId === requestIdRef.current) {
+        copyAbortRef.current = null
+        setCopying(false)
+      }
+    }
+  }
+
+  const handleCopy = () => {
     const requestId = requestIdRef.current
+    let readyText = preparedCopyRef.current
+
     try {
       ensureValidCsvOptions()
-      let text: string
-      if (rowsOverride) {
-        text = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema, includeAutoIncrement)
-        if (new Blob([text]).size > COPY_LIMIT_BYTES) {
+      if (readyText === null && rowsOverride) {
+        readyText = buildFrontendContent(format, database, table, rowsOverride, pkColumnsForSql, getCsvOpts(), insertMode, includeSchema, includeAutoIncrement)
+        if (new Blob([readyText]).size > COPY_LIMIT_BYTES) {
           throw new Error('Copy is limited to 16 MB. Use Download for large exports.')
         }
-      } else {
+        preparedCopyRef.current = readyText
+      }
+    } catch (error) {
+      const message = `Copy failed: ${error instanceof Error ? error.message : String(error)}`
+      setError(message)
+      showToast(message, 'error')
+      return
+    }
+
+    // Call writeText/execCommand before any React state update. A large dialog
+    // render can exceed the browser's transient user-activation window, and a
+    // clipboard call after that window closes is rejected even though the click
+    // was genuine.
+    if (readyText !== null) {
+      const write = clipboardWrite(readyText)
+      setCopying(true)
+      setCopyReady(false)
+      setError(null)
+      void finishCopy(write, readyText, requestId)
+      return
+    }
+
+    setCopying(true)
+    setCopyReady(false)
+    setError(null)
+    void (async () => {
+      try {
         // Kept on the raw Response rather than `api.exportText`: the copy path
         // streams the body so `responseTextWithLimit` can refuse anything over
         // 16 MB before it lands in memory (and in the clipboard).
+        const controller = new AbortController()
+        copyAbortRef.current = controller
         const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/export`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: buildBody(),
+          signal: controller.signal,
         })
         if (!res.ok) throw new Error(await errorMessageFromResponse(res))
-        text = await responseTextWithLimit(res)
-        if (format !== 'csv') {
-          // CSV has no comment syntax, so a truncated CSV cannot carry a marker
-          // and there is nothing to verify here. The SQL formats end with a
-          // completion line; a body that failed mid-stream ends with a FAILED
-          // line instead (the status is already 200 by then).
-          const failedAt = text.indexOf(EXPORT_FAILURE_MARKER)
-          if (failedAt !== -1) {
-            const message = text
-              .slice(failedAt + EXPORT_FAILURE_MARKER.length)
-              .split('\n', 1)[0]
-            throw new Error(message || 'the export failed before it finished')
-          }
-          if (!EXPORT_COMPLETION_RE.test(text)) {
-            throw new Error('the download ended before the export finished')
-          }
-        }
+        const text = await responseTextWithLimit(res)
+        validateTextExport(text, format)
+        preparedCopyRef.current = text
+        await finishCopy(clipboardWrite(text), text, requestId)
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return
+        if (requestId !== requestIdRef.current) return
+        const message = `Copy failed: ${error instanceof Error ? error.message : String(error)}`
+        setError(message)
+        showToast(message, 'error')
+        copyAbortRef.current = null
+        setCopying(false)
       }
-      await clipboardWrite(text)
-      if (requestId !== requestIdRef.current) return
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch (error) {
-      if (requestId !== requestIdRef.current) return
-      const message = `Copy failed: ${error instanceof Error ? error.message : String(error)}`
-      setError(message)
-      showToast(message, 'error')
-    } finally {
-      if (requestId === requestIdRef.current) setCopying(false)
-    }
+    })()
   }
 
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={`Export ${database}.${table}`}
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
           <Button variant="ghost" onClick={handleCopy} disabled={copying || exporting}>
-            {copied ? 'Copied! ✓' : copying ? 'Copying…' : 'Copy'}
+            {copied ? 'Copied! ✓' : copying ? 'Copying…' : copyReady ? 'Copy again' : 'Copy'}
           </Button>
           <Button variant="primary" onClick={handleExport} disabled={exporting || copying}>
-            {exporting ? 'Exporting…' : error ? 'Retry Download' : 'Download'}
+            {exporting ? 'Downloading…' : error ? 'Retry Download' : 'Download'}
           </Button>
         </>
       }
     >
-      <div className="flex flex-col gap-4">
-        {/* The export response is an unbounded stream with no Content-Length, so
-            a percentage cannot be honest; the bar stays indeterminate. */}
+      <fieldset disabled={exporting || copying} className="flex flex-col gap-4">
+        {/* The export response has no Content-Length, so a percentage cannot be
+            honest; the bar stays indeterminate while the byte count proves the
+            download is still moving. */}
         {(exporting || copying) && (
-          <Progress label={copying ? 'Copying export' : 'Exporting'} />
+          <div className="rounded-md border border-surface-700 bg-surface-900 px-3 py-2">
+            <LoadingState
+              compact
+              className="justify-start"
+              label={exporting
+                ? downloadBytes > 0
+                  ? `Downloading export… ${formatExportBytes(downloadBytes)} received`
+                  : 'Preparing export…'
+                : 'Generating export text…'}
+            />
+            <Progress
+              className="mt-2"
+              label={exporting ? 'Download progress' : 'Copy progress'}
+            />
+          </div>
+        )}
+        {copyReady && !copying && !exporting && (
+          <p role="status" className="rounded-md border border-brand-800 bg-brand-950 px-3 py-2 text-xs text-brand-200">
+            The export is ready. Click <strong>Copy again</strong> to finish copying.
+          </p>
         )}
         {error && <p role="alert" className="rounded-md border border-red-800 bg-red-950 px-3 py-2 text-xs text-red-200">{error}</p>}
         <Select
@@ -546,12 +680,17 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
           </label>
         )}
         {format !== 'json' && (
-          <Input
-            label="Batch Size"
-            type="number"
-            value={batchSize}
-            onChange={e => setBatchSize(e.target.value)}
-          />
+          <>
+            <Input
+              label="Batch Size"
+              type="number"
+              min={1}
+              max={10_000}
+              value={batchSize}
+              onChange={e => setBatchSize(e.target.value)}
+            />
+            <p className="-mt-2 text-[11px] text-muted">Rows per INSERT statement, from 1 to 10,000.</p>
+          </>
         )}
         {format === 'csv' && (
           <div>
@@ -637,7 +776,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
             ? <>Exporting <strong className="text-slate-300">{rowsOverride.rows.length} {rowsOverrideLabel}</strong> from <code className="text-slate-300">{table}</code>.</>
             : pkValues
               ? <>Exporting <strong className="text-slate-300">{pkValues.length} selected rows</strong> from <code className="text-slate-300">{table}</code>.</>
-              : <>Downloads all rows from <code className="text-slate-300">{table}</code> as a bounded-memory stream.</>
+              : <>Downloads all rows from <code className="text-slate-300">{table}</code> and shows progress until the file is complete.</>
           }
           {format === 'csv' && (
             <>
@@ -660,9 +799,10 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
               JSON exports all selected columns as an array of row objects.
             </>
           )}
-          {!rowsOverride && <><br />Copy is capped at 16 MB. Download handles large exports without buffering them in this page.</>}
+          <br />
+          Copy is capped at 16 MB. If the browser blocks a large clipboard write, the export stays ready and <strong className="text-slate-300">Copy again</strong> finishes it. Download shows live progress and saves the completed file.
         </p>
-      </div>
+      </fieldset>
     </Modal>
   )
 }

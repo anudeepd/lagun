@@ -22,6 +22,7 @@ from lagun.db.crypto import (
 )
 from lagun.models.config import ServerConfig, SessionExport
 from lagun.models.session import SessionCreate
+from lagun.limits import QUERY_MAX_RESULT_ROWS
 
 router = APIRouter(tags=["config"])
 
@@ -44,6 +45,7 @@ async def get_server_config(request: Request):
         "ldap_enabled": ldap_is_enabled,
         "ldap_idle_timeout": max(0, idle_timeout) if ldap_is_enabled else 0,
         "is_admin": bool(ldap_is_enabled and is_admin_user(username)),
+        "query_max_result_rows": QUERY_MAX_RESULT_ROWS,
     }
 
 

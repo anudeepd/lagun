@@ -143,7 +143,8 @@ describe('TableSchemaView columns table', () => {
       expect(screen.getByRole('columnheader', { name: '#' })).toBeInTheDocument()
     })
 
-    const columnsTable = screen.getByRole('columnheader', { name: '#' }).closest('table') as HTMLElement
+    const columnsTable = screen.getByRole('table', { name: 'Table columns' })
+    expect(within(columnsTable).getByRole('columnheader', { name: '#' })).toHaveAttribute('scope', 'col')
     const rows = within(columnsTable)
       .getAllByRole('row')
       .filter(row => within(row).queryAllByRole('cell').length > 0)

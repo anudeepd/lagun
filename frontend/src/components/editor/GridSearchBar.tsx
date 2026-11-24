@@ -3,6 +3,7 @@ import { useIsPresent, useReducedMotion } from 'motion/react'
 import * as m from 'motion/react-m'
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
 import { motionDuration, motionEase } from '../../motion/tokens'
+import { isImeComposing } from '../../utils/keyboard'
 
 interface GridSearchBarProps {
   open: boolean
@@ -77,6 +78,7 @@ export default function GridSearchBar({
             onClose()
           } else if (e.key === 'Enter') {
             e.preventDefault()
+            if (isImeComposing(e)) return
             if (e.shiftKey) onPrev()
             else onNext()
           }

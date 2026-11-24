@@ -59,6 +59,7 @@ from lagun.models.query import (
     RowDeleteResult,
     QueryKillResult,
 )
+from lagun.limits import QUERY_MAX_RESULT_ROWS
 
 router = APIRouter(tags=["query"])
 
@@ -100,7 +101,7 @@ _QUERY_MAX_RUNTIME_SECONDS = float(os.getenv("LAGUN_QUERY_MAX_RUNTIME_SECONDS", 
 # Hard ceiling on rows returned by a single query, independent of the session's
 # own query_limit. A caller can ask for at most this many rows, so a result set
 # can never be sized by the request alone.
-_QUERY_MAX_RESULT_ROWS = int(os.getenv("LAGUN_QUERY_MAX_RESULT_ROWS", "100000"))
+_QUERY_MAX_RESULT_ROWS = QUERY_MAX_RESULT_ROWS
 _BULK_PREVIEW_CHARS = 160
 # How many rendered DELETE statements a bulk row-delete echoes back. The response
 # is a convenience for the query log, not a record, so it is capped rather than
@@ -323,7 +324,10 @@ def _sequential_statements_from_sql(
     except SqlScriptError as error:
         return None, str(error)
     if len(statements) > _BULK_MAX_STATEMENTS:
-        return None, f"The SQL script exceeds the {_BULK_MAX_STATEMENTS} statement limit."
+        return (
+            None,
+            f"The SQL script exceeds the {_BULK_MAX_STATEMENTS} statement limit.",
+        )
     if not statements:
         return None, "No SQL statements were found."
     return statements, None
@@ -1290,10 +1294,13 @@ async def execute_sequential_script(
             if match is None:
                 if effective_scope(session) is not None:
                     raise HTTPException(
-                        403, "USE target cannot be verified against this connection's allowed databases."
+                        403,
+                        "USE target cannot be verified against this connection's allowed databases.",
                     )
                 continue
-            current_database = (match.group(1) or match.group(2) or "").replace("``", "`")
+            current_database = (match.group(1) or match.group(2) or "").replace(
+                "``", "`"
+            )
             require_db_scope(session, current_database)
             continue
         if req.database or not _statement_names_its_own_schema(statement):
@@ -1327,7 +1334,9 @@ async def execute_sequential_script(
     failed_idx: int | None = None
     execution_error: str | None = None
     thread_id: int | None = None
-    deadline_error = f"Script exceeded the {_BULK_MAX_RUNTIME_SECONDS}-second execution limit"
+    deadline_error = (
+        f"Script exceeded the {_BULK_MAX_RUNTIME_SECONDS}-second execution limit"
+    )
 
     limit = min(req.limit or session.query_limit, _QUERY_MAX_RESULT_ROWS)
     result_rows_remaining = _QUERY_MAX_RESULT_ROWS
@@ -1356,9 +1365,7 @@ async def execute_sequential_script(
                 if not batch:
                     break
                 total_rows += len(batch)
-                remaining_rows = min(
-                    max(0, limit - len(rows)), result_rows_remaining
-                )
+                remaining_rows = min(max(0, limit - len(rows)), result_rows_remaining)
                 if remaining_rows:
                     rows.extend(
                         [_serialize(value) for value in row]
@@ -1405,7 +1412,9 @@ async def execute_sequential_script(
                         await cur.fetchall()
                         thread_id = row[0]
                         async with _active_script_queries_lock:
-                            _active_script_queries[session_id][req.execution_id] = thread_id
+                            _active_script_queries[session_id][req.execution_id] = (
+                                thread_id
+                            )
                         if req.database:
                             await cur.execute(f"USE {quote_ident(req.database)}")
 
@@ -1422,7 +1431,11 @@ async def execute_sequential_script(
                             await cur.execute(sql)
                             while True:
                                 await append_result_set(
-                                    cur, idx, result_set_index, statement, statement_started
+                                    cur,
+                                    idx,
+                                    result_set_index,
+                                    statement,
+                                    statement_started,
                                 )
                                 result_set_index += 1
                                 if not await cur.nextset():
@@ -1447,9 +1460,9 @@ async def execute_sequential_script(
     except (DatabaseCapacityError, DatabaseConnectionError):
         raise
     except (Exception, asyncio.CancelledError) as error:
-        cancelled = _active_script_details.get(
-            (session_id, req.execution_id), {}
-        ).get("cancelled")
+        cancelled = _active_script_details.get((session_id, req.execution_id), {}).get(
+            "cancelled"
+        )
         if isinstance(error, asyncio.CancelledError) and not cancelled:
             raise
         if cancelled or isinstance(error, _QueryCancelled):
