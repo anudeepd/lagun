@@ -6,6 +6,7 @@ import Input from '../ui/Input'
 import Label from '../ui/Label'
 import { LoadingState } from '../ui/Spinner'
 import { api } from '../../api/client'
+import { isImeComposing } from '../../utils/keyboard'
 import { useSessionStore } from '../../store/sessionStore'
 
 interface Props {
@@ -126,7 +127,12 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
               placeholder="Passphrase used during export"
               autoComplete="current-password"
               disabled={loading}
-              onKeyDown={e => e.key === 'Enter' && !loading && handleImport()}
+              onKeyDown={e => {
+                if (e.key !== 'Enter' || loading) return
+                e.preventDefault()
+                if (isImeComposing(e)) return
+                handleImport()
+              }}
             />
             {error && <p role="alert" className="text-xs text-red-400">{error}</p>}
           </fieldset>

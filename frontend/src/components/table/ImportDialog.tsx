@@ -299,7 +299,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         </>
       }
     >
-      <fieldset disabled={importing} className="flex flex-col gap-4">
+      <fieldset disabled={importing} aria-busy={importing} className="flex flex-col gap-4">
         {/* File drop zone */}
         <input
           ref={fileInputRef}
@@ -351,10 +351,20 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
             the body is sent the server reports nothing until it is done, so the
             bar goes indeterminate. */}
         {importing && (
-          <Progress
-            value={uploadPercent}
-            label={uploadPercent === null ? 'Importing' : 'Uploading file'}
-          />
+          <div className="rounded-md border border-surface-700 bg-surface-900 px-3 py-2">
+            <LoadingState
+              compact
+              className="justify-start"
+              label={uploadPercent === null
+                ? `Importing ${file?.name ?? 'file'} into ${database}${targetTable ? `.${targetTable}` : ''}. The server is processing the file; large imports can take a while.`
+                : `Uploading ${file?.name ?? 'file'}… ${uploadPercent}%`}
+            />
+            <Progress
+              className="mt-2"
+              value={uploadPercent}
+              label={uploadPercent === null ? 'Importing' : 'Uploading file'}
+            />
+          </div>
         )}
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-muted">Preview reads at most first 1 MB. Import still reads complete file.</p>
@@ -382,10 +392,11 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
         ) : preview ? (
           <div className="overflow-auto max-h-48 border border-surface-700 rounded-md">
             <table className="text-xs w-full">
+              <caption className="sr-only">Import preview</caption>
               <thead className="sticky top-0 z-10">
                 <tr className="bg-surface-800">
                   {preview.columns.map((col, i) => (
-                    <th key={i} className="px-2 py-1.5 text-left text-slate-400 font-medium whitespace-nowrap border-b border-surface-700">
+                    <th key={i} scope="col" className="px-2 py-1.5 text-left text-slate-400 font-medium whitespace-nowrap border-b border-surface-700">
                       {col}
                     </th>
                   ))}

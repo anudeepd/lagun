@@ -22,6 +22,8 @@ export default function Logo({ size = 'md', showText = true, className = '' }: L
       <svg
         viewBox="0 0 128 128"
         xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+        focusable="false"
         className={`${sizeMap[size]} flex-shrink-0`}
       >
         {/* Rounded square background */}

@@ -8,6 +8,7 @@ import Button from '../ui/Button'
 import ConfirmDialog from '../ui/ConfirmDialog'
 import Label from '../ui/Label'
 import { exitTransition, motionDistance, surfaceTransition } from '../../motion/tokens'
+import { isImeComposing } from '../../utils/keyboard'
 
 type View = 'overview' | 'connections' | 'activity' | 'retention' | 'live' | 'users'
 type AdminError = Error & { status?: number }
@@ -947,6 +948,7 @@ function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: {
             onKeyDown={event => {
               if (event.key === 'Enter') {
                 event.preventDefault()
+                if (isImeComposing(event)) return
                 commitDays()
               }
             }}

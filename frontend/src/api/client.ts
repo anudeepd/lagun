@@ -483,7 +483,12 @@ export const api = {
     return res.json()
   },
 
-  getServerConfig: () => request<{ ldap_enabled: boolean; ldap_idle_timeout: number; is_admin: boolean }>('/config/server'),
+  getServerConfig: () => request<{
+    ldap_enabled: boolean
+    ldap_idle_timeout: number
+    is_admin: boolean
+    query_max_result_rows: number
+  }>('/config/server'),
   getAdminOverview: () => request<AdminOverview>('/admin/overview'),
   getAdminConnections: (after?: string) =>
     request<AdminConnectionsResponse>('/admin/connections' + (after ? `?after=${encodeURIComponent(after)}` : '')),

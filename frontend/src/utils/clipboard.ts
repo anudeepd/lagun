@@ -4,7 +4,11 @@ function legacyClipboardWrite(text: string): void {
   }
 
   const ta = document.createElement('textarea')
-  ta.value = text
+  // The copy handler supplies the real text. Keeping the textarea itself tiny
+  // matters: putting a multi-megabyte value in the DOM makes the browser lay
+  // out the whole app before it can execute the copy command, which can outlast
+  // the user-activation window.
+  ta.value = ' '
   ta.setAttribute('readonly', '')
   ta.style.position = 'fixed'
   ta.style.top = '0'
@@ -24,15 +28,27 @@ function legacyClipboardWrite(text: string): void {
   ta.select()
   ta.setSelectionRange(0, ta.value.length)
 
-  const ok = document.execCommand('copy')
-  document.body.removeChild(ta)
-
-  if (selection) {
-    selection.removeAllRanges()
-    if (previousRange) selection.addRange(previousRange)
+  let payloadSet = false
+  const copy = (event: ClipboardEvent) => {
+    if (!event.clipboardData) return
+    event.preventDefault()
+    event.clipboardData.setData('text/plain', text)
+    payloadSet = true
+  }
+  document.addEventListener('copy', copy, true)
+  let ok: boolean
+  try {
+    ok = document.execCommand('copy')
+  } finally {
+    document.removeEventListener('copy', copy, true)
+    document.body.removeChild(ta)
+    if (selection) {
+      selection.removeAllRanges()
+      if (previousRange) selection.addRange(previousRange)
+    }
   }
 
-  if (!ok) throw new Error('Copy failed')
+  if (!ok || !payloadSet) throw new Error('Copy failed')
 }
 
 /**

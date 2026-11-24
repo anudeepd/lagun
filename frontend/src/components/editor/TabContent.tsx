@@ -39,6 +39,7 @@ import { useHandoff } from '../../motion/useHandoff'
 import useEverOpened from '../../hooks/useEverOpened'
 import TransitionVeil from '../ui/TransitionVeil'
 import Label from '../ui/Label'
+import { isImeComposing } from '../../utils/keyboard'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const loadResultGrid = () => import('./ResultGrid')
@@ -1996,6 +1997,7 @@ function TableTab({ tab, active = true }: Props) {
               onKeyDown={e => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
+                  if (isImeComposing(e)) return
                   if (globalSearchTimerRef.current !== null) {
                     window.clearTimeout(globalSearchTimerRef.current)
                     globalSearchTimerRef.current = null
@@ -2105,7 +2107,7 @@ function TableTab({ tab, active = true }: Props) {
                   <span className="text-xs text-slate-200 font-semibold">All</span>
                 </label>
                 <div className="max-h-60 overflow-y-auto">
-                  {(sortColsAlpha ? [...result.columns].sort() : result.columns)
+                  {(sortColsAlpha ? result.columns.toSorted() : result.columns)
                     .filter(col => !colSearch || col.toLowerCase().includes(colSearch.toLowerCase()))
                     .map(col => (
                       <label key={col} className="flex items-center gap-2 px-3 py-1 hover:bg-surface-800 cursor-pointer">

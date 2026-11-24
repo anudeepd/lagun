@@ -7,6 +7,7 @@ import RefreshIcon from '../ui/RefreshIcon'
 import { LoadingState } from '../ui/Spinner'
 import Label from '../ui/Label'
 import { useSessionStore } from '../../store/sessionStore'
+import { useServerConfigStore } from '../../store/serverConfigStore'
 import { api } from '../../api/client'
 import type { Session, SessionUpdate } from '../../types'
 
@@ -33,6 +34,7 @@ function errorMessage(e: unknown): string {
 
 export default function SessionForm({ open, onClose, session }: Props) {
   const { createSession, updateSession, testSession } = useSessionStore()
+  const maxQueryRows = useServerConfigStore(s => s.queryMaxResultRows) || 1_000_000
   const [form, setForm] = useState(defaults)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -120,8 +122,8 @@ export default function SessionForm({ open, onClose, session }: Props) {
       portRef.current?.focus()
       return
     }
-    if (!Number.isInteger(queryLimit) || queryLimit < 1 || queryLimit > 100000) {
-      setError('Query limit must be a number between 1 and 100000.')
+    if (!Number.isInteger(queryLimit) || queryLimit < 1 || queryLimit > maxQueryRows) {
+      setError(`Query limit must be a number between 1 and ${maxQueryRows.toLocaleString()}.`)
       queryLimitRef.current?.focus()
       return
     }
@@ -293,7 +295,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
         </div>
         <Input label="Default Database (optional)" value={form.default_db} onChange={e => set('default_db', e.target.value)} placeholder="my_db" disabled={isManaged} title={isManaged ? managedLock : undefined} />
         <div className="grid grid-cols-3 items-end gap-2">
-          <Input ref={queryLimitRef} label="Row Limit" type="number" value={form.query_limit} onChange={e => set('query_limit', e.target.value)} disabled={isManaged} title={isManaged ? managedLock : undefined} />
+          <Input ref={queryLimitRef} label="Row Limit" type="number" min={1} max={maxQueryRows} value={form.query_limit} onChange={e => set('query_limit', e.target.value)} disabled={isManaged} title={isManaged ? managedLock : undefined} />
           <label className={`col-span-2 flex items-center gap-2 py-1.5 text-sm text-slate-300 ${isManaged ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
             <input type="checkbox" checked={form.ssl_enabled as boolean} onChange={e => set('ssl_enabled', e.target.checked)} className="h-3.5 w-3.5 rounded accent-brand-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" disabled={isManaged} title={isManaged ? managedLock : undefined} />
             Enable SSL

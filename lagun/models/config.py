@@ -10,6 +10,7 @@ class ServerConfig(BaseModel):
     ldap_enabled: bool
     ldap_idle_timeout: int
     is_admin: bool
+    query_max_result_rows: int
 
 
 class ExportedSession(BaseModel):

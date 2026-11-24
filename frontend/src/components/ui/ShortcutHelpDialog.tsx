@@ -29,7 +29,7 @@ export default function ShortcutHelpDialog({ open, onClose }: Props) {
       <div className="space-y-4">
         {GROUPS.map(({ group, shortcuts }) => (
           <section key={group}>
-            <Label as="h3" className="mb-1">{group}</Label>
+            <Label as="h2" className="mb-1">{group}</Label>
             <dl className="divide-y divide-surface-800">
               {shortcuts.map(shortcut => (
                 <div key={`${shortcut.group}-${shortcut.label}`} className="flex items-center justify-between gap-4 py-2.5 text-sm">

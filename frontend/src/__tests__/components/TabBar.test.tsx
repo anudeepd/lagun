@@ -70,6 +70,27 @@ describe('TabBar', () => {
     expect(screen.getByRole('menu', { name: 'Tab actions' }).querySelector('.border-t')).not.toBeInTheDocument()
   })
 
+  it('renames a tab only after IME composition ends', () => {
+    useTabStore.setState({
+      tabs: [{ id: 'tab-1', type: 'query', label: 'Query', sessionId: 'session-1' }],
+      activeTabId: 'tab-1',
+    })
+
+    render(<TabBar />)
+    fireEvent.contextMenu(screen.getByRole('tab', { name: /query/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }))
+
+    const input = screen.getByRole('textbox', { name: 'Tab name' })
+    fireEvent.change(input, { target: { value: '検索' } })
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', isComposing: true })
+
+    expect(screen.getByRole('dialog', { name: 'Rename Tab' })).toBeInTheDocument()
+    expect(useTabStore.getState().tabs[0].label).toBe('Query')
+
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
+    expect(useTabStore.getState().tabs[0].label).toBe('検索')
+  })
+
   it('confirms Close All for clean tabs when LDAPGate is enabled', () => {
     useServerConfigStore.setState({ ldapEnabled: true })
     useTabStore.setState({

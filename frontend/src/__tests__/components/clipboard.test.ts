@@ -15,7 +15,16 @@ function setClipboard(writeText: ReturnType<typeof vi.fn> | undefined) {
 function mockExecCommand(ok = true) {
   Object.defineProperty(document, 'execCommand', {
     configurable: true,
-    value: vi.fn().mockReturnValue(ok),
+    value: vi.fn(() => {
+      if (ok) {
+        const event = new Event('copy', { bubbles: true, cancelable: true })
+        Object.defineProperty(event, 'clipboardData', {
+          value: { setData: vi.fn() },
+        })
+        document.dispatchEvent(event)
+      }
+      return ok
+    }),
   })
   return vi.mocked(document.execCommand)
 }
@@ -50,5 +59,35 @@ describe('clipboardWrite', () => {
     await clipboardWrite('hello')
 
     expect(execCommand).toHaveBeenCalledWith('copy')
+  })
+
+  it('passes large text through the copy event instead of putting it in the DOM', async () => {
+    setClipboard(undefined)
+    const text = Array.from({ length: 10_000 }, (_, index) => `INSERT INTO t VALUES (${index});`).join('\n')
+    const clipboardData = {
+      value: '',
+      setData(_type: string, value: string) { this.value = value },
+      getData() { return this.value },
+    }
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => {
+        const event = new Event('copy', { bubbles: true, cancelable: true })
+        Object.defineProperty(event, 'clipboardData', { value: clipboardData })
+        document.dispatchEvent(event)
+        return true
+      }),
+    })
+
+    await clipboardWrite(text)
+
+    expect(clipboardData.getData()).toBe(text)
+  })
+
+  it('rejects when the legacy copy command is refused', async () => {
+    setClipboard(undefined)
+    mockExecCommand(false)
+
+    await expect(clipboardWrite('hello')).rejects.toThrow('Copy failed')
   })
 })

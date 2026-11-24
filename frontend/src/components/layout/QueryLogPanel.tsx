@@ -120,14 +120,15 @@ export default function QueryLogPanel() {
               exit={{ opacity: 0, y: motionDistance.surface, scale: 0.98, transition: exitTransition }}
             >
             <table className="w-full text-xs border-collapse">
+              <caption className="sr-only">Query log</caption>
               <thead className="sticky top-0 bg-surface-900">
                 <tr className="text-muted">
-                  <th className="text-left px-2 py-1 font-medium w-16">Time</th>
-                  <th className="text-left px-2 py-1 font-medium">SQL</th>
-                  <th className="text-left px-2 py-1 font-medium w-24">Rows</th>
-                  <th className="text-left px-2 py-1 font-medium w-16">ms</th>
-                  <th className="text-left px-2 py-1 font-medium w-12">Status</th>
-                  <th className="w-14" />
+                  <th scope="col" className="text-left px-2 py-1 font-medium w-16">Time</th>
+                  <th scope="col" className="text-left px-2 py-1 font-medium">SQL</th>
+                  <th scope="col" className="text-left px-2 py-1 font-medium w-24">Rows</th>
+                  <th scope="col" className="text-left px-2 py-1 font-medium w-16">ms</th>
+                  <th scope="col" className="text-left px-2 py-1 font-medium w-12">Status</th>
+                  <th scope="col" className="w-14"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>

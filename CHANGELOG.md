@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **ES2023 frontend target.** The TypeScript baseline now includes the copying array APIs, and the schema and column pickers use `toSorted()` instead of copying an array before sorting.
+
+- **Custom row limits and honest export limits.** Query and table row-limit pickers accept typed values above the presets, up to the server's configured ceiling. The default ceiling is now 1,000,000 and is advertised by `/api/v1/config/server`. Export batch sizes outside 1–10,000 are rejected with a visible error instead of silently becoming 500.
+
+- **Visible import and export work.** Import dialogs name the upload and server-processing phases, and large exports show a working state and live downloaded-byte count until the file is ready.
+
 - **Data-grid feedback.** Row mutations and load failures use toasts; staged-row guidance and value validation remain in the grid status line.
 
 - **Release automation.** Manual GitHub Actions releases now validate project assets, build and smoke-test distributions, and publish to PyPI using Trusted Publishing.
@@ -35,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remove sliding and scaling while preserving feedback, focus, and keyboard navigation.
 
 ### Fixed
+
+- **IME-safe keyboard actions.** Search, find, rename, retention, and connection backup fields now ignore the Enter key that confirms an IME composition, so CJK text is not submitted or saved prematurely.
+
+- **Accessible custom overlays and tables.** Open modals make the page behind them inert, modal titles use the correct heading level, custom-select errors are linked to their controls, decorative logos are hidden from assistive tech, and data tables expose captions and column-header scopes. The app and login page also declare their dark color scheme before styles load.
+
+- **Large INSERT exports copy completely.** The legacy clipboard path no longer places a multi-megabyte value in a hidden textarea, which could stall layout past the browser's user-activation window and make Copy fail on plain HTTP. The copy event now carries the text directly. If a browser still blocks a clipboard write, the prepared export stays available behind an explicit Copy again action.
 
 - **Sidebar bookmark and tooltip fixes.** The databases bookmark filter uses the
   same pop animation as table stars. Every tooltip now renders outside its

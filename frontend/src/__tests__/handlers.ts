@@ -130,7 +130,12 @@ function rowMatchesKey(row: unknown[], primaryKey: Record<string, unknown>): boo
 
 export const handlers = [
   http.get(`${BASE}/config/server`, () =>
-    HttpResponse.json({ ldap_enabled: false, ldap_idle_timeout: 0, is_admin: false })
+    HttpResponse.json({
+      ldap_enabled: false,
+      ldap_idle_timeout: 0,
+      is_admin: false,
+      query_max_result_rows: 1_000_000,
+    })
   ),
 
   // Sessions

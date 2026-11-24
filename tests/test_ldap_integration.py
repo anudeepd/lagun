@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from lagun.api.config import get_server_config
+from lagun.limits import QUERY_MAX_RESULT_ROWS
 from lagun.main import (
     APP_CSP,
     _ensure_ldapgate_static_paths,
@@ -21,6 +22,11 @@ def _login_template() -> str:
 def test_app_csp_allows_self_fonts():
     assert "font-src 'self'" in APP_CSP
     assert "font-src 'self' data:" in APP_CSP
+
+
+def test_login_template_declares_its_dark_color_scheme_before_styles():
+    template = _login_template()
+    assert '<meta name="color-scheme" content="dark">' in template
 
 
 def test_ensure_ldapgate_static_paths_preserves_existing_paths():
@@ -53,6 +59,7 @@ async def test_server_config_exposes_ldap_idle_timeout(monkeypatch):
         "ldap_enabled": True,
         "ldap_idle_timeout": 900,
         "is_admin": False,
+        "query_max_result_rows": QUERY_MAX_RESULT_ROWS,
     }
 
 

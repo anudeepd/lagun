@@ -32,11 +32,11 @@ describe('ShortcutHelpDialog', () => {
   it('renders one section per group, in registry order', () => {
     const dialog = renderSheet()
 
-    const headings = Array.from(dialog.querySelectorAll('h3')).map(heading => heading.textContent)
+    const headings = Array.from(dialog.querySelectorAll('h2')).map(heading => heading.textContent)
     expect(headings).toEqual(registryGroups)
 
     registryGroups.forEach(group => {
-      const section = screen.getByRole('heading', { level: 3, name: group }).closest('section')
+      const section = screen.getByRole('heading', { level: 2, name: group }).closest('section')
       const labels = Array.from(section?.querySelectorAll('dt') ?? []).map(dt => dt.textContent)
       expect(labels).toEqual(SHORTCUTS.filter(shortcut => shortcut.group === group).map(shortcut => shortcut.label))
     })
