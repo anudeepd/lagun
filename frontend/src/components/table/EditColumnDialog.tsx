@@ -84,8 +84,7 @@ function defaultModeError(mode: DefaultMode, type: string, nullable: boolean): s
       ? null
       : 'UUID() default requires CHAR, VARCHAR, or UUID.'
   }
-  if (mode === 'RAND()') return NUMERIC_TYPES[base] ? null : 'RAND() default requires a numeric column.'
-  return 'Unsupported default expression.'
+  return NUMERIC_TYPES[base] ? null : 'RAND() default requires a numeric column.'
 }
 
 interface Props {

@@ -51,7 +51,7 @@ export const extractScopeInfo = (sql: string): { realTables: string[], subqueryA
   // Subquery aliases: (SELECT ...) [AS] alias
   const subqueryAliases = new Map<string, string[]>()
   for (const m of sql.matchAll(/\(\s*SELECT\b/gi)) {
-    const openIndex = m.index ?? 0
+    const openIndex = m.index!
     const closeIndex = matchingParenIndex(sql, openIndex)
     if (closeIndex === null) continue
     const selectList = sql.slice(openIndex + m[0].length, closeIndex)
@@ -250,7 +250,7 @@ export default function QueryEditor({ value, onChange, onRun, running, database,
     run: () => { if (!runningRef.current) onRunRef.current(); return true },
   }])), [])
   const tooltipExtensions = useMemo((): Extension[] =>
-    typeof document === 'undefined' ? [] : [tooltips({ parent: document.body })],
+    [tooltips({ parent: document.body })],
   [])
 
   const extensions = useMemo(

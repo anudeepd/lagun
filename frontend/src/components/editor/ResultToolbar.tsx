@@ -12,6 +12,7 @@ interface Props {
 
 export default function ResultToolbar({ result, running }: Props) {
   const state = running ? 'running' : result?.error ? 'error' : result ? 'success' : 'idle'
+  const finishedResult = result!
 
   return (
     <AnimatePresence initial={false} mode="sync">
@@ -25,21 +26,21 @@ export default function ResultToolbar({ result, running }: Props) {
         >
           {running ? (
             <span className="text-muted">Executing…</span>
-          ) : result?.error ? (
+          ) : finishedResult.error ? (
             <span className="flex items-center gap-1 text-red-400">
               <AlertCircle size={12} /> Error
             </span>
-          ) : result ? (
+          ) : (
             <>
               <span className="flex items-center gap-1 text-muted">
                 <Hash size={12} />
-                {formatRowCount(result.row_count)}
+                {formatRowCount(finishedResult.row_count)}
               </span>
-              {result.affected_rows != null && <span className="text-muted">{result.affected_rows} affected</span>}
-              <span className="flex items-center gap-1 text-muted"><Clock size={12} />{result.exec_time_ms}ms</span>
-              {result.insert_id ? <span className="text-muted">insert_id={result.insert_id}</span> : null}
+              {finishedResult.affected_rows != null && <span className="text-muted">{finishedResult.affected_rows} affected</span>}
+              <span className="flex items-center gap-1 text-muted"><Clock size={12} />{finishedResult.exec_time_ms}ms</span>
+              {finishedResult.insert_id ? <span className="text-muted">insert_id={finishedResult.insert_id}</span> : null}
             </>
-          ) : null}
+          )}
         </m.div>
       )}
     </AnimatePresence>

@@ -66,15 +66,13 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
   }
 
   const handleCopy = async () => {
-    if (!schemaSql) return
-    await clipboardWrite(schemaSql)
+    await clipboardWrite(schemaSql!)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
   const handleDownload = () => {
-    if (!schemaSql) return
-    const blob = new Blob([schemaSql + '\n'], { type: 'text/plain' })
+    const blob = new Blob([schemaSql! + '\n'], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

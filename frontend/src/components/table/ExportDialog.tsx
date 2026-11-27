@@ -128,7 +128,7 @@ export const buildFrontendContent = (
   const colIdx = new Map(data.columns.map((c, i) => [c, i]))
   const outCols = filterAi ? data.columns.filter(c => !autoInc.has(c)) : data.columns
   const outRows = filterAi
-    ? data.rows.map(row => outCols.map(c => row[colIdx.get(c) ?? -1]))
+    ? data.rows.map(row => outCols.map(c => row[colIdx.get(c)!]))
     : data.rows
 
   if (format === 'csv') {
@@ -382,7 +382,7 @@ export default function ExportDialog({ open, onClose, sessionId, database, table
     lf: '\n',
     cr: '\r',
   }
-  const effectiveLineterminator = lineTerminatorMap[csvLineterminator] || '\r\n'
+  const effectiveLineterminator = lineTerminatorMap[csvLineterminator]
 
   const effectiveDelimiter = csvDelimiter === 'custom' ? csvDelimiterCustom : csvDelimiter
 

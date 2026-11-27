@@ -40,7 +40,7 @@ export default function QueryLogPanel() {
   // but while collapsed it must not be reachable: `aria-hidden` alone leaves its
   // buttons in the tab order (an aria-hidden-focus violation).
   useEffect(() => {
-    if (bodyRef.current) bodyRef.current.inert = !expanded
+    bodyRef.current!.inert = !expanded
   }, [expanded])
   const entries = useQueryLogStore(s => s.entries)
   const clearLog = useQueryLogStore(s => s.clearLog)
@@ -169,7 +169,7 @@ export default function QueryLogPanel() {
                           <Tooltip label="Copy SQL">
                           <button
                             type="button"
-                            onClick={() => { if (replaySql) clipboardWrite(replaySql).catch(() => {}) }}
+                            onClick={() => { clipboardWrite(replaySql!).catch(() => {}) }}
                             disabled={!canReplay}
                             title={canReplay ? 'Copy SQL' : 'Full write script unavailable after reload'}
                             aria-label="Copy SQL"
@@ -182,11 +182,10 @@ export default function QueryLogPanel() {
                           <button
                             type="button"
                             onClick={() => {
-                              if (!replaySql) return
                               if (hasQueryTab) {
-                                injectSqlToTab(activeTabId!, replaySql, entry.database)
+                                injectSqlToTab(activeTabId!, replaySql!, entry.database)
                               } else {
-                                openQueryTabWithSql(entry.sessionId, replaySql, entry.database)
+                                openQueryTabWithSql(entry.sessionId, replaySql!, entry.database)
                               }
                             }}
                             disabled={!canReplay}

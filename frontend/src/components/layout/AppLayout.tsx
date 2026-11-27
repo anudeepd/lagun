@@ -22,7 +22,6 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
     const saved = localStorage.getItem('lagun-sidebar-width')
     return saved ? Number(saved) : 256
   })
-  const startRef = useRef<{ x: number; width: number } | null>(null)
   const mobileOpenButtonRef = useRef<HTMLButtonElement>(null)
   const mobileSidebarRef = useRef<HTMLDivElement>(null)
   const mainAreaRef = useRef<HTMLDivElement>(null)
@@ -32,11 +31,11 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
 
   useEffect(() => {
     if (!mobileSidebarOpen) return
-    const sidebar = mobileSidebarRef.current
-    const mainArea = mainAreaRef.current
-    if (mainArea) (mainArea as HTMLDivElement & { inert: boolean }).inert = true
-    const getFocusable = () => Array.from(sidebar?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])
-    getFocusable()[0]?.focus()
+    const sidebar = mobileSidebarRef.current!
+    const mainArea = mainAreaRef.current!
+    mainArea.inert = true
+    const getFocusable = () => Array.from(sidebar.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+    getFocusable()[0].focus()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -44,7 +43,6 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
         window.requestAnimationFrame(() => mobileOpenButtonRef.current?.focus())
       } else if (event.key === 'Tab') {
         const focusable = getFocusable()
-        if (focusable.length === 0) return
         const first = focusable[0]
         const last = focusable[focusable.length - 1]
         if (event.shiftKey && document.activeElement === first) {
@@ -69,7 +67,7 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
     desktop.addEventListener('change', closeOnDesktop)
     return () => {
       desktop.removeEventListener('change', closeOnDesktop)
-      if (mainArea) (mainArea as HTMLDivElement & { inert: boolean }).inert = false
+      mainArea.inert = false
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [mobileSidebarOpen])
@@ -111,15 +109,13 @@ export default function AppLayout({ navigateToAdmin }: { navigateToAdmin?: () =>
   }
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
-    startRef.current = { x: e.clientX, width: sidebarWidth }
+    const start = { x: e.clientX, width: sidebarWidth }
     const onMove = (e: MouseEvent) => {
-      if (!startRef.current) return
-      const next = Math.max(MIN_SIDEBAR, Math.min(MAX_SIDEBAR, startRef.current.width + e.clientX - startRef.current.x))
+      const next = Math.max(MIN_SIDEBAR, Math.min(MAX_SIDEBAR, start.width + e.clientX - start.x))
       setSidebarWidth(next)
       localStorage.setItem('lagun-sidebar-width', String(next))
     }
     const onUp = () => {
-      startRef.current = null
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
     }

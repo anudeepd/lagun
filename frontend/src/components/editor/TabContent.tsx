@@ -515,7 +515,6 @@ function QueryTab({ tab }: Props) {
     const saved = localStorage.getItem(KEY_WORD_WRAP)
     return saved !== null ? saved === 'true' : true
   })
-  const editorDragRef = useRef<{ startY: number; startHeight: number } | null>(null)
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const gridRef = useRef<ResultGridHandle>(null)
   const editorRef = useRef<ReactCodeMirrorRef>(null)
@@ -636,20 +635,18 @@ function QueryTab({ tab }: Props) {
 
   const handleEditorDividerMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
-    editorDragRef.current = { startY: e.clientY, startHeight: editorHeight }
+    const start = { startY: e.clientY, startHeight: editorHeight }
     const onMove = (ev: MouseEvent) => {
-      if (!editorDragRef.current) return
-      const containerHeight = editorContainerRef.current?.clientHeight ?? 600
+      const containerHeight = editorContainerRef.current!.clientHeight
       const maxH = Math.floor(containerHeight * MAX_EDITOR_HEIGHT_FRACTION)
       const next = Math.max(
         MIN_EDITOR_HEIGHT,
-        Math.min(maxH, editorDragRef.current.startHeight + ev.clientY - editorDragRef.current.startY)
+        Math.min(maxH, start.startHeight + ev.clientY - start.startY)
       )
       setEditorHeight(next)
       localStorage.setItem(KEY_EDITOR_HEIGHT, String(next))
     }
     const onUp = () => {
-      editorDragRef.current = null
       document.removeEventListener('mousemove', onMove)
       document.removeEventListener('mouseup', onUp)
       // Ask CodeMirror to remeasure layout after drag resize
@@ -662,7 +659,7 @@ function QueryTab({ tab }: Props) {
   const handleEditorDividerKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
     e.preventDefault()
-    const containerHeight = editorContainerRef.current?.clientHeight ?? 600
+    const containerHeight = editorContainerRef.current!.clientHeight
     const maxHeight = Math.floor(containerHeight * MAX_EDITOR_HEIGHT_FRACTION)
     const delta = e.key === 'ArrowUp' ? -16 : 16
     const next = Math.max(MIN_EDITOR_HEIGHT, Math.min(maxHeight, editorHeight + delta))
@@ -931,10 +928,6 @@ function QueryTab({ tab }: Props) {
     }
     const result = scriptResultToQueryResult(scriptResult)
     newResults.push({ id: `${executionId}-bulk`, result, sql: toRun, scriptResult })
-    if (database && scriptResult.statements_executed > 0 && statementsChangeSchema(statements.slice(0, scriptResult.statements_executed))) {
-      invalidateTablesForDb(sessionId, database)
-      void loadTables(sessionId, database)
-    }
     try {
       const previewSql = scriptResult.statements_executed > 0
         ? toRun.slice(0, 500) + (toRun.length > 500 ? '…' : '')
@@ -959,13 +952,12 @@ function QueryTab({ tab }: Props) {
   }
 
   const handleBulkConfirm = async () => {
-    if (!bulkConfirm) return
-    const { sql: toRun } = bulkConfirm
+    const { sql: toRun, validation } = bulkConfirm!
     setBulkConfirm(null)
 
     setRunning(true)
     setBulkCancelled(false)
-    setBulkValidation(bulkConfirm.validation)
+    setBulkValidation(validation)
     const newResults: ExecutedQueryResult[] = []
     const executionId = randomId()
     try {
@@ -974,7 +966,7 @@ function QueryTab({ tab }: Props) {
       activeScriptExecutionRef.current = executionId
       const start = Date.now()
       const statements = splitStatements(toRun)
-      await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, tab.id, controller.signal, start, newResults, bulkConfirm.validation.operation_counts)
+      await executeBulkScript(executionId, toRun, statements, tab.database, tab.sessionId, tab.id, controller.signal, start, newResults, validation.operation_counts)
     } finally {
       abortControllerRef.current = null
       activeScriptExecutionRef.current = null
@@ -1538,7 +1530,6 @@ function TableTab({ tab, active = true }: Props) {
   }, [tab.sessionId, tab.database])
 
   const handleCellEdit = useCallback((params: { column: string; newValue: unknown; oldValue: unknown; data: Record<string, unknown> }) => {
-    if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     if (initialLoading || refreshing) return
     const columnInfo = columns.find(column => column.name === params.column)
     const normalized = normalizeTableCellValue(columnInfo, params.newValue)
@@ -1584,7 +1575,7 @@ function TableTab({ tab, active = true }: Props) {
       pendingChangesRef.current = next
       return next
     })
-  }, [columns, tab.database, tab.table, rowKeyColumns, initialLoading, refreshing])
+  }, [columns, initialLoading, refreshing])
 
   const handleDuplicateRow = useCallback((row: Record<string, unknown>, mode: DuplicateRowMode) => {
     const draftId = `__insert__${Date.now()}_${randomId()}`
@@ -1628,7 +1619,6 @@ function TableTab({ tab, active = true }: Props) {
 
     const currentPending = pendingChangesRef.current
     const currentDrafts = insertDraftsRef.current
-    if (!tab.database || !tab.table || (currentPending.size === 0 && currentDrafts.size === 0)) return
     setStatusMsg(null)
 
     const normalizeChangeMap = (values: Record<string, unknown>) => {
@@ -1648,8 +1638,7 @@ function TableTab({ tab, active = true }: Props) {
     const normalizedPending = new Map<string, { original: Record<string, unknown>; changes: Record<string, unknown> }>()
     for (const [rowId, edit] of currentPending) {
       const changes = normalizeChangeMap(edit.changes)
-      if (!changes) return
-      normalizedPending.set(rowId, { ...edit, changes })
+      normalizedPending.set(rowId, { ...edit, changes: changes! })
     }
     const normalizedDrafts = new Map<string, Record<string, unknown>>()
     for (const [draftId, values] of currentDrafts) {
@@ -1684,8 +1673,8 @@ function TableTab({ tab, active = true }: Props) {
       rowKeyColumns.forEach(pk => { primary_key[pk] = original[pk] })
       const start = Date.now()
       const r = await api.rowUpdate(tab.sessionId, {
-        database: tab.database,
-        table: tab.table,
+        database: tab.database!,
+        table: tab.table!,
         primary_key,
         updates: changes,
       })
@@ -1724,8 +1713,8 @@ function TableTab({ tab, active = true }: Props) {
     for (const [draftId, values] of normalizedDrafts) {
       const start = Date.now()
       const r = await api.rowInsert(tab.sessionId, {
-        database: tab.database,
-        table: tab.table,
+        database: tab.database!,
+        table: tab.table!,
         values,
       })
       try {
@@ -1767,7 +1756,7 @@ function TableTab({ tab, active = true }: Props) {
       )
     } else if (updatedCount > 0) {
       showToast(`Updated ${updatedCount} row${updatedCount === 1 ? '' : 's'}.`, 'success')
-    } else if (insertedCount > 0) {
+    } else {
       showToast(`Inserted ${insertedCount} row${insertedCount === 1 ? '' : 's'}.`, 'success')
     }
 
@@ -1799,12 +1788,11 @@ function TableTab({ tab, active = true }: Props) {
   }
 
   const handleDeleteRows = async (rows: Record<string, unknown>[]) => {
-    if (!tab.database || !tab.table || rowKeyColumns.length === 0) return
     const primary_keys = rows.map(row => Object.fromEntries(rowKeyColumns.map(pk => [pk, row[pk]])))
     // Transport errors and rejected statements both return `{ ok: false }` and show as error toasts.
     const r = await api.rowDelete(tab.sessionId, {
-      database: tab.database,
-      table: tab.table,
+      database: tab.database!,
+      table: tab.table!,
       primary_keys,
     })
     if (!r.ok || r.data.ok === false) {
@@ -1854,8 +1842,7 @@ function TableTab({ tab, active = true }: Props) {
   }
 
   const confirmDeleteRows = () => {
-    if (!deleteRowsTarget) return
-    const rows = deleteRowsTarget
+    const rows = deleteRowsTarget!
     setDeleteRowsTarget(null)
     void handleDeleteRows(rows)
   }
@@ -1963,7 +1950,7 @@ function TableTab({ tab, active = true }: Props) {
     '.cm-placeholder': { lineHeight: '20px' },
   }), [])
   const filterTooltipExtensions = useMemo((): Extension[] =>
-    typeof document === 'undefined' ? [] : [tooltips({ parent: document.body })],
+    [tooltips({ parent: document.body })],
   [])
   const filterKeymapExtension = useMemo(() =>
     Prec.highest(keymap.of([
@@ -2387,7 +2374,7 @@ function TableTab({ tab, active = true }: Props) {
           >
           {
           initialLoading ? (
-            <LoadingState label={initialLoading ? `Loading rows from ${tab.table}…` : 'Searching…'} />
+            <LoadingState label={`Loading rows from ${tab.table}…`} />
           ) : result ? (
           <Suspense fallback={<LoadingState label="Preparing data grid…" />}>
             <div className={`relative h-full lagun-grid-surface${refreshing ? ' lagun-grid-searching' : ''}`} aria-busy={refreshing}>

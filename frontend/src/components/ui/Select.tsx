@@ -112,7 +112,6 @@ export default function Select({ label, error, className, containerClassName, co
   }, [open, activeIndex])
 
   const choose = (next: SelectOption) => {
-    if (next.disabled) return
     if (value === undefined) setUncontrolledValue(next.value)
     onChange?.({ target: { value: next.value }, currentTarget: { value: next.value } } as ChangeEvent<HTMLSelectElement>)
     setOpen(false)

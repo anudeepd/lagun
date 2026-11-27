@@ -26,7 +26,6 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
   }
 
   const handleExport = async () => {
-    if (loading) return
     setError(null)
     if (!passphrase) {
       setError('Enter a passphrase to protect the exported passwords.')

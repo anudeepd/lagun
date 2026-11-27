@@ -82,7 +82,7 @@ export default function BulkResultSummary({ result, statements }: BulkResultSumm
             <div>Affected rows: <span className="text-slate-200">{result.affected_rows.toLocaleString()}</span></div>
             <div>Elapsed: <span className="text-slate-200">{result.exec_time_ms}ms</span></div>
             {result.failed_statement_index != null && (
-              <div>Failed at: <span className="text-red-400">statement {(result.failed_statement_index ?? 0) + 1}</span></div>
+              <div>Failed at: <span className="text-red-400">statement {result.failed_statement_index! + 1}</span></div>
             )}
             {result.rolled_back && (
               <div>Transaction: <span className="text-red-400">rolled back</span></div>

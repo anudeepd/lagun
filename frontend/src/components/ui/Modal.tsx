@@ -39,7 +39,7 @@ const ModalShell = forwardRef<HTMLDivElement, ModalShellProps>(function ModalShe
   const leave = subtle ? { duration: motionDuration.instant, ease: motionEase.exit } : exitSpring
 
   useEffect(() => {
-    if (dialogRef.current) dialogRef.current.inert = !isPresent
+    dialogRef.current!.inert = !isPresent
   }, [dialogRef, isPresent])
 
   return (
@@ -116,8 +116,7 @@ export default function Modal({ open, onClose, title, children, footer, width = 
   // Escape and focus trapping must be active before the entrance's first frame.
   useLayoutEffect(() => {
     if (!open) return
-    const dialog = dialogRef.current
-    if (!dialog) return
+    const dialog = dialogRef.current!
 
     openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
 

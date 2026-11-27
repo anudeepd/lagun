@@ -165,8 +165,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
   }
 
   const handleConfirmCloseTab = () => {
-    if (!closeTargetId) return
-    closeTab(closeTargetId)
+    closeTab(closeTargetId!)
     setCloseTargetId(null)
   }
 
