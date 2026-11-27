@@ -1,4 +1,4 @@
-import { test } from '@playwright/test'
+import { test } from '../coverage-fixture'
 import { createTestSession, deleteTestSession } from '../fixtures'
 
 test('records representative motion frame timing', async ({ page }, testInfo) => {

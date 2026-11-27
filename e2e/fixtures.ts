@@ -8,7 +8,7 @@
  * Set environment variables to override:
  *   E2E_MYSQL_HOST, E2E_MYSQL_PORT, E2E_MYSQL_USER, E2E_MYSQL_PASS
  */
-import { test as base, expect, Page } from '@playwright/test'
+import { test as base, expect, type Page } from './coverage-fixture'
 
 export const E2E_HOST = process.env.E2E_MYSQL_HOST ?? '127.0.0.1'
 export const E2E_PORT = parseInt(process.env.E2E_MYSQL_PORT ?? '3306')

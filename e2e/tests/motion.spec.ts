@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test } from '../coverage-fixture'
 import { createTestSession, deleteTestSession, seedDatabase } from '../fixtures'
 
 let sessionId = ''
