@@ -522,8 +522,6 @@ def _skip_table_alias(text: str, pos: int) -> int:
         j += 1
     m = re.match(r"(?:AS\s+)?", text[j:], re.IGNORECASE)
     k = j + (m.end() if m else 0)
-    while k < len(text) and text[k] in " \t\n\r":
-        k += 1
     m2 = re.match(rf"(?P<alias>{_SQL_IDENTIFIER_RE})", text[k:], re.IGNORECASE)
     if m2 and m2.group("alias").upper() not in _RESERVED_TABLE_WORDS:
         return k + m2.end()
@@ -735,15 +733,14 @@ def target_table(statement: str) -> tuple[str | None, str] | None:
     if sliced is not None:
         candidates.append(sliced)
     for candidate in candidates:
-        if candidate is not None:
-            # A multi-table DELETE names its targets BEFORE `FROM`, and MySQL
-            # deletes from that list, so it must beat the generic
-            # `DELETE … FROM <ref>` pattern: `DELETE other_db.t1 FROM app_db.t1`
-            # otherwise resolved `app_db` and let a scoped connection delete
-            # from another schema.
-            target = _multi_table_delete_target(candidate)
-            if target is not None:
-                return target
+        # A multi-table DELETE names its targets BEFORE `FROM`, and MySQL
+        # deletes from that list, so it must beat the generic
+        # `DELETE … FROM <ref>` pattern: `DELETE other_db.t1 FROM app_db.t1`
+        # otherwise resolved `app_db` and let a scoped connection delete
+        # from another schema.
+        target = _multi_table_delete_target(candidate)
+        if target is not None:
+            return target
         for pattern in _target_patterns(_LEADING_COMMENT_PREFIX):
             m = re.search(pattern, candidate, re.IGNORECASE)
             if not m:

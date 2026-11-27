@@ -203,16 +203,16 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   }, [clearDropFeedback, open])
 
   const fetchPreview = async () => {
-    if (!file) return
+    const selectedFile = file!
     const requestId = ++previewRequestId.current
     setPreviewLoading(true)
     setPreviewError(null)
     try {
-      const sample = file.size > PREVIEW_SAMPLE_BYTES
-        ? file.slice(0, PREVIEW_SAMPLE_BYTES, file.type)
-        : file
+      const sample = selectedFile.size > PREVIEW_SAMPLE_BYTES
+        ? selectedFile.slice(0, PREVIEW_SAMPLE_BYTES, selectedFile.type)
+        : selectedFile
       const formData = new FormData()
-      formData.append('file', sample, file.name)
+      formData.append('file', sample, selectedFile.name)
       formData.append('config', buildConfigJson())
       const preview = await api.importPreview<Preview>(sessionId, formData)
       if (requestId !== previewRequestId.current) return
@@ -240,14 +240,14 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
   }
 
   const handleImport = async () => {
-    if (!file || (format === 'csv' && !targetTable)) return
+    const selectedFile = file!
     const requestId = requestIdRef.current
     setImporting(true)
     setUploadPercent(null)
     setResult(null)
     try {
       const formData = new FormData()
-      formData.append('file', file)
+      formData.append('file', selectedFile)
       formData.append('config', buildConfigJson())
       const data = await api.importFile<ImportResult>(sessionId, formData, progress => {
         if (requestId !== requestIdRef.current) return
@@ -356,8 +356,8 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
               compact
               className="justify-start"
               label={uploadPercent === null
-                ? `Importing ${file?.name ?? 'file'} into ${database}${targetTable ? `.${targetTable}` : ''}. The server is processing the file; large imports can take a while.`
-                : `Uploading ${file?.name ?? 'file'}… ${uploadPercent}%`}
+                ? `Importing ${file!.name} into ${database}${targetTable ? `.${targetTable}` : ''}. The server is processing the file; large imports can take a while.`
+                : `Uploading ${file!.name}… ${uploadPercent}%`}
             />
             <Progress
               className="mt-2"

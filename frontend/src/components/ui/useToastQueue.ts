@@ -75,11 +75,6 @@ export function useToastQueue() {
   useEffect(() => subscribeToasts(toast => dispatch({ type: 'add', toast })), [])
 
   useEffect(() => {
-    const liveIds = new Set(toasts.map(toast => toast.id))
-    for (const id of timersRef.current.keys()) {
-      if (!liveIds.has(id)) clearTimer(id)
-    }
-
     for (const toast of toasts) {
       if (toast.pauseReasons.length > 0 || timersRef.current.has(toast.id)) continue
       const delay = Math.max(0, toast.remainingMs)

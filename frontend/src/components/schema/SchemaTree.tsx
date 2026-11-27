@@ -225,9 +225,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   useMenuKeyboard(menuRef, closeMenu, Boolean(contextMenu))
   useEffect(() => {
     if (!contextMenu) return
-    const closeOnOutsideClick = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setContextMenu(null)
-    }
+    const closeOnOutsideClick = () => setContextMenu(null)
     document.addEventListener('click', closeOnOutsideClick)
     return () => document.removeEventListener('click', closeOnOutsideClick)
   }, [contextMenu])
@@ -265,8 +263,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   }
 
   const confirmDestructiveAction = async () => {
-    if (!destructiveTarget) return
-    const { action, db, table } = destructiveTarget
+    const { action, db, table } = destructiveTarget!
     setDestructiveTarget(null)
     if (action === 'drop') await dropTable(db, table)
     else await truncateTable(db, table)

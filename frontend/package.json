@@ -12,7 +12,7 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.include='src/**' --coverage.exclude='src/**/*.test.*' --coverage.exclude='src/__tests__/**' --coverage.reporter=lcov --coverage.reporter=text --coverage.reportsDirectory=../coverage/frontend",
+    "test:coverage": "node scripts/coverage.mjs",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
   },

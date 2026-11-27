@@ -34,8 +34,7 @@ export default function SessionList() {
   useMenuKeyboard(menuId ? menuRefFor(menuId) : inactiveMenuRef, () => setMenuId(null), Boolean(menuId))
 
   const handleConfirmDelete = async () => {
-    if (!deleteTarget) return
-    await deleteSession(deleteTarget.id)
+    await deleteSession(deleteTarget!.id)
     setDeleteTarget(null)
   }
 

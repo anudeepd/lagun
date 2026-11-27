@@ -6,7 +6,7 @@ import {
   ColumnApiModule, ColumnAutoSizeModule, DateEditorModule, DateFilterModule,
   NumberEditorModule, NumberFilterModule, RenderApiModule, RowApiModule,
   RowSelectionModule, ScrollApiModule, TextEditorModule, TextFilterModule,
-  TooltipModule, ValidationModule, themeQuartz,
+  TooltipModule, themeQuartz,
 } from 'ag-grid-community'
 import { Copy, Braces, Slash, Clock, Trash2, CopyPlus, PencilLine, Plus, Eye } from 'lucide-react'
 import type { CellClassParams, ICellRendererParams, CellClickedEvent, CellContextMenuEvent, CellDoubleClickedEvent, CellFocusedEvent, CellValueChangedEvent, RowClickedEvent, GridApi, ColumnHeaderClickedEvent } from 'ag-grid-community'
@@ -42,7 +42,6 @@ const gridModules = [
   ColumnApiModule, ColumnAutoSizeModule, DateEditorModule, DateFilterModule,
   NumberEditorModule, NumberFilterModule, RenderApiModule, RowApiModule,
   RowSelectionModule, ScrollApiModule, TextEditorModule, TextFilterModule, TooltipModule,
-  ...(import.meta.env.DEV ? [ValidationModule] : []),
 ]
 
 const darkTheme = themeQuartz.withParams({
@@ -632,8 +631,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   const goToMatch = useCallback((index: number) => {
     const api = agApiRef.current
     if (!api) return
-    const match = findMatches[index]
-    if (!match) return
+    const match = findMatches[index]!
     const node = api.getDisplayedRowAtIndex(match.rowIndex)
     if (!node) return
     api.ensureNodeVisible(node, 'middle')
@@ -784,10 +782,6 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
       if (rootRef.current?.closest('[inert]')) handleClose()
     })
     observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ['inert'] })
-    // The grid may already be inert by the time this observer attaches (the bar
-    // opens and the tab is switched away in the same tick), and pre-existing
-    // mutations are not replayed — so check once up front as well.
-    if (rootRef.current?.closest('[inert]')) handleClose()
     return () => observer.disconnect()
   }, [findOpen, handleClose])
 
@@ -886,8 +880,8 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
 
   const handleGridContextMenu = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     if (!editable || !onCreateEmptyRow) return
-    if (!(e.target instanceof HTMLElement)) return
-    if (e.target.closest('.ag-cell, .ag-header-cell, .ag-header-group-cell')) return
+    const target = e.target as HTMLElement
+    if (target.closest('.ag-cell, .ag-header-cell, .ag-header-group-cell')) return
     e.preventDefault()
     setMenu(null)
     if (rowData.length === 0) {
@@ -1020,21 +1014,20 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
   }, [emptyMenu, editable, onCreateEmptyRow, closeMenu])
 
   const handleApplyCellEditor = useCallback(() => {
-    if (!cellPanel || cellPanel.mode !== 'edit') return
+    const panel = cellPanel!
     onCellEdit?.({
-      column: cellPanel.columnName,
+      column: panel.columnName,
       // The editor opens a NULL cell as an empty textarea and shows a NULL
       // badge; applying it unchanged must write NULL back, not ''.
-      newValue: cellPanel.wasNull && cellPanel.value === '' ? null : cellPanel.value,
-      oldValue: cellPanel.oldValue,
-      data: cellPanel.data,
+      newValue: panel.wasNull && panel.value === '' ? null : panel.value,
+      oldValue: panel.oldValue,
+      data: panel.data,
     })
     setCellPanel(null)
   }, [cellPanel, onCellEdit])
 
   const handleCopyCellPanel = useCallback(() => {
-    if (!cellPanel) return
-    clipboardWrite(cellPanel.value).catch(() => {})
+    clipboardWrite(cellPanel!.value).catch(() => {})
   }, [cellPanel])
 
   if (result.error) {
@@ -1166,7 +1159,7 @@ const ResultGrid = forwardRef<ResultGridHandle, Props>(function ResultGrid({ res
                   aria-label={`Edit ${cellPanel.columnName}`}
                   className="min-h-[240px] w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-sm leading-6 text-slate-100 lagun-field focus:outline-none focus:ring-1 focus:ring-brand-400 focus:border-brand-400"
                   value={cellPanel.value}
-                  onChange={e => setCellPanel(prev => prev ? { ...prev, value: e.target.value } : prev)}
+                  onChange={e => setCellPanel(prev => ({ ...prev!, value: e.target.value }))}
                   spellCheck={false}
                 />
                 <p className="text-xs text-muted">Changes are staged until you apply them to the database.</p>

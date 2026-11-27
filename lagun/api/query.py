@@ -630,6 +630,13 @@ async def _finish_query_execution(
             _cancelled_query_executions.discard(execution_key)
 
 
+async def _clear_script_tracking(session_id: str, execution_id: str) -> None:
+    """Drop the session's single active script and its display metadata."""
+    async with _active_script_queries_lock:
+        _active_script_queries.pop(session_id, None)
+        _active_script_details.pop((session_id, execution_id), None)
+
+
 async def list_active_queries() -> list[dict[str, Any]]:
     """Return live normal and bulk executions for the admin workspace view."""
     async with _active_queries_lock:
@@ -1178,13 +1185,7 @@ async def execute_script_query(
                         except Exception:
                             pass
                 finally:
-                    async with _active_script_queries_lock:
-                        active = _active_script_queries.get(session_id)
-                        if active:
-                            active.pop(req.execution_id, None)
-                            if not active:
-                                del _active_script_queries[session_id]
-                        _active_script_details.pop((session_id, req.execution_id), None)
+                    await _clear_script_tracking(session_id, req.execution_id)
 
         return ScriptQueryResult(
             ok=True,
@@ -1228,13 +1229,7 @@ async def execute_script_query(
             ),
         )
     finally:
-        async with _active_script_queries_lock:
-            active = _active_script_queries.get(session_id)
-            if active:
-                active.pop(req.execution_id, None)
-                if not active:
-                    del _active_script_queries[session_id]
-            _active_script_details.pop((session_id, req.execution_id), None)
+        await _clear_script_tracking(session_id, req.execution_id)
 
 
 class _ScriptCursor(aiomysql.SSCursor):
@@ -1492,13 +1487,7 @@ async def execute_sequential_script(
                 )
             )
     finally:
-        async with _active_script_queries_lock:
-            active = _active_script_queries.get(session_id)
-            if active:
-                active.pop(req.execution_id, None)
-                if not active:
-                    del _active_script_queries[session_id]
-            _active_script_details.pop((session_id, req.execution_id), None)
+        await _clear_script_tracking(session_id, req.execution_id)
 
     return SequentialScriptResult(
         ok=execution_error is None,

@@ -5,10 +5,13 @@ import importlib.metadata
 import logging
 import os
 import threading
+import time
+import webbrowser
 
 import pytest
 from click.testing import CliRunner
 
+import lagun.cli as cli_module
 from lagun.cli import main
 from lagun.db import session_store
 
@@ -105,6 +108,42 @@ def test_serve_opens_the_browser_unless_no_open_is_passed(monkeypatch):
     started.clear()
     assert runner.invoke(main, ["serve", "--no-open"]).exit_code == 0
     assert started == []
+
+
+def test_serve_browser_thread_opens_the_selected_url(monkeypatch):
+    targets: list = []
+
+    class _FakeThread:
+        def __init__(self, target=None, daemon=None, **kwargs):
+            targets.append(target)
+
+        def start(self):
+            pass
+
+    opened: list[str] = []
+    monkeypatch.setattr(threading, "Thread", _FakeThread)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url))
+    _capture_uvicorn(monkeypatch)
+
+    assert runner.invoke(main, ["serve", "--port", "8123"]).exit_code == 0
+    targets[0]()
+    assert opened == ["http://127.0.0.1:8123"]
+
+
+def test_configure_logging_adds_a_stream_handler_when_none_exist(monkeypatch):
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_level = root.level
+    root.handlers.clear()
+    try:
+        cli_module._configure_logging(None)
+        assert len(root.handlers) == 1
+        assert isinstance(root.handlers[0], logging.StreamHandler)
+        assert root.level == logging.INFO
+    finally:
+        root.handlers[:] = saved_handlers
+        root.setLevel(saved_level)
 
 
 def test_serve_exposes_the_ldap_flags_through_the_environment(monkeypatch, tmp_path):

@@ -17,7 +17,6 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from lagun.api.scope import effective_scope, require_db_scope
 from lagun.api.sql_analysis import (
     SCOPE_REFERENCE_EXEMPT_SCHEMAS,
-    _WRITE_KINDS,
     referenced_schemas,
     statement_kind,
     target_database,
@@ -30,16 +29,6 @@ from lagun.db.session_store import get_session
 from lagun.db.utils import quote_ident
 
 router = APIRouter(tags=["import"])
-
-# A dump may name its own target schema, so every statement is checked, not just
-# the configured database. `USE` needs its own pattern because it is not a write
-# statement and has no table reference.
-_USE_STATEMENT_RE = re.compile(
-    r"^\s*(?:(?:--[^\n]*\n|#[^\n]*\n|/\*[\s\S]*?\*/)\s*)*"
-    r"USE\s+(?:`((?:``|[^`])+)`|([A-Za-z0-9_$]+))",
-    re.IGNORECASE,
-)
-
 
 # Statements whose target cannot be known before execution: a dump that prepares
 # or calls dynamic SQL cannot be checked, so scoped connections refuse it.
@@ -103,13 +92,6 @@ def _out_of_scope_schema(statement: str, scope: frozenset[str] | None) -> str | 
                 continue
             if schema not in scope:
                 return schema
-        if statement_kind(candidate) == "USE":
-            match = _USE_STATEMENT_RE.match(candidate)
-            if match:
-                database = match.group(1) or match.group(2) or ""
-                database = database.replace("``", "`")
-                if database and database not in scope:
-                    return database
     return None
 
 
@@ -134,10 +116,12 @@ def _uninspectable_statement(statement: str, scope: frozenset[str] | None) -> bo
     # with no table target and no schema reference cannot be proven in-scope.
     # Plain unqualified INSERT/UPDATE/DELETE/REPLACE resolve via the dump's
     # USE/current schema and stay checkable, so they are not refused here.
-    if kind in _WRITE_KINDS:
-        if target_table(statement) is None and not referenced_schemas(statement):
-            if kind == "MERGE" or kind not in ("INSERT", "UPDATE", "DELETE", "REPLACE"):
-                return True
+    if (
+        kind == "MERGE"
+        and target_table(statement) is None
+        and not referenced_schemas(statement)
+    ):
+        return True
     return False
 
 

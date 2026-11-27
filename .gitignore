@@ -33,6 +33,8 @@ frontend/test-results/
 # E2E
 e2e/node_modules/
 e2e/test-results/
+e2e/coverage-e2e/
+lagun/static/assets/*.map
 
 # Project specific
 *.db

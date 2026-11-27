@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { Check, ChevronDown, X } from 'lucide-react'
 import { AnimatePresence } from 'motion/react'
 import * as m from 'motion/react-m'
-import { exitTransition, surfaceTransition } from '../../motion/tokens'
+import { surfaceTransition } from '../../motion/tokens'
 import { useServerConfigStore } from '../../store/serverConfigStore'
 
 interface LimitSelectProps {
@@ -241,7 +241,7 @@ export default function LimitSelect({ value, options, onChange, ariaLabel = 'Row
               initial={{ opacity: 0, scale: 0.94, y: -6 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.97, y: -4 }}
-              transition={open ? surfaceTransition : exitTransition}
+              transition={surfaceTransition}
               style={{ position: 'fixed', top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, maxHeight: 'min(320px, calc(100vh - 16px))' }}
               className="z-popover origin-top overflow-y-auto rounded-md border border-surface-700 bg-surface-800 p-1 shadow-lg"
             >

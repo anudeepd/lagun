@@ -12,7 +12,12 @@ These back three behaviours that were previously regex-based and wrong:
 import time
 
 from lagun.api.sql_analysis import (
+    _mask_strings_and_comments,
+    _multi_table_delete_target,
+    _read_dotted_name,
+    _skip_table_alias,
     _use_schema,
+    _with_main_verb_offset,
     add_row_limit,
     has_top_level_limit,
     is_result_producing,
@@ -39,6 +44,26 @@ def test_statement_kind_ignores_leading_comments():
 def test_statement_kind_ignores_keywords_inside_strings_and_identifiers():
     assert statement_kind("SELECT 'DELETE FROM x'") == "SELECT"
     assert statement_kind("SELECT `update` FROM t") == "SELECT"
+
+
+def test_comment_and_literal_masking_handles_escapes_and_unterminated_quotes():
+    sql = "SELECT 'a\\'b', 'c''d', \"e\"\"f\", `unterminated"
+    masked = _mask_strings_and_comments(sql)
+    assert len(masked) == len(sql)
+    assert "'a\\'b'" not in masked
+    assert "'c''d'" not in masked
+    assert '"e""f"' not in masked
+    for unterminated in ("SELECT 'unterminated", 'SELECT "unterminated'):
+        assert len(_mask_strings_and_comments(unterminated)) == len(unterminated)
+
+    assert strip_comments_and_literals("SELECT 'a\\'b'") == "SELECT ''"
+    assert strip_comments_and_literals("SELECT 'a''b'") == "SELECT ''"
+    assert strip_comments_and_literals("SELECT 'unterminated") == "SELECT ''"
+    assert strip_comments_and_literals('SELECT "unterminated') == 'SELECT ""'
+    assert strip_comments_and_literals('SELECT "a""b"') == 'SELECT ""'
+    masked_backtick = strip_comments_and_literals("SELECT `unterminated")
+    assert masked_backtick.startswith("SELECT `")
+    assert set(masked_backtick[len("SELECT `") :]) == {"_"}
 
 
 def test_top_level_keywords_skips_nested_parentheses():
@@ -242,6 +267,7 @@ def test_multi_table_delete_resolves_targets_before_from():
         "t1",
     )
     assert target_table("DELETE FROM t WHERE id = 1") == (None, "t")
+    assert _multi_table_delete_target("DELETE t1") is None
 
 
 def test_target_table_reads_through_a_with_prelude():
@@ -286,6 +312,7 @@ def test_with_prelude_nested_and_quoted_names_do_not_confuse_the_verb_scan():
         "app_db",
         "t",
     )
+    assert _with_main_verb_offset("WITH x AS (SELECT 1) UPDATE app_db.t SET a=1") == 21
 
 
 def test_multi_table_delete_reads_through_a_with_prelude():
@@ -337,6 +364,23 @@ def test_referenced_schemas_ignores_column_dots():
     assert referenced_schemas("SELECT * FROM app_db.t WHERE t.col = 1") == {"app_db"}
     assert referenced_schemas("SELECT u.name FROM users u JOIN orders o ON 1") == set()
     assert referenced_schemas("SELECT * FROM a.t, b.u") == {"a", "b"}
+    assert referenced_schemas("SELECT * FROM , a.t") == {"a"}
+
+
+def test_dotted_name_and_alias_scans_handle_whitespace_and_missing_alias():
+    assert _read_dotted_name("schema . table", 0)[:2] == ("schema", "table")
+    assert _read_dotted_name("schema.", 0)[:2] == (None, "schema")
+    assert _skip_table_alias("t AS alias", 1) > 1
+    assert _skip_table_alias("t", 1) == 1
+
+
+def test_with_verb_scan_returns_none_when_the_masked_text_hides_it(monkeypatch):
+    import lagun.api.sql_analysis as analysis
+
+    monkeypatch.setattr(analysis, "_mask_strings_and_comments", lambda _sql: "")
+    assert (
+        _with_main_verb_offset("WITH x AS (SELECT 1) UPDATE app_db.t SET a=1") is None
+    )
 
 
 def test_referenced_schemas_covers_use_and_routines():

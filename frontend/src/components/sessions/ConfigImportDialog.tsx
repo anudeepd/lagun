@@ -33,7 +33,6 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
   }
 
   const handleImport = async () => {
-    if (loading) return
     if (!file) { setError('Select a file first.'); return }
     if (!passphrase) { setError('Enter the passphrase used during export.'); return }
     setLoading(true)

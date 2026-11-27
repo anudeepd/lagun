@@ -189,12 +189,12 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
    * even though retention keeps them for years.
    */
   const loadOlderActivity = async () => {
-    if (activityCursor === null || loadingOlderActivity) return
+    const cursor = activityCursor!
     const epoch = activityEpochRef.current
     setLoadingOlderActivity(true)
     setError(null)
     try {
-      const page = await api.getAdminActivity(filtersRef.current, activityCursor)
+      const page = await api.getAdminActivity(filtersRef.current, cursor)
       // Only an actual filter change makes this page stale, tracked by an
       // epoch bumped in applyActivityFilters (not by filterKey equality,
       // which a round trip back to the same filters could pass spuriously —
@@ -219,11 +219,11 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
    * scale past a deployment's worth of users.
    */
   const loadOlderConnections = async () => {
-    if (connectionCursor === null || loadingOlderConnections) return
+    const cursor = connectionCursor!
     setLoadingOlderConnections(true)
     setError(null)
     try {
-      const page = await api.getAdminConnections(connectionCursor)
+      const page = await api.getAdminConnections(cursor)
       connectionPageCountRef.current += 1
       setConnections(previous => {
         const previousIds = new Set(previous.map(item => item.id))
@@ -382,7 +382,7 @@ export default function AdminConsole({ onClose }: { onClose?: () => void }) {
         message={confirmRemoveUser ? `Remove ${confirmRemoveUser} from future Lagun logins and revoke their active sessions.` : ''}
         confirmLabel="Remove user"
         danger
-        onConfirm={() => { if (confirmRemoveUser) void removeUser(confirmRemoveUser) }}
+        onConfirm={() => { void removeUser(confirmRemoveUser!) }}
         onClose={() => setConfirmRemoveUser(null)}
       />
     </m.div>
@@ -941,9 +941,7 @@ function RetentionPanel({ retention, days, onDaysChange, onRefresh, onPurge }: {
             min={minimumAge}
             max={3650}
             value={draftDays}
-            onChange={event => {
-              if (/^\d*$/.test(event.target.value)) setDraftDays(event.target.value)
-            }}
+            onChange={event => setDraftDays(event.target.value)}
             onBlur={commitDays}
             onKeyDown={event => {
               if (event.key === 'Enter') {

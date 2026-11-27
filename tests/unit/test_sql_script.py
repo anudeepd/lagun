@@ -2,7 +2,13 @@ from io import StringIO
 
 import pytest
 
-from lagun.api.sql_script import SqlScriptError, iter_sql_statements, split_sql_script
+from lagun.api.sql_script import (
+    SqlScriptError,
+    _directive_line,
+    _has_sql_content,
+    iter_sql_statements,
+    split_sql_script,
+)
 
 
 def test_split_quoted_semicolons_and_backticks():
@@ -40,6 +46,16 @@ def test_parser_reports_unterminated_comment():
         list(iter_sql_statements(StringIO("SELECT 1 /* unterminated")))
 
 
+def test_content_probe_treats_an_unclosed_block_comment_as_executable():
+    assert _has_sql_content("/*") is True
+    assert _has_sql_content("  -- only a comment") is False
+
+
+def test_delimiter_directive_requires_a_terminator():
+    with pytest.raises(SqlScriptError, match="non-whitespace terminator"):
+        _directive_line("DELIMITER   ")
+
+
 class ChunkedText:
     def __init__(self, *chunks: str):
         self._chunks = iter(chunks)
@@ -58,6 +74,16 @@ def test_parser_preserves_comment_markers_across_reads():
     )
     assert [item.sql for item in statements] == [
         "SELECT 1 /* hidden; still; */ SELECT 2"
+    ]
+
+
+def test_multiline_block_comment_preserves_statement_line_numbers():
+    statements = list(
+        iter_sql_statements(StringIO("SELECT 1 /* first\nsecond */;\nSELECT 2;"))
+    )
+    assert [(item.sql, item.line) for item in statements] == [
+        ("SELECT 1 /* first\nsecond */", 1),
+        ("SELECT 2", 3),
     ]
 
 

@@ -39,6 +39,10 @@ def test_unrestricted_connections_skip_the_check_entirely():
     assert _out_of_scope_schema("USE other_db", None) is None
 
 
+def test_introspection_schemas_are_exempt_from_import_scope():
+    assert _out_of_scope_schema("SELECT * FROM information_schema.t", SCOPE) is None
+
+
 def test_use_inside_a_string_is_not_a_use_statement():
     assert _out_of_scope_schema("INSERT INTO t VALUES ('USE other_db')", SCOPE) is None
 
@@ -73,6 +77,7 @@ def test_dynamic_sql_is_refused_for_a_scoped_connection():
     ):
         assert _uninspectable_statement(statement, SCOPE) is True, statement
     assert _uninspectable_statement("INSERT INTO t VALUES (1)", SCOPE) is False
+    assert _uninspectable_statement("SELECT 1", SCOPE) is False
     # An unrestricted connection keeps accepting dumps as before.
     assert _uninspectable_statement("PREPARE s FROM @sql", None) is False
 

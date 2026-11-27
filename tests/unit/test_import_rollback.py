@@ -7,21 +7,35 @@ COMMITting the partial batch while the response reported `rows_imported=0`.
 
 import io
 
+from fastapi import HTTPException
+
 from lagun.api import import_data
 from lagun.api.import_data import _batch_insert
 
 
 class _Cursor:
-    def __init__(self, *, fail_rollback: bool):
+    def __init__(
+        self,
+        *,
+        fail_rollback: bool = False,
+        fail_autocommit: bool = False,
+        fail_use: bool = False,
+    ):
         self.fail_rollback = fail_rollback
+        self.fail_autocommit = fail_autocommit
+        self.fail_use = fail_use
         self.statements: list[str] = []
         self.rowcount = 0
         self.import_warnings: list[str] = []
 
     async def execute(self, sql, args=None):
         self.statements.append(sql)
+        if sql.startswith("USE") and self.fail_use:
+            raise HTTPException(400, "denied by fake server")
         if sql.startswith("ROLLBACK") and self.fail_rollback:
             raise RuntimeError("rollback failed")
+        if sql == "SET autocommit=1" and self.fail_autocommit:
+            raise RuntimeError("reset failed")
         return None
 
     async def executemany(self, sql, params):
@@ -96,3 +110,40 @@ async def test_a_successful_rollback_restores_the_session_default():
     assert conn.closed is False
     assert "ROLLBACK" in cursor.statements
     assert "SET autocommit=1" in cursor.statements
+
+
+async def test_an_http_failure_inside_the_transaction_is_reported_and_rolled_back():
+    cursor = _Cursor(fail_use=True)
+    conn = _Conn(cursor)
+
+    result = await _batch_insert(_Pool(conn), _config(), io.BytesIO(b"a,b\n1,2\n"))
+
+    assert result.ok is False
+    assert result.error == "denied by fake server"
+    assert "ROLLBACK" in cursor.statements
+
+
+async def test_a_failed_autocommit_reset_discards_the_connection():
+    cursor = _Cursor(fail_autocommit=True)
+    conn = _Conn(cursor)
+
+    result = await _batch_insert(_Pool(conn), _config(), io.BytesIO(b"a,b\n1,2\n"))
+
+    assert result.ok is False
+    assert conn.closed is True
+
+
+async def test_a_close_failure_does_not_mask_the_rolled_back_result():
+    class BadCloseConnection(_Conn):
+        def close(self):
+            raise OSError("socket already gone")
+
+    cursor = _Cursor(fail_rollback=True)
+    result = await _batch_insert(
+        _Pool(BadCloseConnection(cursor)),
+        _config(),
+        io.BytesIO(b"a,b\n1,2\n"),
+    )
+
+    assert result.ok is False
+    assert result.rows_imported == 0

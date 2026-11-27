@@ -33,6 +33,10 @@ export default defineConfig([
     rules: {
       '@typescript-eslint/no-empty-object-type': 'off',
       '@typescript-eslint/no-unused-expressions': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
       // Bundle-size invariant that used to live in a source-text test: the app
       // must use the lightweight `m` components from `motion/react-m` under the
       // `LazyMotion strict` boundary in main.tsx, never the full `motion`
@@ -51,6 +55,14 @@ export default defineConfig([
         'warn',
         { allowConstantExport: true },
       ],
+    },
+  },
+  {
+    files: ['src/__tests__/**/*.{ts,tsx}', 'src/**/*.test.{ts,tsx}'],
+    rules: {
+      // Mocks and AG Grid internals cross several nominal library types in
+      // tests; production code keeps the strict rule.
+      '@typescript-eslint/no-explicit-any': 'off',
     },
   },
 ])

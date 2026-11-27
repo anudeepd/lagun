@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { chromium, expect, firefox, test } from '@playwright/test'
+import { chromium, firefox } from '@playwright/test'
+import { expect, test } from '../coverage-fixture'
 
 // ldapgate renders this page in production. Render the same template with Jinja
 // so its real markup, CSS and script run in each browser.

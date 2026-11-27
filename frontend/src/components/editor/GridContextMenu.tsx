@@ -23,8 +23,7 @@ export default function GridContextMenu({ x, y, items, onClose }: Props) {
 
   // Clamp position to viewport after first render.
   useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
+    const el = ref.current!
     setPos(clampToViewport(x, y, el))
   }, [x, y])
 

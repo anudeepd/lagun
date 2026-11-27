@@ -60,6 +60,7 @@ export default defineConfig({
   build: {
     outDir: '../lagun/static',
     emptyOutDir: true,
+    sourcemap: process.env.LAGUN_COVERAGE === '1' ? 'hidden' : false,
     // Vite's default. The four bundled fonts (3 × JetBrains Mono + the Inter
     // subset, ~330 KB) must be emitted as content-hashed `.woff2` files rather
     // than base64-inlined: at 200_000 they landed inside `index.css`, adding

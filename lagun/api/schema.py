@@ -19,13 +19,6 @@ router = APIRouter(tags=["schema"])
 _MAX_BATCH_SCHEMAS = 256
 
 
-async def _get_pool_or_404(session_id: str):
-    s = await get_session(session_id)
-    if not s:
-        raise HTTPException(404, "Session not found")
-    return await get_pool(session_id)
-
-
 @router.get("/sessions/{session_id}/databases")
 async def list_databases(session_id: str) -> list[str]:
     session = await get_session(session_id)

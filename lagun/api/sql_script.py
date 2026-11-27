@@ -72,8 +72,6 @@ def _directive_line(line: str) -> str | None:
     if not match:
         raise SqlScriptError("DELIMITER directive requires a non-whitespace terminator")
     token = match.group(1)
-    if any(ch.isspace() for ch in token):
-        raise SqlScriptError("DELIMITER directive requires a non-whitespace terminator")
     return token
 
 
