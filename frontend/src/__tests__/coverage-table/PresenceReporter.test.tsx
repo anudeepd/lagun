@@ -230,16 +230,18 @@ describe('PresenceReporter behavior', () => {
   })
 
   it('does not send when a captured timeout fires after unmount', async () => {
-    const scheduled: Array<() => void> = []
-    vi.spyOn(window, 'setTimeout').mockImplementation(((callback: TimerHandler) => {
-      if (typeof callback === 'function') scheduled.push(callback as () => void)
+    const scheduled: Array<{ callback: () => void; delay: number }> = []
+    vi.spyOn(window, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number) => {
+      if (typeof callback === 'function') {
+        scheduled.push({ callback: callback as () => void, delay: delay ?? 0 })
+      }
       return 1
     }) as typeof window.setTimeout)
     vi.spyOn(window, 'clearTimeout').mockImplementation(() => undefined)
 
     const view = render(<PresenceReporter />)
     view.unmount()
-    act(() => scheduled[0]?.())
+    act(() => scheduled.find(entry => entry.delay === 150)?.callback())
 
     expect(reportPresence).not.toHaveBeenCalled()
   })
