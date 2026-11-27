@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+import lagun.api.admin as admin_api
 from lagun.api import presence
 from lagun.api.admin import _MIN_RETENTION_DAYS
 from lagun.db import session_store
@@ -435,3 +436,105 @@ async def test_presence_enforces_the_documented_field_limits(ldap_admin, http_cl
 
     assert label_response.status_code == 422
     assert tabs_response.status_code == 422
+
+
+async def test_admin_users_includes_presence_counts(ldap_admin, http_client):
+    admin = {"x-test-user": "alice"}
+    await http_client.post(
+        "/api/v1/presence",
+        json={
+            "client_id": "client-1",
+            "tabs": [
+                {"id": "tab-1", "type": "query", "label": "q", "session_id": "s"},
+                {"id": "tab-2", "type": "query", "label": "q2", "session_id": "s"},
+            ],
+        },
+        headers=admin,
+    )
+
+    response = await http_client.get("/api/v1/admin/users", headers=admin)
+    row = response.json()["items"][0]
+    assert row["active_clients"] == 1
+    assert row["active_tabs"] == 2
+
+
+async def test_admin_user_mutations_reject_invalid_names_and_policy_failures(
+    ldap_admin, http_client, monkeypatch
+):
+    admin = {"x-test-user": "alice"}
+    invalid = await http_client.post(
+        "/api/v1/admin/users", json={"username": "  "}, headers=admin
+    )
+    assert invalid.status_code == 400
+
+    def fail(_self, *_args):
+        raise admin_api.PolicyConflict("changed")
+
+    monkeypatch.setattr(admin_api.LDAPPolicyStore, "snapshot", fail)
+    conflict = await http_client.get("/api/v1/admin/users", headers=admin)
+    assert conflict.status_code == 409
+
+    monkeypatch.setattr(admin_api.LDAPPolicyStore, "mutate", fail)
+    add_conflict = await http_client.post(
+        "/api/v1/admin/users", json={"username": "bob"}, headers=admin
+    )
+    remove_conflict = await http_client.delete(
+        "/api/v1/admin/users/bob", headers=admin
+    )
+    assert add_conflict.status_code == 409
+    assert remove_conflict.status_code == 409
+
+
+async def test_admin_user_mutations_restore_and_revoke_sessions(
+    ldap_admin, http_client, monkeypatch
+):
+    admin = {"x-test-user": "alice"}
+
+    class Manager:
+        restored: list[str] = []
+        revoked: list[str] = []
+
+        def restore_user_sessions(self, username):
+            self.restored.append(username)
+
+        def revoke_user_sessions(self, username):
+            self.revoked.append(username)
+            return 3
+
+    manager = Manager()
+    monkeypatch.setattr(admin_api, "live_session_manager", lambda: manager)
+
+    added = await http_client.post(
+        "/api/v1/admin/users", json={"username": "bob"}, headers=admin
+    )
+    removed = await http_client.delete("/api/v1/admin/users/bob", headers=admin)
+    assert added.status_code == 200
+    assert removed.status_code == 200
+    assert manager.restored == ["bob"]
+    assert manager.revoked == ["bob"]
+    assert removed.json()["revoked_sessions"] == 3
+
+
+async def test_admin_queries_returns_the_live_query_inventory(
+    ldap_admin, http_client, monkeypatch
+):
+    async def active_queries():
+        return [
+            {
+                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "username": "alice",
+                "sql": "SELECT 1",
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "elapsed_ms": 1.0,
+                "state": "running",
+                "kind": "query",
+            }
+        ]
+
+    monkeypatch.setattr(admin_api.query, "list_active_queries", active_queries)
+    response = await http_client.get(
+        "/api/v1/admin/queries", headers={"x-test-user": "alice"}
+    )
+    assert response.status_code == 200
+    assert response.json()["items"][0]["execution_id"] == "exec-1"
