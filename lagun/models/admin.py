@@ -14,7 +14,7 @@ class AdminConnection(BaseModel):
     host: str
     port: int
     username: str
-    default_db: Optional[str]
+    default_db: Optional[str] = None
     query_limit: int
     ssl_enabled: bool
     created_at: str
@@ -23,8 +23,8 @@ class AdminConnection(BaseModel):
     managed_selected_databases: list[str]
     managed: bool
     is_default: bool
-    owner_username: Optional[str]
-    config_key: Optional[str]
+    owner_username: Optional[str] = None
+    config_key: Optional[str] = None
     shared_user_count: int
 
 
@@ -43,7 +43,7 @@ class AdminOverview(BaseModel):
 class AdminConnectionsResponse(BaseModel):
     items: list[AdminConnection]
     # Keyset cursor for the next page; null when this page is the last one.
-    next_cursor: Optional[str]
+    next_cursor: Optional[str] = None
     observed_at: int
 
 
@@ -85,8 +85,8 @@ class AuditEvent(BaseModel):
     username: str
     method: str
     path: str
-    session_id: Optional[str]
-    details: Optional[str]
+    session_id: Optional[str] = None
+    details: Optional[str] = None
     status_code: int
     duration_ms: float
 
@@ -94,7 +94,7 @@ class AuditEvent(BaseModel):
 class AdminActivityResponse(BaseModel):
     items: list[AuditEvent]
     # Keyset cursor for the next, older page; null when this page is the last.
-    next_before_id: Optional[int]
+    next_before_id: Optional[int] = None
     observed_at: int
 
 
@@ -104,8 +104,8 @@ class ActiveQuery(BaseModel):
     session_id: str
     execution_id: str
     username: str
-    database: Optional[str]
-    tab_id: Optional[str]
+    database: Optional[str] = None
+    tab_id: Optional[str] = None
     sql: str
     started_at: str
     elapsed_ms: float

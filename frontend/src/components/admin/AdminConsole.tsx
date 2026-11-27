@@ -564,7 +564,7 @@ function ConnectionRow({ connection }: { connection: AdminConnection }) {
 function LiveWorkspacePanel({ presence, queries, connections }: { presence: AdminPresence[]; queries: AdminQuery[]; connections: AdminConnection[] }) {
   const [selectedUser, setSelectedUser] = useState<string | null>(null)
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set())
-  const liveUsers = Array.from(new Set([...presence.map(item => item.username), ...queries.map(item => item.username)])).sort()
+  const liveUsers = Array.from(new Set([...presence.map(item => item.username), ...queries.map(item => item.username)])).sort((a, b) => a.localeCompare(b))
   const activeUser = selectedUser && liveUsers.includes(selectedUser) ? selectedUser : liveUsers[0] || null
   const selectedPresence = activeUser ? presence.filter(item => item.username === activeUser) : []
   const selectedQueries = activeUser ? queries.filter(item => item.username === activeUser) : []
@@ -898,7 +898,7 @@ function ActivityEventRow({ event }: { event: AdminActivityEvent }) {
         {event.details && (
           <details className="mt-2 min-w-0">
             <summary className="cursor-pointer text-[11px] text-brand-300 hover:text-brand-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400">Show raw request body ({event.details.length} characters)</summary>
-            <pre tabIndex={0} aria-label={`Raw request body for ${event.method} ${event.path}`} className="mt-2 max-h-[60vh] w-full min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[10px] leading-relaxed text-slate-400 [overflow-wrap:anywhere] lg:max-h-[32rem]">{event.details}</pre>
+            <pre aria-label={`Raw request body for ${event.method} ${event.path}`} className="mt-2 max-h-[60vh] w-full min-w-0 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded bg-surface-950 p-2 font-mono text-[10px] leading-relaxed text-slate-400 [overflow-wrap:anywhere] lg:max-h-[32rem]">{event.details}</pre>
           </details>
         )}
       </td>

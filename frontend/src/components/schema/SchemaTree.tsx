@@ -111,7 +111,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
         : 'Filter tables...'
 
   useEffect(() => {
-    loadDatabases(sessionId)
+    void loadDatabases(sessionId)
   }, [sessionId, loadDatabases])
 
   // Reset bookmark view when switching sessions
@@ -157,7 +157,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     if (q) {
       const scopeDbs = expandedDbs.size > 0 ? dbs.filter(db => expandedDbs.has(db)) : dbs
       setExpandedDbs(prev => new Set([...prev, ...scopeDbs]))
-      loadTablesBatch(sessionId, scopeDbs)
+      void loadTablesBatch(sessionId, scopeDbs)
     }
   }
 
@@ -183,7 +183,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
     if (next) {
       const bookmarkedDbs = dbs.filter(db => [...bookmarks].some(b => b.startsWith(`${db}/`)))
       setExpandedDbs(prev => new Set([...prev, ...bookmarkedDbs]))
-      loadTablesBatch(sessionId, bookmarkedDbs)
+      void loadTablesBatch(sessionId, bookmarkedDbs)
     }
   }
 
@@ -223,6 +223,14 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
 
   const closeMenu = () => setContextMenu(null)
   useMenuKeyboard(menuRef, closeMenu, Boolean(contextMenu))
+  useEffect(() => {
+    if (!contextMenu) return
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setContextMenu(null)
+    }
+    document.addEventListener('click', closeOnOutsideClick)
+    return () => document.removeEventListener('click', closeOnOutsideClick)
+  }, [contextMenu])
   // Keep the menu inside the viewport: opened near the bottom of the sidebar it
   // used to hang off-screen, hiding Truncate/Drop.
   const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
@@ -267,7 +275,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
   const noBookmarks = showBookmarksOnly && bookmarks.size === 0
 
   return (
-    <div className="flex h-full min-h-0 flex-col py-1" onClick={closeMenu}>
+    <div className="flex h-full min-h-0 flex-col py-1">
       <div className="flex flex-shrink-0 items-center justify-between px-3 py-1">
         <Label as="span">Databases</Label>
         <div className="flex items-center gap-1">
@@ -449,6 +457,7 @@ export default function SchemaTree({ sessionId, selectedDatabases }: Props) {
         <m.div
           ref={menuRef}
           role="menu"
+          tabIndex={-1}
           aria-label="Schema actions"
           initial={{ opacity: 0, scale: 0.9, y: -motionDistance.surface }}
           animate={{ opacity: 1, scale: 1, y: 0, transition: surfaceTransition }}

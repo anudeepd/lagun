@@ -1,6 +1,7 @@
 """Config export/import: backup and restore saved connection sessions."""
 
 import base64
+import asyncio
 import json
 import os
 import secrets
@@ -64,6 +65,24 @@ class ImportResult(BaseModel):
     skipped: int
 
 
+def _write_export_tempfile(payload: dict) -> str:
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, encoding="utf-8"
+    )
+    try:
+        json.dump(payload, tmp, indent=2, ensure_ascii=False)
+        tmp.flush()
+        tmp.close()
+        return tmp.name
+    except Exception:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 @router.post(
     "/config/export",
     response_model=SessionExport,
@@ -108,16 +127,7 @@ async def export_config(req: ExportRequest):
         "sessions": sessions_out,
     }
 
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json", delete=False, encoding="utf-8"
-    )
-    try:
-        json.dump(payload, tmp, indent=2, ensure_ascii=False)
-        tmp.flush()
-        tmp.close()
-    except Exception:
-        os.unlink(tmp.name)
-        raise
+    tmp_path = await asyncio.to_thread(_write_export_tempfile, payload)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     filename = f"lagun_sessions_{ts}.json"
@@ -129,11 +139,11 @@ async def export_config(req: ExportRequest):
             pass
 
     return FileResponse(
-        tmp.name,
+        tmp_path,
         media_type="application/json",
         filename=filename,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-        background=BackgroundTask(_cleanup_tmp, tmp.name),
+        background=BackgroundTask(_cleanup_tmp, tmp_path),
     )
 
 

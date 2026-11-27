@@ -5,7 +5,7 @@ export interface ParsedQueryError {
 }
 
 const MYSQL_TUPLE_ERROR = /^\((\d+),\s*(["'])([\s\S]*)\2\)$/
-const MYSQL_PREFIX_ERROR = /^(?:ERROR\s+)?(\d+)(?:\s+\([^)]*\))?:\s*([\s\S]+)$/i
+const MYSQL_PREFIX_ERROR = /^(?:ERROR[ \t]+)?(\d+)(?:[ \t]+\([^)]*\))?:[ \t]*([\s\S]+)$/i
 
 export function parseQueryError(error: string): ParsedQueryError {
   const raw = error.trim()

@@ -9,7 +9,7 @@ class ColumnInfo(BaseModel):
     data_type: str
     column_type: str
     is_nullable: bool
-    column_default: Optional[str]
+    column_default: Optional[str] = None
     is_primary_key: bool
     is_auto_increment: bool
     extra: str
@@ -33,9 +33,9 @@ class RowKeyInfo(BaseModel):
 class TableInfo(BaseModel):
     name: str
     table_type: str  # BASE TABLE | VIEW
-    engine: Optional[str]
-    row_count: Optional[int]
-    data_length: Optional[int]
+    engine: Optional[str] = None
+    row_count: Optional[int] = None
+    data_length: Optional[int] = None
     comment: str
 
 
@@ -104,8 +104,8 @@ class AnalyzeTableResult(BaseModel):
 
     ok: bool
     analyzed: bool
-    row_count: Optional[int]
-    data_length: Optional[int]
+    row_count: Optional[int] = None
+    data_length: Optional[int] = None
 
 
 class CreateSqlResult(BaseModel):

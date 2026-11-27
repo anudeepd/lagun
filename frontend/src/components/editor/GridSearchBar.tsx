@@ -33,11 +33,8 @@ export default function GridSearchBar({
 
   useEffect(() => {
     if (!open) return
-    const frame = requestAnimationFrame(() => {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    })
-    return () => cancelAnimationFrame(frame)
+    inputRef.current?.focus()
+    inputRef.current?.select()
   }, [open])
 
   if (!open) return null
@@ -67,7 +64,6 @@ export default function GridSearchBar({
         type="search"
         role="searchbox"
         aria-label="Find in grid"
-        autoFocus
         autoComplete="off"
         spellCheck={false}
         value={query}

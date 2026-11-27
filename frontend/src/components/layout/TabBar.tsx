@@ -45,11 +45,20 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const tabListRef = useRef<HTMLDivElement>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
   const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 })
   useLayoutEffect(() => {
     if (!contextMenu || !contextMenuRef.current) return
     setMenuPosition(clampToViewport(contextMenu.x, contextMenu.y, contextMenuRef.current))
   }, [contextMenu])
+  useEffect(() => {
+    if (renameTargetId === null) return
+    const frame = window.requestAnimationFrame(() => {
+      renameInputRef.current?.focus()
+      renameInputRef.current?.select()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [renameTargetId])
   useLayoutEffect(() => {
     const tab = activeTabId ? tabButtonRefs.current[activeTabId]?.parentElement : null
     const tabList = tabListRef.current
@@ -346,6 +355,7 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
         <Label className="flex flex-col gap-1">
           Tab name
           <input
+            ref={renameInputRef}
             value={renameValue}
             onChange={event => setRenameValue(event.target.value)}
             onKeyDown={event => {
@@ -354,7 +364,6 @@ export default function TabBar({ onOpenAdmin }: { onOpenAdmin?: () => void } = {
               if (isImeComposing(event)) return
               saveRename()
             }}
-            autoFocus
             className="rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 text-sm font-normal normal-case text-slate-100 focus:outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-400"
           />
         </Label>

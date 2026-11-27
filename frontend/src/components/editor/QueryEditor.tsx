@@ -50,21 +50,52 @@ export const extractScopeInfo = (sql: string): { realTables: string[], subqueryA
 
   // Subquery aliases: (SELECT ...) [AS] alias
   const subqueryAliases = new Map<string, string[]>()
-  for (const m of sql.matchAll(/\(\s*SELECT\s+([\s\S]+?)\)\s*(?:AS\s+)?(\w+)/gi)) {
-    const selectList = m[1]
-    const alias = m[2]
+  for (const m of sql.matchAll(/\(\s*SELECT\b/gi)) {
+    const openIndex = m.index ?? 0
+    const closeIndex = matchingParenIndex(sql, openIndex)
+    if (closeIndex === null) continue
+    const selectList = sql.slice(openIndex + m[0].length, closeIndex)
+    const aliasMatch = sql.slice(closeIndex + 1).match(/^\s*(?:AS\s+)?(\w+)/i)
+    if (!aliasMatch) continue
+    const alias = aliasMatch[1]
     // Parse SELECT list: each comma-separated item, take the last identifier (bare name or AS alias)
     const cols = selectList.split(',').map(item => {
-      item = item.trim()
-      const asMatch = item.match(/\bAS\s+(\w+)\s*$/i)
+      const trimmed = item.trim()
+      const asMatch = trimmed.match(/\bAS\s+(\w+)$/i)
       if (asMatch) return asMatch[1]
-      const lastIdent = item.match(/(\w+)\s*$/)
+      const lastIdent = trimmed.match(/(\w+)$/)
       return lastIdent ? lastIdent[1] : null
     }).filter((c): c is string => c !== null && !SQL_KW.has(c.toUpperCase()))
     if (cols.length) subqueryAliases.set(alias, cols)
   }
 
   return { realTables: [...new Set(realTables)], subqueryAliases }
+}
+
+function matchingParenIndex(sql: string, openIndex: number): number | null {
+  let depth = 0
+  let quote: "'" | '"' | '`' | null = null
+  for (let index = openIndex; index < sql.length; index++) {
+    const char = sql[index]
+    if (quote) {
+      if (char === '\\' && quote !== '`') {
+        index++
+      } else if (char === quote) {
+        if (quote !== '`' && sql[index + 1] === quote) index++
+        else quote = null
+      }
+      continue
+    }
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char
+    } else if (char === '(') {
+      depth++
+    } else if (char === ')') {
+      depth--
+      if (depth === 0) return index
+    }
+  }
+  return null
 }
 
 // Check if the cursor is in a context that expects column names (not table names)

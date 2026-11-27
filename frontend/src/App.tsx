@@ -30,8 +30,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    loadServerConfig()
-    loadSessions().then(() => {
+    void loadServerConfig()
+    void loadSessions().then(() => {
       const sessionIds = new Set(useSessionStore.getState().sessions.map(s => s.id))
 
       // Clear activeSessionId if the session was deleted

@@ -109,6 +109,7 @@ export default function SessionList() {
                 <div
                   ref={menuRefFor(s.id)}
                   role="menu"
+                  tabIndex={-1}
                   aria-label={`Actions for ${s.name}`}
                   className="absolute right-0 top-6 z-popover w-40 rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-lg"
                   onMouseLeave={() => setMenuId(null)}

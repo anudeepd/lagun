@@ -92,7 +92,7 @@ export default function ConfigExportDialog({ open, onClose }: Props) {
             if (e.key !== 'Enter' || loading) return
             e.preventDefault()
             if (isImeComposing(e)) return
-            handleExport()
+            void handleExport()
           }}
         />
         {error && <p role="alert" className="text-xs text-red-400">{error}</p>}

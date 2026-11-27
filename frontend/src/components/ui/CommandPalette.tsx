@@ -16,6 +16,7 @@ export default function CommandPalette({ open, onClose }: Props) {
   const [activeIndex, setActiveIndex] = useState(0)
   const listboxId = useId()
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const inputRef = useRef<HTMLInputElement>(null)
   const activeSessionId = useSessionStore(s => s.activeSessionId)
   const sessions = useSessionStore(s => s.sessions)
   const tabs = useTabStore(s => s.tabs)
@@ -24,6 +25,14 @@ export default function CommandPalette({ open, onClose }: Props) {
   const setActiveTab = useTabStore(s => s.setActiveTab)
 
   useEffect(() => { if (open) setQuery('') }, [open])
+  useEffect(() => {
+    if (!open) return
+    const frame = window.requestAnimationFrame(() => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open])
 
   const commands = useMemo(() => {
     const items: Array<{ id: string; label: string; detail: string; icon: typeof FileCode2; run: () => void }> = []
@@ -102,7 +111,7 @@ export default function CommandPalette({ open, onClose }: Props) {
         <label className="flex items-center gap-2 rounded-md border border-surface-700 bg-surface-800 px-3 py-2 text-slate-400 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-400">
           <Search size={16} />
           <input
-            autoFocus
+            ref={inputRef}
             role="combobox"
             aria-label="Search commands and tabs"
             aria-expanded={open}

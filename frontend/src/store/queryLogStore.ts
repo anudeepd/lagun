@@ -1,15 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-
-function uuid() {
-  const cryptoApi = globalThis.crypto
-  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID()
-  if (cryptoApi?.getRandomValues) {
-    return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c =>
-      (+c ^ cryptoApi.getRandomValues!(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16))
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
+import { randomId } from '../utils/randomId'
 
 export interface QueryLogEntry {
   id: string
@@ -44,7 +35,7 @@ export const useQueryLogStore = create<QueryLogState>()(
 
       addEntry: (entry) => set(s => ({
         entries: [
-          { ...entry, id: uuid(), timestamp: new Date().toISOString() },
+          { ...entry, id: randomId(), timestamp: new Date().toISOString() },
           ...s.entries,
         ].slice(0, 100),
       })),

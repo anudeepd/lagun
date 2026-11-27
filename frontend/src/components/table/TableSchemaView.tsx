@@ -112,7 +112,7 @@ export default function TableSchemaView({ sessionId, database, table, refreshTri
       setTableInfo(tables.find(t => t.name === table) ?? null)
       // bust store cache so autocomplete and sidebar see fresh data
       invalidateTable(sessionId, database, table)
-      loadColumns(sessionId, database, table)
+      void loadColumns(sessionId, database, table)
     } catch (error) {
       // Every session/db/table change and every unmount aborts the previous
       // request; those are expected. A real failure used to leave the tab

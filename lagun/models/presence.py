@@ -22,7 +22,7 @@ class PresenceEntry(BaseModel):
 
     username: str
     client_id: str
-    active_tab_id: Optional[str]
+    active_tab_id: Optional[str] = None
     # Tab payloads verbatim: exactly the keys the client reported.
     tabs: list[dict[str, Any]] = Field(default_factory=list)
     seen_at: str
