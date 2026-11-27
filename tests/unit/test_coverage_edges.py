@@ -1,5 +1,4 @@
 import datetime as dt
-from types import SimpleNamespace
 
 import pytest
 
@@ -135,9 +134,34 @@ def test_crypto_uses_a_keyring_value_without_writing(monkeypatch):
     assert writes == []
 
 
+def test_crypto_creates_and_stores_a_keyring_value(monkeypatch):
+    import sys
+    import types
+
+    fake = types.ModuleType("keyring")
+    writes = []
+    fake.get_password = lambda service, account: None
+    fake.set_password = lambda service, account, value: writes.append(value)
+    monkeypatch.setitem(sys.modules, "keyring", fake)
+
+    key = crypto._get_or_create_master_key()
+    assert len(key) > 20
+    assert writes == [key.decode()]
+
+
 def test_crypto_harden_permissions_ignores_stat_errors():
     class BrokenPath:
         def stat(self):
             raise OSError("gone")
 
     crypto._harden_permissions(BrokenPath())
+
+
+def test_crypto_leaves_an_already_private_key_file_untouched(tmp_path):
+    key = tmp_path / "master.key"
+    key.write_bytes(b"secret")
+    key.chmod(0o600)
+
+    crypto._harden_permissions(key)
+
+    assert key.stat().st_mode & 0o777 == 0o600

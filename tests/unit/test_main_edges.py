@@ -1,3 +1,6 @@
+import builtins
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
@@ -6,11 +9,13 @@ from starlette.responses import JSONResponse
 
 import lagun.main as main_module
 from lagun.api import import_data
+from lagun.db.crypto import CredentialDecryptError
 
 
 def request(method="GET", path="/api/v1/sessions", headers=None, query=""):
     raw_headers = [
-        (name.lower().encode(), value.encode()) for name, value in (headers or {}).items()
+        (name.lower().encode(), value.encode())
+        for name, value in (headers or {}).items()
     ]
     return Request(
         {
@@ -35,9 +40,7 @@ def test_audit_helpers_cover_unparseable_truncated_and_secret_values(monkeypatch
     assert main_module._audit_details(b"") is None
     assert main_module._audit_details(b"not json").startswith("[unpa")
     assert "[truncated]" in main_module._audit_details(b"not json")
-    redacted = main_module._audit_details(
-        b'{"password":"secret","auth":{"token":"x"}}'
-    )
+    redacted = main_module._audit_details(b'{"password":"secret","auth":{"token":"x"}}')
     assert "secret" not in redacted
     assert "[truncated]" in redacted
     assert main_module._audit_target(request(query="a=1&b=2")) == (
@@ -48,15 +51,22 @@ def test_audit_helpers_cover_unparseable_truncated_and_secret_values(monkeypatch
 def test_should_audit_request_and_safe_request_id():
     assert main_module._should_audit_request(request(), None) is False
     assert main_module._should_audit_request(request(), "alice") is True
-    assert main_module._should_audit_request(
-        request(method="GET", path="/api/v1/admin/users"), "alice"
-    ) is False
-    assert main_module._should_audit_request(
-        request(method="POST", path="/api/v1/admin/users"), "alice"
-    ) is True
-    assert main_module._should_audit_request(
-        request(path="/api/v1/presence"), "alice"
-    ) is False
+    assert (
+        main_module._should_audit_request(
+            request(method="GET", path="/api/v1/admin/users"), "alice"
+        )
+        is False
+    )
+    assert (
+        main_module._should_audit_request(
+            request(method="POST", path="/api/v1/admin/users"), "alice"
+        )
+        is True
+    )
+    assert (
+        main_module._should_audit_request(request(path="/api/v1/presence"), "alice")
+        is False
+    )
     assert main_module._safe_request_id("abc-123") == "abc-123"
     assert len(main_module._safe_request_id("bad value")) == 12
 
@@ -176,6 +186,14 @@ def test_ldap_static_and_body_limit_helpers_cover_missing_proxy():
     assert proxy.session_cookie_name == "lagun_session"
     assert "/healthz" in proxy.static_paths
 
+    custom = SimpleNamespace(
+        session_cookie_name="custom_session",
+        static_paths=["/favicon.svg"],
+    )
+    main_module._ensure_ldapgate_static_paths(SimpleNamespace(proxy=custom))
+    assert custom.session_cookie_name == "custom_session"
+    assert custom.static_paths.count("/favicon.svg") == 1
+
 
 @pytest.mark.asyncio
 async def test_audited_request_blocks_config_and_inaccessible_sessions(monkeypatch):
@@ -191,9 +209,7 @@ async def test_audited_request_blocks_config_and_inaccessible_sessions(monkeypat
     )
     assert blocked.status_code == 403
 
-    monkeypatch.setattr(
-        main_module.session_store, "can_access_session", _access_denied
-    )
+    monkeypatch.setattr(main_module.session_store, "can_access_session", _access_denied)
     invisible = await main_module._handle_audited_request(
         request(path="/api/v1/sessions/abc"),
         call,
@@ -233,3 +249,210 @@ def test_redaction_handles_plain_values_and_secret_keys():
     assert main_module._redact_secrets("plain") == "plain"
     assert main_module._is_secret_key("client_secret") is True
     assert main_module._cap_details("short") == "short"
+
+
+def test_logging_configuration_includes_stream_and_file_handlers(monkeypatch, tmp_path):
+    configured = []
+    monkeypatch.setenv("LAGUN_LOG_FILE", str(tmp_path / "lagun.log"))
+    monkeypatch.setattr(
+        main_module.logging, "basicConfig", lambda **kwargs: configured.append(kwargs)
+    )
+
+    main_module._configure_logging()
+
+    assert configured[0]["level"] == main_module.logging.INFO
+    assert len(configured[0]["handlers"]) == 2
+
+
+def test_dev_cors_is_added_only_when_enabled(monkeypatch):
+    calls = []
+
+    class App:
+        def add_middleware(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    monkeypatch.setenv("LAGUN_DEV", "1")
+    main_module._configure_dev_cors(App())
+
+    assert calls[0][0] == (main_module.CORSMiddleware,)
+    assert calls[0][1]["allow_credentials"] is True
+
+
+def test_ldap_configuration_installs_the_gate_and_live_policy(monkeypatch):
+    proxy = SimpleNamespace(
+        session_cookie_name="ldapgate_session",
+        static_paths=[],
+        idle_timeout=17,
+        max_body_size=import_data.IMPORT_MAX_FILE_BYTES + 1024 * 1024,
+    )
+    config = SimpleNamespace(proxy=proxy)
+    manager = object()
+    configured = []
+    package = types.ModuleType("ldapgate")
+    config_module = types.ModuleType("ldapgate.config")
+    middleware_module = types.ModuleType("ldapgate.middleware")
+    config_module.load_config = lambda _path: config
+    middleware_module.add_ldap_auth = lambda app, loaded, template_path: manager
+    package.config = config_module
+    package.middleware = middleware_module
+    monkeypatch.setitem(sys.modules, "ldapgate", package)
+    monkeypatch.setitem(sys.modules, "ldapgate.config", config_module)
+    monkeypatch.setitem(sys.modules, "ldapgate.middleware", middleware_module)
+    monkeypatch.setenv("LAGUN_LDAP_CONFIG", "ldap.yaml")
+    monkeypatch.setattr(
+        main_module,
+        "configure_live_policy",
+        lambda loaded, session_manager: configured.append((loaded, session_manager)),
+    )
+
+    main_module._configure_ldap(object())
+
+    assert configured == [(config, manager)]
+    assert main_module.os.environ["LAGUN_LDAP_IDLE_TIMEOUT"] == "17"
+    assert proxy.session_cookie_name == "lagun_session"
+
+
+def test_ldap_configuration_explains_a_missing_dependency(monkeypatch):
+    real_import = builtins.__import__
+
+    def reject_ldapgate(name, *args, **kwargs):
+        if name == "ldapgate" or name.startswith("ldapgate."):
+            raise ImportError("not installed")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setenv("LAGUN_LDAP_CONFIG", "ldap.yaml")
+    monkeypatch.setattr(builtins, "__import__", reject_ldapgate)
+    with pytest.raises(RuntimeError, match="ldapgate is not installed"):
+        main_module._configure_ldap(object())
+
+
+@pytest.mark.asyncio
+async def test_audited_request_survives_unreadable_and_unwritable_audit_data(
+    monkeypatch,
+):
+    async def unreadable(_self):
+        raise OSError("body unavailable")
+
+    async def call(_request):
+        return JSONResponse({"ok": True})
+
+    recorded = []
+
+    async def record(**kwargs):
+        recorded.append(kwargs)
+
+    audit_request = request(
+        method="POST",
+        path="/api/v1/sessions/one/query",
+        headers={"content-type": "application/json"},
+    )
+    audit_request.state.user = "alice"
+    monkeypatch.setattr(Request, "body", unreadable)
+    monkeypatch.setattr(main_module.session_store, "record_audit_event", record)
+    monkeypatch.setattr(
+        main_module.session_store,
+        "can_access_session",
+        lambda _session_id, _username: _true(),
+    )
+
+    response = await main_module._handle_audited_request(audit_request, call, "alice")
+
+    assert response.status_code == 200
+    assert recorded[0]["details"] is None
+
+    async def fail_record(**_kwargs):
+        raise OSError("audit store unavailable")
+
+    monkeypatch.setattr(main_module.session_store, "record_audit_event", fail_record)
+    response = await main_module._handle_audited_request(
+        request(method="POST", path="/api/v1/sessions"),
+        call,
+        "alice",
+    )
+    assert response.status_code == 200
+
+
+async def _true():
+    return True
+
+
+@pytest.mark.asyncio
+async def test_credential_and_liveness_handlers():
+    response = await main_module.credential_decrypt_error_handler(
+        request(), CredentialDecryptError("key changed")
+    )
+    assert response.status_code == 500
+    assert await main_module.healthz() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_static_asset_routes_serve_existing_files(monkeypatch, tmp_path):
+    (tmp_path / "favicon.svg").write_text("<svg />", encoding="utf-8")
+    (tmp_path / "THIRD_PARTY_LICENSES.txt").write_text("licenses", encoding="utf-8")
+    monkeypatch.setattr(main_module, "_static", tmp_path)
+
+    favicon = await main_module.favicon()
+    licenses = await main_module.third_party_licenses()
+
+    assert favicon.status_code == 200
+    assert licenses.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_static_routes_return_404_when_a_file_is_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr(main_module, "_static", tmp_path)
+
+    assert (await main_module.favicon()).status_code == 404
+    assert (await main_module.third_party_licenses()).status_code == 404
+    assert (await main_module.spa_fallback("settings")) == {
+        "detail": "Frontend not built. Run: cd frontend && npm run build"
+    }
+
+    (tmp_path / "index.html").write_text("<html />", encoding="utf-8")
+    response = await main_module.spa_fallback("settings")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == main_module.APP_SHELL_CACHE_CONTROL
+
+
+def test_static_asset_mount_runs_only_for_a_populated_assets_directory(tmp_path):
+    calls = []
+
+    class App:
+        def mount(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    main_module._mount_static_assets(App(), None)
+    main_module._mount_static_assets(App(), tmp_path)
+    (tmp_path / "assets").mkdir()
+    main_module._mount_static_assets(App(), tmp_path)
+
+    assert len(calls) == 1
+    assert calls[0][0][0] == "/assets"
+    assert calls[0][1]["name"] == "assets"
+
+
+def test_static_dir_falls_back_to_package_resources(tmp_path):
+    empty_package_dir = tmp_path / "empty"
+    empty_package_dir.mkdir()
+    resources = tmp_path / "resources"
+    resources.mkdir()
+    (resources / "index.html").write_text("<html />", encoding="utf-8")
+    traversable = SimpleNamespace(joinpath=lambda _name: resources)
+
+    assert (
+        main_module._static_dir(empty_package_dir, lambda _name: traversable)
+        == resources
+    )
+
+    empty_resources = tmp_path / "empty-resources"
+    empty_resources.mkdir()
+    empty_traversable = SimpleNamespace(joinpath=lambda _name: empty_resources)
+    assert (
+        main_module._static_dir(empty_package_dir, lambda _name: empty_traversable)
+        is None
+    )
+
+    def unavailable(_name):
+        raise OSError("resources unavailable")
+
+    assert main_module._static_dir(empty_package_dir, unavailable) is None

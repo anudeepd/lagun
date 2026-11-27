@@ -101,3 +101,23 @@ async def test_sync_connections_config_inserts_and_updates_managed_rows(
     assert updated.name == "Shared Renamed"
     assert updated.managed_selected_databases == ["app"]
     assert updated.selected_databases == ["app"]
+
+
+@pytest.mark.asyncio
+async def test_sync_connections_config_treats_null_allowlist_as_empty(
+    tmp_path, monkeypatch, caplog
+):
+    monkeypatch.setenv("TEST_SHARED_PASSWORD", "secret")
+    path = write_config(
+        tmp_path,
+        "connections:\n"
+        "  - id: shared-null\n"
+        "    password_env: TEST_SHARED_PASSWORD\n"
+        "    allowed_users: [alice]\n"
+        "    selected_databases: null\n",
+    )
+    await session_store.init_db()
+    await connections_config.sync_connections_config(str(path))
+    sessions = await session_store.list_sessions_for_user("alice")
+    assert sessions[0].managed_selected_databases == []
+    assert "no selected_databases allowlist" in caplog.text

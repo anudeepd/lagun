@@ -41,16 +41,22 @@ from lagun.ldap_policy import configure_live_policy
 
 _log = logging.getLogger("lagun")
 
-if _log_file := os.getenv("LAGUN_LOG_FILE"):
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
-        datefmt="%H:%M:%S",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(_log_file, encoding="utf-8"),
-        ],
-    )
+
+def _configure_logging() -> None:
+    log_file = os.getenv("LAGUN_LOG_FILE")
+    if log_file:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)-8s %(name)s %(message)s",
+            datefmt="%H:%M:%S",
+            handlers=[
+                logging.StreamHandler(),
+                logging.FileHandler(log_file, encoding="utf-8"),
+            ],
+        )
+
+
+_configure_logging()
 
 
 # Readiness flag: set once startup has finished, cleared when shutdown starts.
@@ -419,15 +425,18 @@ async def add_app_security_headers(request: Request, call_next):
     return response
 
 
-# CORS for development (Vite dev server)
-if os.getenv("LAGUN_DEV"):
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+def _configure_dev_cors(target_app: FastAPI) -> None:
+    if os.getenv("LAGUN_DEV"):
+        target_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+
+_configure_dev_cors(app)
 
 # API routers
 prefix = "/api/v1"
@@ -457,14 +466,16 @@ async def readyz():
 
 
 # Static file serving (pre-built frontend)
-def _static_dir() -> Path | None:
+def _static_dir(
+    package_static: Path | None = None, resource_files=files
+) -> Path | None:
     # Prefer the on-disk package directory (works for editable + wheel installs)
-    pkg_dir = Path(__file__).parent / "static"
+    pkg_dir = package_static or Path(__file__).parent / "static"
     if pkg_dir.exists() and any(pkg_dir.iterdir()):
         return pkg_dir
     # Fallback: importlib.resources for non-standard layouts
     try:
-        pkg_static = files("lagun").joinpath("static")
+        pkg_static = resource_files("lagun").joinpath("static")
         # Use the Traversable path directly (avoids as_file context manager
         # whose temporary backing can be cleaned up after the with-block)
         candidate = Path(str(pkg_static))
@@ -476,8 +487,16 @@ def _static_dir() -> Path | None:
 
 
 _static = _static_dir()
-if _static and (_static / "assets").exists():
-    app.mount("/assets", StaticFiles(directory=_static / "assets"), name="assets")
+
+
+def _mount_static_assets(target_app: FastAPI, static_dir: Path | None) -> None:
+    if static_dir and (static_dir / "assets").exists():
+        target_app.mount(
+            "/assets", StaticFiles(directory=static_dir / "assets"), name="assets"
+        )
+
+
+_mount_static_assets(app, _static)
 
 
 @app.get("/favicon.svg", include_in_schema=False)
@@ -553,8 +572,10 @@ def _warn_if_ldap_body_limit_blocks_imports(config) -> None:
         )
 
 
-_ldap_config_path = os.getenv("LAGUN_LDAP_CONFIG")
-if _ldap_config_path:
+def _configure_ldap(target_app: FastAPI) -> None:
+    ldap_config_path = os.getenv("LAGUN_LDAP_CONFIG")
+    if not ldap_config_path:
+        return
     try:
         from ldapgate.config import load_config
         from ldapgate.middleware import add_ldap_auth
@@ -564,16 +585,19 @@ if _ldap_config_path:
             "Install it with: pip install 'lagun[ldap]' or pip install -e /path/to/ldapgate"
         ) from e
     _login_template = Path(__file__).parent / "templates" / "login.html"
-    _ldap_config = load_config(_ldap_config_path)
+    _ldap_config = load_config(ldap_config_path)
     _ensure_ldapgate_static_paths(_ldap_config)
     _warn_if_ldap_body_limit_blocks_imports(_ldap_config)
     os.environ["LAGUN_LDAP_IDLE_TIMEOUT"] = str(
         getattr(getattr(_ldap_config, "proxy", None), "idle_timeout", 0) or 0
     )
     _ldap_session_manager = add_ldap_auth(
-        app, _ldap_config, template_path=str(_login_template)
+        target_app, _ldap_config, template_path=str(_login_template)
     )
     configure_live_policy(_ldap_config, _ldap_session_manager)
+
+
+_configure_ldap(app)
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
