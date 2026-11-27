@@ -63,8 +63,7 @@ export const extractScopeInfo = (sql: string): { realTables: string[], subqueryA
       const trimmed = item.trim()
       const asMatch = trimmed.match(/\bAS\s+(\w+)$/i)
       if (asMatch) return asMatch[1]
-      const lastIdent = trimmed.match(/(\w+)$/)
-      return lastIdent ? lastIdent[1] : null
+      return trailingIdentifier(trimmed)
     }).filter((c): c is string => c !== null && !SQL_KW.has(c.toUpperCase()))
     if (cols.length) subqueryAliases.set(alias, cols)
   }
@@ -96,6 +95,23 @@ function matchingParenIndex(sql: string, openIndex: number): number | null {
     }
   }
   return null
+}
+
+function trailingIdentifier(value: string): string | null {
+  let end = value.length
+  while (end > 0 && value.charCodeAt(end - 1) <= 32) end--
+  let start = end
+  while (start > 0) {
+    const code = value.charCodeAt(start - 1)
+    const isWord = (code >= 48 && code <= 57)
+      || (code >= 65 && code <= 90)
+      || (code >= 97 && code <= 122)
+      || code === 95
+      || code === 36
+    if (!isWord) break
+    start--
+  }
+  return start < end ? value.slice(start, end) : null
 }
 
 // Check if the cursor is in a context that expects column names (not table names)
