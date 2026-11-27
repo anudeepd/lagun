@@ -191,6 +191,36 @@ async def test_get_pool_rejects_missing_sessions_and_uses_ssl(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_pool_returns_a_pool_created_while_waiting_for_the_session_lock():
+    pool_module._get_lock()
+    pool_module._pools.clear()
+
+    class RacingLock:
+        def __init__(self):
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def __aenter__(self):
+            self.entered.set()
+            await self.release.wait()
+
+        async def __aexit__(self, *_args):
+            return False
+
+    racing_lock = RacingLock()
+    pool_module._pool_locks["racing"] = racing_lock
+    waiting = asyncio.create_task(pool_module.get_pool("racing"))
+    await racing_lock.entered.wait()
+
+    existing = object()
+    pool_module._pools["racing"] = existing
+    racing_lock.release.set()
+
+    assert await waiting is existing
+    pool_module._pool_locks.pop("racing", None)
+
+
+@pytest.mark.asyncio
 async def test_reaper_removes_idle_pools_and_start_is_idempotent(monkeypatch):
     pool = pool_module.ManagedPool(Raw(), session())
 
