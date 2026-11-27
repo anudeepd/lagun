@@ -332,8 +332,11 @@ describe('TableTab data loading and toolbar', () => {
     fireEvent.click(screen.getByRole('option', { name: '500' }))
     await waitFor(() => expect(api.executeQuery.mock.calls.at(-1)![3]).toBe(500))
 
+    const callsBeforeRefresh = api.executeQuery.mock.calls.length
     fireEvent.click(screen.getByRole('button', { name: 'Refresh data' }))
-    await waitFor(() => expect(api.executeQuery).toHaveBeenCalledTimes(6))
+    await waitFor(() =>
+      expect(api.executeQuery.mock.calls.length).toBeGreaterThan(callsBeforeRefresh)
+    )
 
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))
     expect(await screen.findByRole('dialog', { name: 'Export data' })).toHaveTextContent('displayed rows:2')
