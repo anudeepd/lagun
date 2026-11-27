@@ -99,8 +99,12 @@ const clusters = [
     include: [
       "src/components/table/**",
       "src/components/admin/**",
-      "src/components/presence/**",
     ],
+  },
+  {
+    name: "presence",
+    tests: ["src/__tests__/coverage-table/PresenceReporter.test.tsx"],
+    include: ["src/components/presence/**"],
   },
   {
     name: "core",
