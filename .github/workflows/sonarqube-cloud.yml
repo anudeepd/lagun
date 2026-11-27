@@ -35,7 +35,7 @@ jobs:
       - name: Run Python tests with coverage
         run: |
           mkdir -p coverage
-          uv run --frozen pytest --cov=lagun --cov-branch --cov-report=term-missing --cov-report=xml:coverage/python-coverage.xml -q
+          uv run --frozen pytest --cov=lagun --cov-branch --cov-report=term-missing --cov-report=xml:coverage/python-coverage.xml --cov-fail-under=100 -q
 
       - uses: actions/setup-node@v4
         with:
@@ -49,10 +49,8 @@ jobs:
       - name: Run frontend tests with coverage
         run: npm --prefix frontend run test:coverage
 
-      - name: Normalize frontend coverage paths for SonarQube Cloud
-        run: node scripts/normalize-sonar-lcov.mjs
-
       - name: Authenticate to SonarQube Cloud
+        id: sonar-auth
         uses: SonarSource/sonarqube-auth-action@v1
 
       - name: SonarQube Cloud scan
@@ -61,3 +59,13 @@ jobs:
           skipSignatureVerification: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for SonarQube Cloud quality gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        with:
+          pollingTimeoutSec: 600
+
+      - name: Require 100% coverage and zero duplication
+        run: node scripts/check-sonar-quality.mjs
+        env:
+          SONAR_PROJECT_KEY: ${{ steps.sonar-auth.outputs.project-key }}
