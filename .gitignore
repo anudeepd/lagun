@@ -43,6 +43,9 @@ lagun.log
 /test-results/
 .pytest_cache/
 .ruff_cache/
+coverage/
+.coverage
+.scannerwork/
 
 # Local only
 think

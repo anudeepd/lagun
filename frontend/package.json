@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage --coverage.provider=v8 --coverage.include='src/**' --coverage.exclude='src/**/*.test.*' --coverage.exclude='src/__tests__/**' --coverage.reporter=lcov --coverage.reporter=text --coverage.reportsDirectory=../coverage/frontend",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
   },
@@ -52,6 +53,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/coverage-v8": "^4.1.11",
     "@vitest/ui": "^4.1.11",
     "autoprefixer": "^10.4.20",
     "eslint": "^10.8.0",
