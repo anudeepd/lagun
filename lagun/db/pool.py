@@ -310,10 +310,11 @@ async def close_pool(session_id: str) -> None:
             )
         except asyncio.TimeoutError:
             pool.terminate()
+            safe_session_id = str(session_id).replace("\r", "\\r").replace("\n", "\\n")
             _log.warning(
                 "Force-terminated database pool for session %s after the %.1fs "
                 "close grace period",
-                session_id,
+                safe_session_id,
                 _POOL_CLOSE_GRACE_SECONDS,
             )
 

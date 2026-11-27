@@ -288,6 +288,67 @@ async def _next_batch(cur, fetch_size: int, deadline: float, exported: int):
     )
 
 
+async def _execute_export(
+    cur, statement: str, params, deadline: float, exported: int
+) -> None:
+    await _await_with_remaining_deadline(
+        cur.execute(statement, params), deadline, _export_timeout(exported)
+    )
+
+
+async def _fetch_export_rows(cur, deadline: float, exported: int):
+    return await _await_with_remaining_deadline(
+        cur.fetchall(), deadline, _export_timeout(exported)
+    )
+
+
+@asynccontextmanager
+async def _open_export_cursor(pool, req, deadline: float, exported: int):
+    async with _export_lease(pool) as conn:
+        async with conn.cursor(aiomysql.SSCursor) as cur:
+            await _execute_export(
+                cur,
+                f"USE {quote_ident(req.database)}",
+                None,
+                deadline,
+                exported,
+            )
+            yield cur
+
+
+def _export_columns(cur, ai_cols: set[str] = frozenset()):
+    cols = [d[0] for d in cur.description]
+    cols_filtered = [c for c in cols if c not in ai_cols]
+    keep = _kept_indexes(cols, cols_filtered)
+    cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
+    return cols, cols_filtered, keep, cols_sql
+
+
+async def _select_export_columns(
+    cur,
+    select_sql: str,
+    deadline: float,
+    exported: int,
+    ai_cols: set[str] = frozenset(),
+):
+    await _execute_export(cur, select_sql, None, deadline, exported)
+    return _export_columns(cur, ai_cols)
+
+
+async def _primary_key_columns(cur, req, deadline: float, exported: int):
+    await _execute_export(
+        cur,
+        """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+           WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
+           AND CONSTRAINT_NAME='PRIMARY'
+           ORDER BY ORDINAL_POSITION""",
+        (req.database, req.table),
+        deadline,
+        exported,
+    )
+    return [row[0] for row in await _fetch_export_rows(cur, deadline, exported)]
+
+
 def _where_value(column: str, value) -> str:
     if value is None:
         return f"{quote_ident(column)} IS NULL"
@@ -522,109 +583,110 @@ async def _export_response(session_id: str, req: ExportRequest):
         # pooled connection, and a second lease from the same per-session pool
         # never succeeds when LAGUN_DB_POOL_MAX_SIZE=1.
         ai_cols = await _apply_ai_filter(pool, req, deadline, exported)
-        async with _export_lease(pool) as conn:
-            async with conn.cursor(aiomysql.SSCursor) as cur:
-                await _await_with_remaining_deadline(
-                    cur.execute(f"USE {quote_ident(req.database)}"),
-                    deadline,
-                    _export_timeout(exported),
-                )
-                await _await_with_remaining_deadline(
-                    cur.execute(select_sql), deadline, _export_timeout(exported)
-                )
-                cols = [d[0] for d in cur.description]
-                cols_filtered = [c for c in cols if c not in ai_cols]
-                # Values are taken by position: two result columns can share a
-                # name (a self-join) and a name-keyed dict kept only the last.
-                keep = _kept_indexes(cols, cols_filtered)
-                cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
-                tbl = req.table or "exported_data"
-                tbl_q = _target_table_sql(req.database, tbl, req.include_schema)
-                tbl_label = _target_table_label(req.database, tbl, req.include_schema)
+        async with _open_export_cursor(pool, req, deadline, exported) as cur:
+            cols, cols_filtered, keep, cols_sql = await _select_export_columns(
+                cur, select_sql, deadline, exported, ai_cols
+            )
+            # Values are taken by position: two result columns can share a
+            # name (a self-join) and a name-keyed dict kept only the last.
+            tbl = req.table or "exported_data"
+            tbl_q = _target_table_sql(req.database, tbl, req.include_schema)
+            tbl_label = _target_table_label(req.database, tbl, req.include_schema)
 
-                yield f"-- Lagun export: {tbl_label}\n"
-                yield f"-- Format: INSERT ({req.insert_mode})\n\n"
-                buf = io.StringIO()
-                if req.insert_mode == "single":
-                    while True:
-                        rows = await _next_batch(cur, fetch_size, deadline, exported)
-                        if not rows:
-                            break
-                        exported += len(rows)
-                        for row in rows:
-                            vals = ", ".join(escape_value(row[i]) for i in keep)
-                            buf.write(
-                                f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
-                            )
-                            if buf.tell() >= _EXPORT_STREAM_CHARS:
-                                yield buf.getvalue()
-                                buf.seek(0)
-                                buf.truncate(0)
-                else:
-                    rows_in_statement = 0
-                    while True:
-                        rows = await _next_batch(cur, fetch_size, deadline, exported)
-                        if not rows:
-                            break
-                        exported += len(rows)
-                        for row in rows:
-                            if rows_in_statement == 0:
-                                buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
-                            else:
-                                buf.write(",\n")
-                            vals = ", ".join(escape_value(row[i]) for i in keep)
-                            buf.write(f"({vals})")
-                            rows_in_statement += 1
-                            if rows_in_statement == req.batch_size:
-                                buf.write(";\n")
-                                rows_in_statement = 0
-                            if buf.tell() >= _EXPORT_STREAM_CHARS:
-                                yield buf.getvalue()
-                                buf.seek(0)
-                                buf.truncate(0)
-                    if rows_in_statement:
-                        buf.write(";\n")
-                if buf.tell():
-                    yield buf.getvalue()
-                yield _completion_marker(exported)
+            yield f"-- Lagun export: {tbl_label}\n"
+            yield f"-- Format: INSERT ({req.insert_mode})\n\n"
+            buf = io.StringIO()
+            if req.insert_mode == "single":
+                while True:
+                    rows = await _next_batch(cur, fetch_size, deadline, exported)
+                    if not rows:
+                        break
+                    exported += len(rows)
+                    for row in rows:
+                        vals = ", ".join(escape_value(row[i]) for i in keep)
+                        buf.write(
+                            f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                        )
+                        if buf.tell() >= _EXPORT_STREAM_CHARS:
+                            yield buf.getvalue()
+                            buf.seek(0)
+                            buf.truncate(0)
+            else:
+                rows_in_statement = 0
+                while True:
+                    rows = await _next_batch(cur, fetch_size, deadline, exported)
+                    if not rows:
+                        break
+                    exported += len(rows)
+                    for row in rows:
+                        if rows_in_statement == 0:
+                            buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
+                        else:
+                            buf.write(",\n")
+                        vals = ", ".join(escape_value(row[i]) for i in keep)
+                        buf.write(f"({vals})")
+                        rows_in_statement += 1
+                        if rows_in_statement == req.batch_size:
+                            buf.write(";\n")
+                            rows_in_statement = 0
+                        if buf.tell() >= _EXPORT_STREAM_CHARS:
+                            yield buf.getvalue()
+                            buf.seek(0)
+                            buf.truncate(0)
+                if rows_in_statement:
+                    buf.write(";\n")
+            if buf.tell():
+                yield buf.getvalue()
+            yield _completion_marker(exported)
 
     async def _generate_delete():
         exported = 0
         deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
-        async with _export_lease(pool) as conn:
-            async with conn.cursor(aiomysql.SSCursor) as cur:
-                await _await_with_remaining_deadline(
-                    cur.execute(f"USE {quote_ident(req.database)}"),
-                    deadline,
-                    _export_timeout(exported),
-                )
-                await _await_with_remaining_deadline(
-                    cur.execute(
-                        """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
-                           WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
-                           AND CONSTRAINT_NAME='PRIMARY'
-                           ORDER BY ORDINAL_POSITION""",
-                        (req.database, req.table),
-                    ),
-                    deadline,
-                    _export_timeout(exported),
-                )
-                pk_cols = [
-                    row[0]
-                    for row in await _await_with_remaining_deadline(
-                        cur.fetchall(), deadline, _export_timeout(exported)
-                    )
-                ]
-                tbl_q = _target_table_sql(
-                    req.database, req.table or "tbl", req.include_schema
-                )
-                await _await_with_remaining_deadline(
-                    cur.execute(select_sql), deadline, _export_timeout(exported)
-                )
-                cols = [d[0] for d in cur.description]
-                where_cols = pk_cols if pk_cols else cols
+        async with _open_export_cursor(pool, req, deadline, exported) as cur:
+            pk_cols = await _primary_key_columns(cur, req, deadline, exported)
+            tbl_q = _target_table_sql(
+                req.database, req.table or "tbl", req.include_schema
+            )
+            cols, _, _, _ = await _select_export_columns(
+                cur, select_sql, deadline, exported
+            )
+            where_cols = pk_cols if pk_cols else cols
 
-                yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE\n\n"
+            yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE\n\n"
+            buf = io.StringIO()
+            while True:
+                rows = await _next_batch(cur, fetch_size, deadline, exported)
+                if not rows:
+                    break
+                exported += len(rows)
+                for row in rows:
+                    where = _where_clause(cols, row, where_cols)
+                    buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
+                    if buf.tell() >= _EXPORT_STREAM_CHARS:
+                        yield buf.getvalue()
+                        buf.seek(0)
+                        buf.truncate(0)
+            if buf.tell():
+                yield buf.getvalue()
+            yield _completion_marker(exported)
+
+    async def _generate_delete_insert():
+        exported = 0
+        deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
+        # Resolved before the streaming lease: see _generate_insert.
+        ai_cols = await _apply_ai_filter(pool, req, deadline, exported)
+        async with _open_export_cursor(pool, req, deadline, exported) as cur:
+            pk_cols = await _primary_key_columns(cur, req, deadline, exported)
+            tbl_q = _target_table_sql(
+                req.database, req.table or "tbl", req.include_schema
+            )
+            cols, _, keep, cols_sql = await _select_export_columns(
+                cur, select_sql, deadline, exported, ai_cols
+            )
+            where_cols = pk_cols if pk_cols else cols
+
+            yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE+INSERT ({req.insert_mode})\n\n"
+            if req.insert_mode == "single":
                 buf = io.StringIO()
                 while True:
                     rows = await _next_batch(cur, fetch_size, deadline, exported)
@@ -633,94 +695,34 @@ async def _export_response(session_id: str, req: ExportRequest):
                     exported += len(rows)
                     for row in rows:
                         where = _where_clause(cols, row, where_cols)
+                        vals = ", ".join(escape_value(row[i]) for i in keep)
                         buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
+                        buf.write(
+                            f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
+                        )
                         if buf.tell() >= _EXPORT_STREAM_CHARS:
                             yield buf.getvalue()
                             buf.seek(0)
                             buf.truncate(0)
                 if buf.tell():
                     yield buf.getvalue()
-                yield _completion_marker(exported)
-
-    async def _generate_delete_insert():
-        exported = 0
-        deadline = time.monotonic() + _EXPORT_MAX_RUNTIME_SECONDS
-        # Resolved before the streaming lease: see _generate_insert.
-        ai_cols = await _apply_ai_filter(pool, req, deadline, exported)
-        async with _export_lease(pool) as conn:
-            async with conn.cursor(aiomysql.SSCursor) as cur:
-                await _await_with_remaining_deadline(
-                    cur.execute(f"USE {quote_ident(req.database)}"),
-                    deadline,
-                    _export_timeout(exported),
-                )
-                await _await_with_remaining_deadline(
-                    cur.execute(
-                        """SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
-                           WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s
-                           AND CONSTRAINT_NAME='PRIMARY'
-                           ORDER BY ORDINAL_POSITION""",
-                        (req.database, req.table),
-                    ),
-                    deadline,
-                    _export_timeout(exported),
-                )
-                pk_cols = [
-                    row[0]
-                    for row in await _await_with_remaining_deadline(
-                        cur.fetchall(), deadline, _export_timeout(exported)
-                    )
-                ]
-                tbl_q = _target_table_sql(
-                    req.database, req.table or "tbl", req.include_schema
-                )
-                await _await_with_remaining_deadline(
-                    cur.execute(select_sql), deadline, _export_timeout(exported)
-                )
-                cols = [d[0] for d in cur.description]
-                cols_filtered = [c for c in cols if c not in ai_cols]
-                keep = _kept_indexes(cols, cols_filtered)
-                cols_sql = ", ".join(quote_ident(c) for c in cols_filtered)
-                where_cols = pk_cols if pk_cols else cols
-
-                yield f"-- Lagun export: {_target_table_label(req.database, req.table or 'tbl', req.include_schema)}\n-- Format: DELETE+INSERT ({req.insert_mode})\n\n"
-                if req.insert_mode == "single":
+            else:
+                while True:
+                    rows = await _next_batch(cur, fetch_size, deadline, exported)
+                    if not rows:
+                        break
+                    exported += len(rows)
                     buf = io.StringIO()
-                    while True:
-                        rows = await _next_batch(cur, fetch_size, deadline, exported)
-                        if not rows:
-                            break
-                        exported += len(rows)
-                        for row in rows:
-                            where = _where_clause(cols, row, where_cols)
-                            vals = ", ".join(escape_value(row[i]) for i in keep)
-                            buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
-                            buf.write(
-                                f"INSERT INTO {tbl_q} ({cols_sql}) VALUES ({vals});\n"
-                            )
-                            if buf.tell() >= _EXPORT_STREAM_CHARS:
-                                yield buf.getvalue()
-                                buf.seek(0)
-                                buf.truncate(0)
-                    if buf.tell():
-                        yield buf.getvalue()
-                else:
-                    while True:
-                        rows = await _next_batch(cur, fetch_size, deadline, exported)
-                        if not rows:
-                            break
-                        exported += len(rows)
-                        buf = io.StringIO()
-                        for row in rows:
-                            where = _where_clause(cols, row, where_cols)
-                            buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
-                        buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
-                        for index, row in enumerate(rows):
-                            vals = ", ".join(escape_value(row[i]) for i in keep)
-                            buf.write((",\n" if index else "") + f"({vals})")
-                        buf.write(";\n")
-                        yield buf.getvalue()
-                yield _completion_marker(exported)
+                    for row in rows:
+                        where = _where_clause(cols, row, where_cols)
+                        buf.write(f"DELETE FROM {tbl_q} WHERE {where};\n")
+                    buf.write(f"INSERT INTO {tbl_q} ({cols_sql}) VALUES\n")
+                    for index, row in enumerate(rows):
+                        vals = ", ".join(escape_value(row[i]) for i in keep)
+                        buf.write((",\n" if index else "") + f"({vals})")
+                    buf.write(";\n")
+                    yield buf.getvalue()
+            yield _completion_marker(exported)
 
     async def _generate_csv():
         exported = 0
@@ -747,38 +749,29 @@ async def _export_response(session_id: str, req: ExportRequest):
 
         # Resolved before the streaming lease: see _generate_insert.
         ai_cols = await _apply_ai_filter(pool, req, deadline, exported)
-        async with _export_lease(pool) as conn:
-            async with conn.cursor(aiomysql.SSCursor) as cur:
-                await _await_with_remaining_deadline(
-                    cur.execute(f"USE {quote_ident(req.database)}"),
-                    deadline,
-                    _export_timeout(exported),
-                )
-                await _await_with_remaining_deadline(
-                    cur.execute(select_sql), deadline, _export_timeout(exported)
-                )
-                cols = [d[0] for d in cur.description]
-                cols_filtered = [c for c in cols if c not in ai_cols]
-                keep = _kept_indexes(cols, cols_filtered)
-                if req.csv_encoding == "utf-8-sig":
-                    yield b"\xef\xbb\xbf"
+        async with _open_export_cursor(pool, req, deadline, exported) as cur:
+            _, cols_filtered, keep, _ = await _select_export_columns(
+                cur, select_sql, deadline, exported, ai_cols
+            )
+            if req.csv_encoding == "utf-8-sig":
+                yield b"\xef\xbb\xbf"
 
-                buf = io.StringIO()
-                writer = csv.writer(buf, **writer_kwargs)
-                writer.writerow(_csv_neutralize(c) for c in cols_filtered)
-                while True:
-                    rows = await _next_batch(cur, fetch_size, deadline, exported)
-                    if not rows:
-                        break
-                    exported += len(rows)
-                    for row in rows:
-                        writer.writerow(_csv_cell(row[i]) for i in keep)
-                        if buf.tell() >= _EXPORT_STREAM_CHARS:
-                            yield buf.getvalue().encode(byte_enc, errors=enc_errors)
-                            buf.seek(0)
-                            buf.truncate(0)
-                if buf.tell():
-                    yield buf.getvalue().encode(byte_enc, errors=enc_errors)
+            buf = io.StringIO()
+            writer = csv.writer(buf, **writer_kwargs)
+            writer.writerow(_csv_neutralize(c) for c in cols_filtered)
+            while True:
+                rows = await _next_batch(cur, fetch_size, deadline, exported)
+                if not rows:
+                    break
+                exported += len(rows)
+                for row in rows:
+                    writer.writerow(_csv_cell(row[i]) for i in keep)
+                    if buf.tell() >= _EXPORT_STREAM_CHARS:
+                        yield buf.getvalue().encode(byte_enc, errors=enc_errors)
+                        buf.seek(0)
+                        buf.truncate(0)
+            if buf.tell():
+                yield buf.getvalue().encode(byte_enc, errors=enc_errors)
 
     db = _safe_filename_part(req.database)
     tbl = _safe_filename_part(req.table or "query")

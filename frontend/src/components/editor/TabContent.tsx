@@ -40,6 +40,7 @@ import useEverOpened from '../../hooks/useEverOpened'
 import TransitionVeil from '../ui/TransitionVeil'
 import Label from '../ui/Label'
 import { isImeComposing } from '../../utils/keyboard'
+import { randomId } from '../../utils/randomId'
 
 const TableSchemaView = lazy(() => import('../table/TableSchemaView'))
 const loadResultGrid = () => import('./ResultGrid')
@@ -555,7 +556,7 @@ function QueryTab({ tab }: Props) {
     : filteredDbs
 
   useEffect(() => {
-    loadDatabases(tab.sessionId)
+    void loadDatabases(tab.sessionId)
   }, [tab.sessionId, loadDatabases])
 
   // Synchronously extract alias→table map from the current SQL (no debounce needed — pure string parsing)
@@ -603,7 +604,7 @@ function QueryTab({ tab }: Props) {
   // Load table names eagerly (single fast request)
   useEffect(() => {
     if (!tab.database) return
-    loadTables(tab.sessionId, tab.database)
+    void loadTables(tab.sessionId, tab.database)
   }, [tab.sessionId, tab.database, loadTables])
 
   // Load user-defined functions for autocomplete
@@ -622,7 +623,7 @@ function QueryTab({ tab }: Props) {
       const commaMatches = [...sql.matchAll(/,\s*`?(?:\w+`?\.`?)?(\w+)`?\s*(?:AS\s+\w+\s*)?(?:,|WHERE\b|SET\b|ON\b|LIMIT\b|$)/gi)]
       const names = [...new Set([...fromJoinMatches, ...commaMatches].map(m => m[1]))]
       for (const name of names) {
-        loadColumns(tab.sessionId, tab.database!, name)
+        void loadColumns(tab.sessionId, tab.database!, name)
       }
     }, 300)
     return () => clearTimeout(timer)
@@ -658,6 +659,18 @@ function QueryTab({ tab }: Props) {
     document.addEventListener('mouseup', onUp)
   }
 
+  const handleEditorDividerKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+    e.preventDefault()
+    const containerHeight = editorContainerRef.current?.clientHeight ?? 600
+    const maxHeight = Math.floor(containerHeight * MAX_EDITOR_HEIGHT_FRACTION)
+    const delta = e.key === 'ArrowUp' ? -16 : 16
+    const next = Math.max(MIN_EDITOR_HEIGHT, Math.min(maxHeight, editorHeight + delta))
+    setEditorHeight(next)
+    localStorage.setItem(KEY_EDITOR_HEIGHT, String(next))
+    editorRef.current?.view?.requestMeasure()
+  }
+
   const bulkOperationCounts = useMemo(() => {
     const counts: Record<string, number> = { INSERT: 0, UPDATE: 0, DELETE: 0 }
     for (const stmt of bulkStatements) {
@@ -683,7 +696,7 @@ function QueryTab({ tab }: Props) {
     setBulkStatements(statements)
     setBulkValidation(null)
     const newResults: ExecutedQueryResult[] = []
-    const executionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const executionId = randomId()
     // Set when this run hands off to the bulk confirmation dialog. It must be a
     // local, not the `bulkConfirm` state: the state value captured by this
     // closure is the one from before `setBulkConfirm` was called, so reading it
@@ -855,7 +868,7 @@ function QueryTab({ tab }: Props) {
       }
       if (tab.sessionId && tab.database && statementsChangeSchema(succeededStatements)) {
         invalidateTablesForDb(tab.sessionId, tab.database)
-        loadTables(tab.sessionId, tab.database)
+        void loadTables(tab.sessionId, tab.database)
       }
       setRunning(false)
     }
@@ -920,7 +933,7 @@ function QueryTab({ tab }: Props) {
     newResults.push({ id: `${executionId}-bulk`, result, sql: toRun, scriptResult })
     if (database && scriptResult.statements_executed > 0 && statementsChangeSchema(statements.slice(0, scriptResult.statements_executed))) {
       invalidateTablesForDb(sessionId, database)
-      loadTables(sessionId, database)
+      void loadTables(sessionId, database)
     }
     try {
       const previewSql = scriptResult.statements_executed > 0
@@ -954,7 +967,7 @@ function QueryTab({ tab }: Props) {
     setBulkCancelled(false)
     setBulkValidation(bulkConfirm.validation)
     const newResults: ExecutedQueryResult[] = []
-    const executionId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const executionId = randomId()
     try {
       const controller = new AbortController()
       abortControllerRef.current = controller
@@ -1007,9 +1020,12 @@ function QueryTab({ tab }: Props) {
           onWordWrapChange={handleWordWrapChange}
         />
       </div>
-      <div
+      <button
+        type="button"
+        aria-label="Resize query editor"
         onMouseDown={handleEditorDividerMouseDown}
-        className="h-1.5 flex-shrink-0 bg-surface-800 hover:bg-brand-700 cursor-row-resize transition-colors"
+        onKeyDown={handleEditorDividerKeyDown}
+        className="h-1.5 w-full flex-shrink-0 cursor-row-resize border-0 bg-surface-800 p-0 transition-colors hover:bg-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       />
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         {results.length > 1 && (
@@ -1216,6 +1232,7 @@ function TableTab({ tab, active = true }: Props) {
   const loadExecutionIdRef = useRef<string | null>(null)
   const loadCancellationRef = useRef<Promise<void>>(Promise.resolve())
   const colPickerRef = useRef<HTMLDivElement>(null)
+  const colSearchRef = useRef<HTMLInputElement>(null)
   const schemaPanelRef = useRef<HTMLDivElement | null>(null)
   const dataPanelRef = useRef<HTMLDivElement | null>(null)
   // Both view panels stay mounted so switching views cross-fades instead of
@@ -1275,8 +1292,7 @@ function TableTab({ tab, active = true }: Props) {
     if (loadSeqRef.current !== requestSeq) return
 
     const controller = new AbortController()
-    const executionId = globalThis.crypto?.randomUUID?.()
-      ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const executionId = randomId()
     loadAbortRef.current = controller
     loadExecutionIdRef.current = executionId
 
@@ -1402,7 +1418,7 @@ function TableTab({ tab, active = true }: Props) {
     prevViewRef.current = view
     if (view === 'data') {
       setDataVisited(true)
-      loadDataRef.current()
+      void loadDataRef.current()
     } else {
       setSchemaVisited(true)
       // Only bump the trigger on an actual schema→…→schema switch, not on the
@@ -1483,6 +1499,15 @@ function TableTab({ tab, active = true }: Props) {
     }
   }, [showColPicker])
 
+  useEffect(() => {
+    if (!showColPicker) return
+    const frame = window.requestAnimationFrame(() => {
+      colSearchRef.current?.focus()
+      colSearchRef.current?.select()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [showColPicker])
+
   const appliedWhereRef = useRef(appliedWhere)
   appliedWhereRef.current = appliedWhere
   const previousGlobalSearchRef = useRef(globalSearch)
@@ -1495,7 +1520,7 @@ function TableTab({ tab, active = true }: Props) {
     if (!shouldDebounceDataSearch(previousSearch, globalSearch, view)) return
     const timer = window.setTimeout(() => {
       globalSearchTimerRef.current = null
-      loadDataRef.current(undefined, globalSearch, appliedWhereRef.current, undefined, true)
+      void loadDataRef.current(undefined, globalSearch, appliedWhereRef.current, undefined, true)
     }, 400)
     globalSearchTimerRef.current = timer
     return () => {
@@ -1562,7 +1587,7 @@ function TableTab({ tab, active = true }: Props) {
   }, [columns, tab.database, tab.table, rowKeyColumns, initialLoading, refreshing])
 
   const handleDuplicateRow = useCallback((row: Record<string, unknown>, mode: DuplicateRowMode) => {
-    const draftId = `__insert__${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const draftId = `__insert__${Date.now()}_${randomId()}`
     const values = buildDuplicateRowDraftValues(row, columns, mode)
     setInsertDrafts(prev => {
       const next = new Map(prev)
@@ -1581,7 +1606,7 @@ function TableTab({ tab, active = true }: Props) {
   }, [columns])
 
   const handleCreateEmptyRow = useCallback(() => {
-    const draftId = `__insert__${Date.now()}_${Math.random().toString(36).slice(2)}`
+    const draftId = `__insert__${Date.now()}_${randomId()}`
     const values = buildEmptyRowDraftValues(columns)
     setInsertDrafts(prev => {
       const next = new Map(prev)
@@ -1721,7 +1746,7 @@ function TableTab({ tab, active = true }: Props) {
           r.ok ? (r.data.error ?? 'Insert failed') : r.error,
           'error',
         )
-        loadData()
+        void loadData()
         return
       }
       remainingDrafts.delete(draftId)
@@ -1753,8 +1778,8 @@ function TableTab({ tab, active = true }: Props) {
     mergeConcurrentStaged()
     syncPending(new Map(remainingPending))
     invalidateTablesForDb(tab.sessionId!, tab.database!)
-    loadTables(tab.sessionId!, tab.database!)
-    loadData()
+    void loadTables(tab.sessionId!, tab.database!)
+    void loadData()
   }
 
   const confirmApplyChanges = async () => {
@@ -1770,7 +1795,7 @@ function TableTab({ tab, active = true }: Props) {
     setPendingChanges(new Map())
     setInsertDrafts(new Map())
     setInsertDraftAnchors(new Map())
-    loadData()
+    void loadData()
   }
 
   const handleDeleteRows = async (rows: Record<string, unknown>[]) => {
@@ -1800,7 +1825,7 @@ function TableTab({ tab, active = true }: Props) {
     if (r.data.affected_rows === 0) {
       showToast('Delete matched 0 rows — the row may have changed since it was loaded.', 'error')
       try { addEntry({ sql: r.data.sql_executed || `-- DELETE FROM \`${tab.database}\`.\`${tab.table}\` matched 0 rows`, sessionId: tab.sessionId, database: tab.database, affectedRows: 0, execTimeMs: 0 }) } catch { /* ignore */ }
-      loadData()
+      void loadData()
       return
     }
 
@@ -1820,8 +1845,8 @@ function TableTab({ tab, active = true }: Props) {
     showToast(`Deleted ${r.data.affected_rows} row${r.data.affected_rows !== 1 ? 's' : ''}.`, 'success')
     try { addEntry({ sql: r.data.sql_executed || `DELETE FROM \`${tab.database}\`.\`${tab.table}\``, sessionId: tab.sessionId, database: tab.database, affectedRows: r.data.affected_rows, execTimeMs: 0 }) } catch { /* ignore */ }
     invalidateTablesForDb(tab.sessionId!, tab.database!)
-    loadTables(tab.sessionId!, tab.database!)
-    loadData()
+    void loadTables(tab.sessionId!, tab.database!)
+    void loadData()
   }
 
   const requestDeleteRows = (rows: Record<string, unknown>[]) => {
@@ -1837,24 +1862,24 @@ function TableTab({ tab, active = true }: Props) {
 
   const handleLimitChange = (newLimit: number) => {
     setLimit(newLimit)
-    if (result) loadData(newLimit, undefined, undefined, undefined, true)
+    if (result) void loadData(newLimit, undefined, undefined, undefined, true)
   }
 
   const handleApplyFilter = useCallback(() => {
-    loadDataRef.current(undefined, globalSearch, whereFilter, whereFilter, true)
+    void loadDataRef.current(undefined, globalSearch, whereFilter, whereFilter, true)
   }, [whereFilter, globalSearch])
 
   // Picking a recent filter commits it immediately (same contract as Apply),
   // passing the picked value directly so no stale-state round-trip is needed.
   const handleSelectFilterHistory = useCallback((filter: string) => {
     setWhereFilter(filter)
-    loadDataRef.current(undefined, globalSearch, filter, filter, true)
+    void loadDataRef.current(undefined, globalSearch, filter, filter, true)
   }, [globalSearch])
 
   const handleClearFilter = () => {
     setWhereFilter('')
     setAppliedWhere('')
-    loadData(undefined, globalSearch, '', undefined, true)
+    void loadData(undefined, globalSearch, '', undefined, true)
   }
 
   const dismissWhereFilter = useCallback(() => {
@@ -1862,7 +1887,7 @@ function TableTab({ tab, active = true }: Props) {
     if (!whereFilter && !appliedWhere) return
     setWhereFilter('')
     setAppliedWhere('')
-    loadDataRef.current(undefined, globalSearch, '', undefined, true)
+    void loadDataRef.current(undefined, globalSearch, '', undefined, true)
   }, [whereFilter, appliedWhere, globalSearch])
 
   const handleClearSearch = () => {
@@ -2002,7 +2027,7 @@ function TableTab({ tab, active = true }: Props) {
                     window.clearTimeout(globalSearchTimerRef.current)
                     globalSearchTimerRef.current = null
                   }
-                  loadDataRef.current(undefined, globalSearch, appliedWhereRef.current, undefined, true)
+                  void loadDataRef.current(undefined, globalSearch, appliedWhereRef.current, undefined, true)
                   return
                 }
                 if (e.key !== 'Escape') return
@@ -2090,10 +2115,10 @@ function TableTab({ tab, active = true }: Props) {
                 <div className="px-2 pt-2 pb-1">
                   <input
                     type="text"
+                    ref={colSearchRef}
                     value={colSearch}
                     onChange={e => setColSearch(e.target.value)}
                     placeholder="Filter columns…"
-                    autoFocus
                     className="lagun-field w-full bg-surface-800 border border-surface-700 rounded-md px-2 py-0.5 text-xs text-slate-300 placeholder-muted focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400"
                   />
                 </div>
@@ -2107,7 +2132,7 @@ function TableTab({ tab, active = true }: Props) {
                   <span className="text-xs text-slate-200 font-semibold">All</span>
                 </label>
                 <div className="max-h-60 overflow-y-auto">
-                  {(sortColsAlpha ? result.columns.toSorted() : result.columns)
+                  {(sortColsAlpha ? result.columns.toSorted((a, b) => a.localeCompare(b)) : result.columns)
                     .filter(col => !colSearch || col.toLowerCase().includes(colSearch.toLowerCase()))
                     .map(col => (
                       <label key={col} className="flex items-center gap-2 px-3 py-1 hover:bg-surface-800 cursor-pointer">
@@ -2229,7 +2254,7 @@ function TableTab({ tab, active = true }: Props) {
           <Tooltip label={refreshing ? 'Refreshing data' : 'Refresh data'}>
           <button
             type="button"
-            onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); loadData() }}
+            onClick={() => { setPendingChanges(new Map()); setInsertDrafts(new Map()); setInsertDraftAnchors(new Map()); void loadData() }}
             aria-label={refreshing ? 'Refreshing data' : 'Refresh data'}
             disabled={initialLoading || refreshing}
             className={`lagun-hit-target rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:cursor-wait ${refreshing ? 'text-muted' : 'text-muted hover:text-slate-200'}`}
@@ -2254,7 +2279,7 @@ function TableTab({ tab, active = true }: Props) {
                 setWhereFilter(val)
                 if (!val.trim() && appliedWhere) {
                   setAppliedWhere('')
-                  loadData(undefined, globalSearch, '', undefined, true)
+                  void loadData(undefined, globalSearch, '', undefined, true)
                 }
               }}
               extensions={filterExtensions}
@@ -2482,7 +2507,7 @@ function TableTab({ tab, active = true }: Props) {
             sessionId={tab.sessionId}
             database={tab.database ?? ''}
             table={tab.table}
-            onImportComplete={() => loadData()}
+            onImportComplete={() => { void loadData() }}
           />
         )}
       </Suspense>

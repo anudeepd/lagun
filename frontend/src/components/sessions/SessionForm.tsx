@@ -105,8 +105,8 @@ export default function SessionForm({ open, onClose, session }: Props) {
     setError(null)
     const name = form.name.trim()
     const username = form.username.trim()
-    const port = parseInt(form.port)
-    const queryLimit = parseInt(form.query_limit)
+    const port = Number.parseInt(form.port)
+    const queryLimit = Number.parseInt(form.query_limit)
     if (!name) {
       setError('Connection name is required.')
       nameRef.current?.focus()
@@ -164,7 +164,7 @@ export default function SessionForm({ open, onClose, session }: Props) {
   }
 
   const probePort = (): number | null => {
-    const port = parseInt(form.port)
+    const port = Number.parseInt(form.port)
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       setError('Port must be a number between 1 and 65535.')
       portRef.current?.focus()

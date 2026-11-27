@@ -37,7 +37,7 @@ class SessionRead(BaseModel):
     host: str
     port: int
     username: str
-    default_db: Optional[str]
+    default_db: Optional[str] = None
     query_limit: int
     ssl_enabled: bool
     selected_databases: list[str]

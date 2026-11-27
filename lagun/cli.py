@@ -4,6 +4,7 @@ import os
 import asyncio
 import logging
 from pathlib import Path
+from urllib.parse import urlunsplit
 
 import click
 import uvicorn
@@ -83,7 +84,7 @@ def serve(
     log_file: Path | None,
 ):
     """Start the Lagun web server."""
-    url = f"http://{host}:{port}"
+    url = urlunsplit(("http", f"{host}:{port}", "", "", ""))
 
     # LDAPGate logs authentication events through normal Python loggers.
     _configure_logging(log_file)

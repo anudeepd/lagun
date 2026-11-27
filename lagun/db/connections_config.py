@@ -1,5 +1,6 @@
 """Server-managed LDAP connection profiles loaded from YAML."""
 
+import asyncio
 import json
 import logging
 import os
@@ -13,12 +14,16 @@ from lagun.db import session_store
 _log = logging.getLogger(__name__)
 
 
+def _read_connections_config(path: str) -> object:
+    with Path(path).open(encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
 async def sync_connections_config(path: str | None) -> None:
     """Upsert managed profiles and their allowed LDAP users from a YAML file."""
     if not path:
         return
-    with Path(path).open(encoding="utf-8") as f:
-        payload = yaml.safe_load(f) or {}
+    payload = await asyncio.to_thread(_read_connections_config, path)
     entries = payload.get("connections", [])
     if not isinstance(entries, list):
         raise ValueError("connections.yaml: 'connections' must be a list")

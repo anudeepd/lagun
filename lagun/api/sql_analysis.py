@@ -52,7 +52,8 @@ SCOPE_REFERENCE_EXEMPT_SCHEMAS = SYSTEM_DBS - {"mysql"}
 # Grammar slots that must follow a LIMIT, so a LIMIT is inserted before them.
 # `SELECT ... FOR UPDATE LIMIT 1` is a syntax error; `SELECT ... LIMIT 1 FOR UPDATE` is not.
 _TRAILING_LOCK_RE = re.compile(
-    r"\b(FOR\s+UPDATE|FOR\s+SHARE|LOCK\s+IN\s+SHARE\s+MODE)\s*;?\s*$", re.IGNORECASE
+    r"\b(FOR\s++UPDATE|FOR\s++SHARE|LOCK\s++IN\s++SHARE\s++MODE)\s*+;?\s*+$",
+    re.IGNORECASE,
 )
 
 
@@ -684,12 +685,14 @@ def _multi_table_delete_target(statement: str) -> tuple[str | None, str] | None:
     keep their real spelling.
     """
     stripped = strip_comments_and_literals(statement)
-    m = re.match(
-        r"\s*DELETE\s+(?P<targets>.+?)\s+(?P<from_kw>FROM)\b",
-        stripped,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not m or re.match(r"^\s*FROM\b", m.group("targets"), re.IGNORECASE):
+    delete_match = re.match(r"\s*DELETE\s+", stripped, re.IGNORECASE)
+    if not delete_match:
+        return None
+    from_match = re.search(r"\bFROM\b", stripped[delete_match.end() :], re.IGNORECASE)
+    if not from_match:
+        return None
+    from_start = delete_match.end() + from_match.start()
+    if not stripped[delete_match.end() : from_start].strip():
         return None
     # `stripped` blanks out backtick-quoted identifier contents (see
     # strip_comments_and_literals), so the FROM position it locates is used to
@@ -699,7 +702,7 @@ def _multi_table_delete_target(statement: str) -> tuple[str | None, str] | None:
     # looking for a literal "FROM" and silently fell back to the whole
     # statement (including the FROM/JOIN clause) whenever the query used
     # lowercase "from".
-    head = statement[: m.start("from_kw")]
+    head = statement[:from_start]
     for raw_schema, raw_table in re.findall(
         rf"({_SQL_IDENTIFIER_RE})\s*\.\s*({_SQL_IDENTIFIER_RE})",
         head,

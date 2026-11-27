@@ -131,7 +131,7 @@ export default function ConfigImportDialog({ open, onClose }: Props) {
                 if (e.key !== 'Enter' || loading) return
                 e.preventDefault()
                 if (isImeComposing(e)) return
-                handleImport()
+                void handleImport()
               }}
             />
             {error && <p role="alert" className="text-xs text-red-400">{error}</p>}

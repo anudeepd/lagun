@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { api } from '../../api/client'
 import { useTabStore } from '../../store/tabStore'
 import type { PresenceUpdate } from '../../types'
+import { randomId } from '../../utils/randomId'
 
 const CLIENT_ID_KEY = 'lagun-presence-client-id'
 const MAX_GLOBAL_SEARCH_LENGTH = 1000
@@ -28,11 +29,11 @@ function getClientId(): string {
   try {
     const existing = sessionStorage.getItem(CLIENT_ID_KEY)
     if (existing) return existing
-    const value = globalThis.crypto?.randomUUID?.() ?? `client-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const value = `client-${randomId()}`
     sessionStorage.setItem(CLIENT_ID_KEY, value)
     return value
   } catch {
-    return `client-${Date.now()}`
+    return `client-${randomId()}`
   }
 }
 

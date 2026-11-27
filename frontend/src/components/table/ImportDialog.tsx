@@ -92,7 +92,7 @@ export default function ImportDialog({ open, onClose, sessionId, database, table
 
   useEffect(() => {
     if (!open) return
-    loadTables(sessionId, database)
+    void loadTables(sessionId, database)
   }, [open, sessionId, database, loadTables])
 
   // Callers keep this dialog mounted so Modal can play its exit animation, so a
